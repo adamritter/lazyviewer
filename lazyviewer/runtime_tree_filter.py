@@ -25,7 +25,11 @@ CONTENT_SEARCH_MATCH_LIMIT_2CHAR = 1_000
 CONTENT_SEARCH_MATCH_LIMIT_3CHAR = 2_000
 CONTENT_SEARCH_MATCH_LIMIT_DEFAULT = 4_000
 CONTENT_SEARCH_FILE_LIMIT = 800
-SKIP_GITIGNORED_ENTRIES = True
+
+
+def _skip_gitignored_for_hidden_mode(show_hidden: bool) -> bool:
+    # Hidden mode should reveal both dotfiles and gitignored paths.
+    return not show_hidden
 
 
 class TreeFilterOps:
@@ -63,7 +67,7 @@ class TreeFilterOps:
         self.state.picker_file_labels = collect_project_file_labels(
             root,
             self.state.show_hidden,
-            skip_gitignored=SKIP_GITIGNORED_ENTRIES,
+            skip_gitignored=_skip_gitignored_for_hidden_mode(self.state.show_hidden),
         )
         self.state.picker_file_labels_folded = []
         self.state.picker_files_root = root
@@ -220,7 +224,7 @@ class TreeFilterOps:
                     self.state.tree_root,
                     self.state.tree_filter_query,
                     self.state.show_hidden,
-                    skip_gitignored=SKIP_GITIGNORED_ENTRIES,
+                    skip_gitignored=_skip_gitignored_for_hidden_mode(self.state.show_hidden),
                     max_matches=max(1, match_limit),
                     max_files=CONTENT_SEARCH_FILE_LIMIT,
                 )
@@ -255,7 +259,7 @@ class TreeFilterOps:
                     self.state.expanded,
                     self.state.show_hidden,
                     matched_paths,
-                    skip_gitignored=SKIP_GITIGNORED_ENTRIES,
+                    skip_gitignored=_skip_gitignored_for_hidden_mode(self.state.show_hidden),
                 )
         else:
             self.state.tree_filter_match_count = 0
@@ -265,7 +269,7 @@ class TreeFilterOps:
                 self.state.tree_root,
                 self.state.expanded,
                 self.state.show_hidden,
-                skip_gitignored=SKIP_GITIGNORED_ENTRIES,
+                skip_gitignored=_skip_gitignored_for_hidden_mode(self.state.show_hidden),
             )
 
         if force_first_file:

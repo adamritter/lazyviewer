@@ -187,7 +187,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertEqual(snapshots["after_commit"], "a = 1\nb = 22\n")
 
     @unittest.skipIf(shutil.which("git") is None, "git is required for hidden-toggle integration test")
-    def test_hidden_toggle_does_not_flip_gitignore_filtering(self) -> None:
+    def test_hidden_toggle_turns_hidden_and_gitignored_on_together(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             subprocess.run(["git", "init", "-q"], cwd=root, check=True)
@@ -243,9 +243,10 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             self.assertNotIn(".git", snapshots["before"])
             self.assertNotIn(".gitignore", snapshots["before"])
+            self.assertNotIn("__pycache__", snapshots["before"])
             self.assertIn(".git", snapshots["after"])
             self.assertIn(".gitignore", snapshots["after"])
-            self.assertEqual("__pycache__" in snapshots["before"], "__pycache__" in snapshots["after"])
+            self.assertIn("__pycache__", snapshots["after"])
 
 
 if __name__ == "__main__":

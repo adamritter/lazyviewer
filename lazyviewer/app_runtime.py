@@ -43,7 +43,11 @@ GIT_STATUS_REFRESH_SECONDS = 2.0
 TREE_WATCH_POLL_SECONDS = 0.5
 GIT_WATCH_POLL_SECONDS = 0.5
 GIT_FEATURES_DEFAULT_ENABLED = True
-SKIP_GITIGNORED_ENTRIES = True
+
+
+def _skip_gitignored_for_hidden_mode(show_hidden: bool) -> bool:
+    # Hidden mode should reveal both dotfiles and gitignored paths.
+    return not show_hidden
 
 COMMAND_PALETTE_ITEMS: tuple[tuple[str, str], ...] = (
     ("filter_files", "Filter files (Ctrl+P)"),
@@ -119,7 +123,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         tree_root,
         expanded,
         show_hidden,
-        skip_gitignored=SKIP_GITIGNORED_ENTRIES,
+        skip_gitignored=_skip_gitignored_for_hidden_mode(show_hidden),
     )
     selected_path = current_path if current_path.exists() else tree_root
     selected_idx = 0
@@ -143,7 +147,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         style,
         no_color,
         dir_max_entries=DIR_PREVIEW_INITIAL_MAX_ENTRIES,
-        dir_skip_gitignored=SKIP_GITIGNORED_ENTRIES,
+        dir_skip_gitignored=_skip_gitignored_for_hidden_mode(show_hidden),
         prefer_git_diff=GIT_FEATURES_DEFAULT_ENABLED,
     )
     rendered = initial_render.text
@@ -211,7 +215,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 collect_project_file_labels(
                     root,
                     show_hidden_value,
-                    skip_gitignored=SKIP_GITIGNORED_ENTRIES,
+                    skip_gitignored=_skip_gitignored_for_hidden_mode(show_hidden_value),
                 )
             except Exception:
                 # Warming is best-effort; foreground path still loads synchronously if needed.
@@ -441,7 +445,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             style,
             no_color,
             dir_max_entries=dir_limit,
-            dir_skip_gitignored=SKIP_GITIGNORED_ENTRIES,
+            dir_skip_gitignored=_skip_gitignored_for_hidden_mode(state.show_hidden),
             prefer_git_diff=prefer_git_diff,
         )
         state.rendered = rendered_for_path.text
