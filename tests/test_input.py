@@ -62,6 +62,17 @@ class ReadKeyRegressionTests(unittest.TestCase):
 
         self.assertEqual(key, "CTRL_K")
 
+    def test_ctrl_d_is_recognized(self) -> None:
+        read_fd, write_fd = os.pipe()
+        try:
+            os.write(write_fd, b"\x04")
+            key = input_mod.read_key(read_fd, timeout_ms=20)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+        self.assertEqual(key, "CTRL_D")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,7 +11,7 @@ HELP_PANEL_TREE_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mTREE\033[0m",
     "\033[2;38;5;250mnav:\033[0m \033[38;5;229mh/j/k/l\033[0m move  \033[38;5;229mEnter\033[0m toggle/open",
     "\033[2;38;5;250mfilter:\033[0m \033[38;5;229mCtrl+P\033[0m files  \033[38;5;229m/\033[0m content  \033[38;5;229mEnter\033[0m open+exit  \033[38;5;229mTab\033[0m edit",
-    "\033[2;38;5;250mroot/nav:\033[0m \033[38;5;229mr\033[0m set root  \033[38;5;229mR\033[0m parent root  \033[38;5;229mCtrl+U/D\033[0m jump dirs (max 10)",
+    "\033[2;38;5;250mroot/nav:\033[0m \033[38;5;229mr\033[0m set root  \033[38;5;229mR\033[0m parent root  \033[38;5;229mCtrl+U/D\033[0m smart dir jump (max 10)",
 )
 
 HELP_PANEL_TEXT_LINES: tuple[str, ...] = (
@@ -25,7 +25,7 @@ HELP_PANEL_TEXT_ONLY_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mKEYS\033[0m",
     "\033[2;38;5;250mscroll:\033[0m \033[38;5;229mUp/Down\033[0m  \033[38;5;229md/u\033[0m  \033[38;5;229mf/B\033[0m  \033[38;5;229mg/G/10G\033[0m  \033[38;5;229mLeft/Right\033[0m",
     "\033[2;38;5;250medit:\033[0m \033[38;5;229mw\033[0m wrap  \033[38;5;229me\033[0m edit  \033[38;5;229ms\033[0m symbols  \033[38;5;229mt\033[0m tree  \033[38;5;229mr/R\033[0m root  \033[38;5;229m.\033[0m hidden",
-    "\033[2;38;5;250mmeta:\033[0m \033[38;5;229mCtrl+P\033[0m file filter  \033[38;5;229m/\033[0m content filter  \033[38;5;229mCtrl+U/D\033[0m dir jump  \033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
+    "\033[2;38;5;250mmeta:\033[0m \033[38;5;229mCtrl+P\033[0m file filter  \033[38;5;229m/\033[0m content filter  \033[38;5;229mCtrl+U/D\033[0m smart jump  \033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
 )
 
 
@@ -94,6 +94,7 @@ def render_dual_page(
     picker_list_start: int = 0,
     picker_message: str = "",
     git_status_overlay: dict[Path, int] | None = None,
+    tree_search_query: str = "",
 ) -> None:
     out: list[str] = []
     out.append("\033[H\033[J")
@@ -195,6 +196,7 @@ def render_dual_page(
                     tree_root,
                     expanded,
                     git_status_overlay=git_status_overlay,
+                    search_query=tree_search_query,
                 )
                 tree_text = clip_ansi_line(tree_text, left_width)
                 if tree_idx == tree_selected:
@@ -271,7 +273,7 @@ def render_help_page(width: int, height: int) -> None:
         "  \033[38;5;229m.\033[0m show/hide hidden files and directories",
         "  \033[38;5;229mr\033[0m tree root -> selected directory (or selected file parent)",
         "  \033[38;5;229mR\033[0m tree root -> parent directory",
-        "  \033[38;5;229mCtrl+U\033[0m/\033[38;5;229mCtrl+D\033[0m jump to previous/next directory (max 10)",
+        "  \033[38;5;229mCtrl+U\033[0m/\033[38;5;229mCtrl+D\033[0m smart directory jump around opened dirs (max 10)",
         "",
         "\033[1;38;5;81mTree pane\033[0m",
         "  h/j/k/l move/select   l open/expand   h collapse/parent",

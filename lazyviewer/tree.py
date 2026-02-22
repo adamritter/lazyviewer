@@ -27,6 +27,24 @@ def file_color_for(path: Path) -> str:
     return "\033[38;5;252m"
 
 
+def _highlight_substring(text: str, query: str) -> str:
+    if not query:
+        return text
+    folded_text = text.casefold()
+    folded_query = query.casefold()
+    idx = folded_text.find(folded_query)
+    if idx < 0:
+        return text
+    end = idx + len(query)
+    return (
+        text[:idx]
+        + "\033[1;30;43m"
+        + text[idx:end]
+        + "\033[0m\033[38;5;250m"
+        + text[end:]
+    )
+
+
 def compute_left_width(total_width: int) -> int:
     if total_width <= 60:
         return max(16, total_width // 2)
@@ -247,6 +265,39 @@ def next_directory_entry_index(
     return None
 
 
+def next_opened_directory_entry_index(
+    entries: list[TreeEntry],
+    selected_idx: int,
+    direction: int,
+    expanded: set[Path],
+) -> int | None:
+    if not entries or direction == 0:
+        return None
+    step = 1 if direction > 0 else -1
+    idx = selected_idx + step
+    while 0 <= idx < len(entries):
+        entry = entries[idx]
+        if entry.is_dir and entry.path.resolve() in expanded:
+            return idx
+        idx += step
+    return None
+
+
+def next_index_after_directory_subtree(entries: list[TreeEntry], directory_idx: int) -> int | None:
+    if not entries or directory_idx < 0 or directory_idx >= len(entries):
+        return None
+    directory_entry = entries[directory_idx]
+    if not directory_entry.is_dir:
+        return None
+
+    idx = directory_idx + 1
+    while idx < len(entries) and entries[idx].depth > directory_entry.depth:
+        idx += 1
+    if idx >= len(entries):
+        return None
+    return idx
+
+
 def _format_git_status_badges(path: Path, git_status_overlay: dict[Path, int] | None) -> str:
     if not git_status_overlay:
         return ""
@@ -270,6 +321,7 @@ def format_tree_entry(
     root: Path,
     expanded: set[Path],
     git_status_overlay: dict[Path, int] | None = None,
+    search_query: str = "",
 ) -> str:
     if entry.kind == "search_hit":
         indent = "  " * entry.depth
@@ -282,7 +334,7 @@ def format_tree_entry(
                 line_label = f"L{entry.line}:{entry.column} "
             else:
                 line_label = f"L{entry.line} "
-        content = entry.display or ""
+        content = _highlight_substring(entry.display or "", search_query)
         return f"{indent}{marker_color}· {reset}{text_color}{line_label}{content}{reset}"
 
     indent = "  " * entry.depth

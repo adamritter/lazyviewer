@@ -42,7 +42,9 @@ from .tree import (
     filter_tree_entries_for_content_matches,
     filter_tree_entries_for_files,
     next_directory_entry_index,
+    next_index_after_directory_subtree,
     next_file_entry_index,
+    next_opened_directory_entry_index,
 )
 
 DOUBLE_CLICK_SECONDS = 0.35
@@ -753,6 +755,11 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     state.picker_list_start,
                     state.picker_message,
                     git_status_overlay=state.git_status_overlay,
+                    tree_search_query=(
+                        state.tree_filter_query
+                        if state.tree_filter_active and state.tree_filter_mode == "content"
+                        else ""
+                    ),
                 )
                 state.dirty = False
 
@@ -1021,11 +1028,54 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             if key == "CTRL_U" or key == "CTRL_D":
                 if state.browser_visible and state.tree_entries:
                     direction = -1 if key == "CTRL_U" else 1
-                    jump_steps = 10 if count is None else max(1, min(10, count))
+                    jump_steps = 1 if count is None else max(1, min(10, count))
+
+                    def parent_directory_index(from_idx: int) -> int | None:
+                        current_depth = state.tree_entries[from_idx].depth
+                        idx = from_idx - 1
+                        while idx >= 0:
+                            candidate = state.tree_entries[idx]
+                            if candidate.is_dir and candidate.depth < current_depth:
+                                return idx
+                            idx -= 1
+                        return None
+
+                    def smart_directory_jump(from_idx: int, jump_direction: int) -> int | None:
+                        if jump_direction < 0:
+                            prev_opened = next_opened_directory_entry_index(
+                                state.tree_entries,
+                                from_idx,
+                                -1,
+                                state.expanded,
+                            )
+                            if prev_opened is not None:
+                                return prev_opened
+                            return parent_directory_index(from_idx)
+
+                        current_entry = state.tree_entries[from_idx]
+                        if current_entry.is_dir and current_entry.path.resolve() in state.expanded:
+                            after_current = next_index_after_directory_subtree(state.tree_entries, from_idx)
+                            if after_current is not None:
+                                return after_current
+
+                        next_opened = next_opened_directory_entry_index(
+                            state.tree_entries,
+                            from_idx,
+                            1,
+                            state.expanded,
+                        )
+                        if next_opened is not None:
+                            after_next_opened = next_index_after_directory_subtree(state.tree_entries, next_opened)
+                            if after_next_opened is not None:
+                                return after_next_opened
+                            return next_opened
+
+                        return next_directory_entry_index(state.tree_entries, from_idx, 1)
+
                     target_idx = state.selected_idx
                     moved = 0
                     while moved < jump_steps:
-                        next_idx = next_directory_entry_index(state.tree_entries, target_idx, direction)
+                        next_idx = smart_directory_jump(target_idx, direction)
                         if next_idx is None:
                             break
                         target_idx = next_idx

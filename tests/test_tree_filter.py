@@ -10,8 +10,11 @@ from lazyviewer.tree import (
     TreeEntry,
     filter_tree_entries_for_content_matches,
     filter_tree_entries_for_files,
+    format_tree_entry,
+    next_index_after_directory_subtree,
     next_directory_entry_index,
     next_file_entry_index,
+    next_opened_directory_entry_index,
 )
 
 
@@ -121,6 +124,35 @@ class TreeFilterBehaviorTests(unittest.TestCase):
         self.assertEqual(next_directory_entry_index(entries, selected_idx=4, direction=-1), 3)
         self.assertEqual(next_directory_entry_index(entries, selected_idx=1, direction=-1), 0)
         self.assertEqual(next_directory_entry_index(entries, selected_idx=0, direction=-1), None)
+
+    def test_next_opened_directory_entry_index_and_after_subtree(self) -> None:
+        entries = [
+            TreeEntry(path=Path("/tmp/root"), depth=0, is_dir=True),
+            TreeEntry(path=Path("/tmp/root/a"), depth=1, is_dir=True),
+            TreeEntry(path=Path("/tmp/root/a/file.txt"), depth=2, is_dir=False),
+            TreeEntry(path=Path("/tmp/root/b"), depth=1, is_dir=True),
+            TreeEntry(path=Path("/tmp/root/c"), depth=1, is_dir=True),
+            TreeEntry(path=Path("/tmp/root/c/sub"), depth=2, is_dir=True),
+            TreeEntry(path=Path("/tmp/root/c/sub/file.txt"), depth=3, is_dir=False),
+            TreeEntry(path=Path("/tmp/root/d"), depth=1, is_dir=True),
+        ]
+        expanded = {
+            entries[0].path.resolve(),
+            entries[1].path.resolve(),
+            entries[4].path.resolve(),
+            entries[5].path.resolve(),
+        }
+
+        self.assertEqual(next_opened_directory_entry_index(entries, selected_idx=3, direction=-1, expanded=expanded), 1)
+        self.assertEqual(next_opened_directory_entry_index(entries, selected_idx=1, direction=-1, expanded=expanded), 0)
+        self.assertEqual(next_opened_directory_entry_index(entries, selected_idx=0, direction=-1, expanded=expanded), None)
+        self.assertEqual(next_opened_directory_entry_index(entries, selected_idx=3, direction=1, expanded=expanded), 4)
+        self.assertEqual(next_opened_directory_entry_index(entries, selected_idx=5, direction=1, expanded=expanded), None)
+
+        self.assertEqual(next_index_after_directory_subtree(entries, directory_idx=1), 3)
+        self.assertEqual(next_index_after_directory_subtree(entries, directory_idx=4), 7)
+        self.assertEqual(next_index_after_directory_subtree(entries, directory_idx=5), 7)
+        self.assertEqual(next_index_after_directory_subtree(entries, directory_idx=7), None)
 
     def test_strict_substring_and_tree_projection_pipeline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -263,6 +295,29 @@ class TreeFilterBehaviorTests(unittest.TestCase):
             )
             self.assertIn((root / "docs").resolve(), render_expanded)
             self.assertIn((root / "src").resolve(), render_expanded)
+
+    def test_format_tree_entry_highlights_search_hit_substring(self) -> None:
+        root = Path("/tmp/project").resolve()
+        file_path = root / "src" / "main.py"
+        entry = TreeEntry(
+            path=file_path,
+            depth=3,
+            is_dir=False,
+            kind="search_hit",
+            display="some hello world line",
+            line=12,
+            column=7,
+        )
+
+        rendered = format_tree_entry(
+            entry,
+            root=root,
+            expanded={root},
+            search_query="hello",
+        )
+
+        self.assertIn("L12:7", rendered)
+        self.assertIn("\033[1;30;43mhello\033[0m\033[38;5;250m", rendered)
 
 
 if __name__ == "__main__":
