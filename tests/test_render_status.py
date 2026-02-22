@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from lazyviewer.git_status import _ADDED_BG_SGR, _apply_line_background
 from lazyviewer.render import (
     build_status_line,
     help_panel_row_count,
@@ -101,6 +102,38 @@ class RenderStatusTests(unittest.TestCase):
         matches = re.findall(r"\x1b\[7m([^\x1b]*)\x1b\[0m", rendered)
         self.assertTrue(matches)
         self.assertTrue(matches[-1].endswith("│ ? Help"))
+
+    def test_git_diff_background_persists_when_horizontal_scroll_reaches_line_end(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        diff_line = _apply_line_background("abcdef", _ADDED_BG_SGR)
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            render_dual_page(
+                text_lines=[diff_line],
+                text_start=0,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=2,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=60,
+                left_width=24,
+                text_x=6,
+                wrap_text=False,
+                browser_visible=False,
+                show_hidden=False,
+                preview_is_git_diff=True,
+            )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        first_line = rendered.split("\r\n")[0]
+        self.assertIn("\033[48;2;36;74;52m\033[K", first_line)
 
     def test_bottom_help_panel_renders_without_replacing_main_view(self) -> None:
         writes: list[bytes] = []
@@ -900,6 +933,139 @@ class RenderStatusTests(unittest.TestCase):
         self.assertGreaterEqual(outer_idx, 0)
         self.assertGreater(inner_idx, outer_idx)
         self.assertGreater(run_idx, inner_idx)
+
+    def test_render_shows_sticky_headers_for_git_diff_preview(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        source = (
+            "class Box:\n"
+            "    def first(self):\n"
+            "        pass\n"
+            "\n"
+            "    def second(self):\n"
+            "        value = 2\n"
+            "        return value\n"
+        )
+        # Simulate annotated diff preview lines where a removed line is injected.
+        text_lines = [
+            "class Box:",
+            "    def first(self):",
+            "\033[48;2;92;43;49m        removed = 0\033[K\033[0m",
+            "\033[48;2;36;74;52m        pass\033[K\033[0m",
+            "",
+            "    def second(self):",
+            "        value = 2",
+            "        return value",
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "demo.py"
+            path.write_text(source, encoding="utf-8")
+            with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+                render_dual_page(
+                    text_lines=text_lines,
+                    text_start=4,
+                    tree_entries=[],
+                    tree_start=0,
+                    tree_selected=0,
+                    max_lines=4,
+                    current_path=path,
+                    tree_root=path.parent,
+                    expanded=set(),
+                    width=120,
+                    left_width=30,
+                    text_x=0,
+                    wrap_text=False,
+                    browser_visible=False,
+                    show_hidden=False,
+                    preview_is_git_diff=True,
+                )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertRegex(rendered, r"\x1b\[4mclass Box:")
+        self.assertNotRegex(rendered, r"\x1b\[4m\s+def second\(self\):")
+        self.assertIn("def second(self):", rendered)
+
+    def test_git_diff_sticky_render_avoids_quadratic_diff_mapping_calls(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        source_lines = ["class Big:"]
+        diff_lines = ["class Big:"]
+        for idx in range(1, 351):
+            source_lines.extend(
+                [
+                    f"    def m{idx}(self):",
+                    f"        value = {idx}",
+                    "        return value",
+                ]
+            )
+            diff_lines.extend(
+                [
+                    f"    def m{idx}(self):",
+                    "\033[48;2;92;43;49m        old_value = 0\033[K\033[0m",
+                    f"\033[48;2;36;74;52m        value = {idx}\033[K\033[0m",
+                    "        return value",
+                ]
+            )
+
+        source = "\n".join(source_lines) + "\n"
+        text_lines = diff_lines
+        diff_lookup_calls = {"count": 0}
+
+        import lazyviewer.render as render_mod
+
+        original_source_line_raw_text = render_mod._source_line_raw_text
+
+        def counting_source_line_raw_text(
+            text_lines_arg: list[str],
+            source_line: int,
+            wrap_text: bool,
+            preview_is_git_diff: bool = False,
+        ) -> str:
+            if preview_is_git_diff:
+                diff_lookup_calls["count"] += 1
+            return original_source_line_raw_text(
+                text_lines_arg,
+                source_line,
+                wrap_text,
+                preview_is_git_diff=preview_is_git_diff,
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "big.py"
+            path.write_text(source, encoding="utf-8")
+            with mock.patch("lazyviewer.render._source_line_raw_text", side_effect=counting_source_line_raw_text), mock.patch(
+                "lazyviewer.render.os.write", side_effect=capture
+            ):
+                render_dual_page(
+                    text_lines=text_lines,
+                    text_start=max(0, len(text_lines) - 6),
+                    tree_entries=[],
+                    tree_start=0,
+                    tree_selected=0,
+                    max_lines=6,
+                    current_path=path,
+                    tree_root=path.parent,
+                    expanded=set(),
+                    width=140,
+                    left_width=30,
+                    text_x=0,
+                    wrap_text=False,
+                    browser_visible=False,
+                    show_hidden=False,
+                    preview_is_git_diff=True,
+                )
+
+        # Repeated diff-source remapping used to spike into hundreds/thousands of calls per frame.
+        self.assertLess(diff_lookup_calls["count"], 80)
 
     def test_render_scroll_by_one_keeps_lower_content_progressing_by_one_with_sticky(self) -> None:
         source = (
