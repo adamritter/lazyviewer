@@ -4,7 +4,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .git_status import GIT_STATUS_CHANGED, GIT_STATUS_UNTRACKED
 from .gitignore import get_gitignore_matcher
+from .search import ContentMatch
 
 
 @dataclass(frozen=True)
@@ -12,6 +14,10 @@ class TreeEntry:
     path: Path
     depth: int
     is_dir: bool
+    kind: str = "path"
+    display: str | None = None
+    line: int | None = None
+    column: int | None = None
 
 
 def file_color_for(path: Path) -> str:
@@ -130,6 +136,85 @@ def filter_tree_entries_for_files(
     return filtered_entries, render_expanded
 
 
+def filter_tree_entries_for_content_matches(
+    root: Path,
+    expanded: set[Path],
+    matches_by_file: dict[Path, list[ContentMatch]],
+) -> tuple[list[TreeEntry], set[Path]]:
+    root = root.resolve()
+    visible_dirs: set[Path] = {root}
+    visible_files: set[Path] = set()
+    normalized_matches: dict[Path, list[ContentMatch]] = {}
+    forced_expanded: set[Path] = {root}
+
+    for raw_path, matches in matches_by_file.items():
+        file_path = raw_path if raw_path.is_absolute() else (root / raw_path)
+        if not file_path.is_relative_to(root):
+            file_path = file_path.resolve()
+            if not file_path.is_relative_to(root):
+                continue
+        if not matches:
+            continue
+
+        normalized_matches[file_path] = sorted(matches, key=lambda item: (item.line, item.column, item.preview))
+        visible_files.add(file_path)
+        parent = file_path.parent
+        while True:
+            if not parent.is_relative_to(root):
+                break
+            visible_dirs.add(parent)
+            forced_expanded.add(parent)
+            if parent == root or parent.parent == parent:
+                break
+            parent = parent.parent
+
+    render_expanded = set(expanded) | forced_expanded
+    children_by_parent: dict[Path, list[Path]] = {}
+    for path in visible_dirs | visible_files:
+        if path == root:
+            continue
+        parent = path.parent
+        children_by_parent.setdefault(parent, []).append(path)
+
+    def child_sort_key(path: Path) -> tuple[bool, str]:
+        is_dir = path in visible_dirs
+        return (not is_dir, path.name.lower())
+
+    for parent, children in children_by_parent.items():
+        children.sort(key=child_sort_key)
+
+    filtered_entries: list[TreeEntry] = [TreeEntry(root, 0, True)]
+
+    def walk(directory: Path, depth: int) -> None:
+        for child in children_by_parent.get(directory, []):
+            is_dir = child in visible_dirs
+            filtered_entries.append(TreeEntry(child, depth, is_dir))
+            if is_dir and child in render_expanded:
+                walk(child, depth + 1)
+                continue
+            if is_dir:
+                continue
+            for hit in normalized_matches.get(child, []):
+                filtered_entries.append(
+                    TreeEntry(
+                        path=child,
+                        depth=depth + 1,
+                        is_dir=False,
+                        kind="search_hit",
+                        display=hit.preview,
+                        line=hit.line,
+                        column=hit.column,
+                    )
+                )
+
+    if root in render_expanded:
+        walk(root, 1)
+
+    if not filtered_entries:
+        filtered_entries = [TreeEntry(root, 0, True)]
+    return filtered_entries, render_expanded
+
+
 def next_file_entry_index(
     entries: list[TreeEntry],
     selected_idx: int,
@@ -146,7 +231,60 @@ def next_file_entry_index(
     return None
 
 
-def format_tree_entry(entry: TreeEntry, root: Path, expanded: set[Path]) -> str:
+def next_directory_entry_index(
+    entries: list[TreeEntry],
+    selected_idx: int,
+    direction: int,
+) -> int | None:
+    if not entries or direction == 0:
+        return None
+    step = 1 if direction > 0 else -1
+    idx = selected_idx + step
+    while 0 <= idx < len(entries):
+        if entries[idx].is_dir:
+            return idx
+        idx += step
+    return None
+
+
+def _format_git_status_badges(path: Path, git_status_overlay: dict[Path, int] | None) -> str:
+    if not git_status_overlay:
+        return ""
+
+    flags = git_status_overlay.get(path.resolve(), 0)
+    if flags == 0:
+        return ""
+
+    badges: list[str] = []
+    if flags & GIT_STATUS_CHANGED:
+        badges.append("\033[38;5;214m[M]\033[0m")
+    if flags & GIT_STATUS_UNTRACKED:
+        badges.append("\033[38;5;42m[?]\033[0m")
+    if not badges:
+        return ""
+    return " " + "".join(badges)
+
+
+def format_tree_entry(
+    entry: TreeEntry,
+    root: Path,
+    expanded: set[Path],
+    git_status_overlay: dict[Path, int] | None = None,
+) -> str:
+    if entry.kind == "search_hit":
+        indent = "  " * entry.depth
+        marker_color = "\033[38;5;44m"
+        text_color = "\033[38;5;250m"
+        reset = "\033[0m"
+        line_label = ""
+        if entry.line is not None:
+            if entry.column is not None:
+                line_label = f"L{entry.line}:{entry.column} "
+            else:
+                line_label = f"L{entry.line} "
+        content = entry.display or ""
+        return f"{indent}{marker_color}· {reset}{text_color}{line_label}{content}{reset}"
+
     indent = "  " * entry.depth
     if entry.path == root:
         name = f"{root.name or str(root)}/"
@@ -156,11 +294,12 @@ def format_tree_entry(entry: TreeEntry, root: Path, expanded: set[Path]) -> str:
     file_color = file_color_for(entry.path)
     marker_color = "\033[38;5;44m"
     reset = "\033[0m"
+    badges = _format_git_status_badges(entry.path, git_status_overlay)
     if entry.is_dir:
         marker = "▾ " if entry.path.resolve() in expanded else "▸ "
-        return f"{indent}{marker_color}{marker}{reset}{dir_color}{name}{reset}"
+        return f"{indent}{marker_color}{marker}{reset}{dir_color}{name}{reset}{badges}"
 
     # Align file names under the parent directory arrow column.
     indent = "  " * max(0, entry.depth - 1)
     marker = "  "
-    return f"{indent}{marker}{file_color}{name}{reset}"
+    return f"{indent}{marker}{file_color}{name}{reset}{badges}"

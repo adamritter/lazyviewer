@@ -10,8 +10,8 @@ from .tree import TreeEntry, clamp_left_width, format_tree_entry
 HELP_PANEL_TREE_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mTREE\033[0m",
     "\033[2;38;5;250mnav:\033[0m \033[38;5;229mh/j/k/l\033[0m move  \033[38;5;229mEnter\033[0m toggle/open",
-    "\033[2;38;5;250mfilter:\033[0m \033[38;5;229mCtrl+P\033[0m open  \033[38;5;229mEnter\033[0m open+exit  \033[38;5;229mTab\033[0m edit  \033[38;5;229mEsc\033[0m clear",
-    "\033[2;38;5;250mlayout:\033[0m \033[38;5;229mShift+Left/Right\033[0m resize",
+    "\033[2;38;5;250mfilter:\033[0m \033[38;5;229mCtrl+P\033[0m files  \033[38;5;229m/\033[0m content  \033[38;5;229mEnter\033[0m open+exit  \033[38;5;229mTab\033[0m edit",
+    "\033[2;38;5;250mroot/nav:\033[0m \033[38;5;229mr\033[0m set root  \033[38;5;229mR\033[0m parent root  \033[38;5;229mCtrl+U/D\033[0m jump dirs (max 10)",
 )
 
 HELP_PANEL_TEXT_LINES: tuple[str, ...] = (
@@ -24,8 +24,8 @@ HELP_PANEL_TEXT_LINES: tuple[str, ...] = (
 HELP_PANEL_TEXT_ONLY_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mKEYS\033[0m",
     "\033[2;38;5;250mscroll:\033[0m \033[38;5;229mUp/Down\033[0m  \033[38;5;229md/u\033[0m  \033[38;5;229mf/B\033[0m  \033[38;5;229mg/G/10G\033[0m  \033[38;5;229mLeft/Right\033[0m",
-    "\033[2;38;5;250medit:\033[0m \033[38;5;229mw\033[0m wrap  \033[38;5;229me\033[0m edit  \033[38;5;229ms\033[0m symbols  \033[38;5;229mt\033[0m tree  \033[38;5;229m.\033[0m hidden",
-    "\033[2;38;5;250mmeta:\033[0m \033[38;5;229mCtrl+P\033[0m filter  \033[38;5;229m?\033[0m hide help  \033[38;5;229mq\033[0m quit",
+    "\033[2;38;5;250medit:\033[0m \033[38;5;229mw\033[0m wrap  \033[38;5;229me\033[0m edit  \033[38;5;229ms\033[0m symbols  \033[38;5;229mt\033[0m tree  \033[38;5;229mr/R\033[0m root  \033[38;5;229m.\033[0m hidden",
+    "\033[2;38;5;250mmeta:\033[0m \033[38;5;229mCtrl+P\033[0m file filter  \033[38;5;229m/\033[0m content filter  \033[38;5;229mCtrl+U/D\033[0m dir jump  \033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
 )
 
 
@@ -83,6 +83,8 @@ def render_dual_page(
     tree_filter_editing: bool = False,
     tree_filter_cursor_visible: bool = False,
     tree_filter_match_count: int = 0,
+    tree_filter_prefix: str = "p>",
+    tree_filter_placeholder: str = "type to filter files",
     picker_active: bool = False,
     picker_mode: str = "symbols",
     picker_query: str = "",
@@ -91,6 +93,7 @@ def render_dual_page(
     picker_focus: str = "query",
     picker_list_start: int = 0,
     picker_message: str = "",
+    git_status_overlay: dict[Path, int] | None = None,
 ) -> None:
     out: list[str] = []
     out.append("\033[H\033[J")
@@ -172,13 +175,13 @@ def render_dual_page(
                     tree_text = ""
         elif tree_filter_row_visible and row == 0:
             if tree_filter_editing:
-                base = f"p> {tree_filter_query}" if tree_filter_query else "p> "
+                base = f"{tree_filter_prefix} {tree_filter_query}" if tree_filter_query else f"{tree_filter_prefix} "
                 cursor = "_" if tree_filter_cursor_visible else " "
                 query_text = f"\033[1;38;5;81m{base}{cursor}\033[0m"
             elif tree_filter_query:
-                query_text = f"\033[1;38;5;81mp> {tree_filter_query}\033[0m"
+                query_text = f"\033[1;38;5;81m{tree_filter_prefix} {tree_filter_query}\033[0m"
             else:
-                query_text = "\033[2;38;5;250mp> type to filter files\033[0m"
+                query_text = f"\033[2;38;5;250m{tree_filter_prefix} {tree_filter_placeholder}\033[0m"
             tree_text = clip_ansi_line(query_text, left_width)
             if tree_filter_editing:
                 tree_text = selected_with_ansi(tree_text)
@@ -187,7 +190,12 @@ def render_dual_page(
         else:
             tree_idx = tree_start + row - tree_row_offset
             if tree_idx < len(tree_entries):
-                tree_text = format_tree_entry(tree_entries[tree_idx], tree_root, expanded)
+                tree_text = format_tree_entry(
+                    tree_entries[tree_idx],
+                    tree_root,
+                    expanded,
+                    git_status_overlay=git_status_overlay,
+                )
                 tree_text = clip_ansi_line(tree_text, left_width)
                 if tree_idx == tree_selected:
                     tree_text = selected_with_ansi(tree_text)
@@ -255,13 +263,15 @@ def render_help_page(width: int, height: int) -> None:
         "",
         "\033[1;38;5;81mGeneral\033[0m",
         "  \033[38;5;229m?\033[0m toggle help   \033[38;5;229mq\033[0m/\033[38;5;229mEsc\033[0m close help",
-        "  \033[38;5;229mCtrl+P\033[0m toggle fuzzy filter mode on the tree",
-        "  \033[38;5;229mType/Backspace\033[0m edit filter query   \033[38;5;229mUp/Down\033[0m or \033[38;5;229mCtrl+J/K\033[0m move matches",
+        "  \033[38;5;229mCtrl+P\033[0m file filter mode, \033[38;5;229m/\033[0m content filter mode",
+        "  \033[38;5;229mType/Backspace\033[0m edit query   \033[38;5;229mUp/Down\033[0m or \033[38;5;229mCtrl+J/K\033[0m move matches",
         "  \033[38;5;229mEnter\033[0m use tree keys   \033[38;5;229mTab\033[0m edit query",
         "  \033[38;5;229ms\033[0m symbol outline (functions/classes/imports) for current file",
         "  \033[38;5;229mt\033[0m show/hide tree pane",
         "  \033[38;5;229m.\033[0m show/hide hidden files and directories",
-        "  \033[38;5;229mCtrl+U\033[0m tree root -> parent directory",
+        "  \033[38;5;229mr\033[0m tree root -> selected directory (or selected file parent)",
+        "  \033[38;5;229mR\033[0m tree root -> parent directory",
+        "  \033[38;5;229mCtrl+U\033[0m/\033[38;5;229mCtrl+D\033[0m jump to previous/next directory (max 10)",
         "",
         "\033[1;38;5;81mTree pane\033[0m",
         "  h/j/k/l move/select   l open/expand   h collapse/parent",

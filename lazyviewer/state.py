@@ -34,8 +34,10 @@ class AppState:
     last_click_time: float = 0.0
     tree_filter_active: bool = False
     tree_filter_editing: bool = False
+    tree_filter_mode: str = "files"
     tree_filter_query: str = ""
     tree_filter_match_count: int = 0
+    tree_filter_truncated: bool = False
     tree_filter_prev_browser_visible: bool | None = None
     tree_render_expanded: set[Path] = field(default_factory=set)
     picker_active: bool = False
@@ -59,3 +61,5 @@ class AppState:
     dir_preview_max_entries: int = 400
     dir_preview_truncated: bool = False
     dir_preview_path: Path | None = None
+    git_status_overlay: dict[Path, int] = field(default_factory=dict)
+    git_status_last_refresh: float = 0.0

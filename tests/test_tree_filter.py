@@ -5,7 +5,14 @@ import unittest
 from pathlib import Path
 
 from lazyviewer.fuzzy import fuzzy_match_file_index, to_project_relative
-from lazyviewer.tree import TreeEntry, filter_tree_entries_for_files, next_file_entry_index
+from lazyviewer.search import ContentMatch
+from lazyviewer.tree import (
+    TreeEntry,
+    filter_tree_entries_for_content_matches,
+    filter_tree_entries_for_files,
+    next_directory_entry_index,
+    next_file_entry_index,
+)
 
 
 class TreeFilterBehaviorTests(unittest.TestCase):
@@ -99,6 +106,21 @@ class TreeFilterBehaviorTests(unittest.TestCase):
         self.assertEqual(next_file_entry_index(entries, selected_idx=4, direction=1), None)
         self.assertEqual(next_file_entry_index(entries, selected_idx=4, direction=-1), 2)
         self.assertEqual(next_file_entry_index(entries, selected_idx=2, direction=-1), None)
+
+    def test_next_directory_entry_index_skips_files(self) -> None:
+        entries = [
+            TreeEntry(path=Path("/tmp/root"), depth=0, is_dir=True),
+            TreeEntry(path=Path("/tmp/root/src"), depth=1, is_dir=True),
+            TreeEntry(path=Path("/tmp/root/src/main.py"), depth=2, is_dir=False),
+            TreeEntry(path=Path("/tmp/root/docs"), depth=1, is_dir=True),
+            TreeEntry(path=Path("/tmp/root/docs/readme.md"), depth=2, is_dir=False),
+        ]
+
+        self.assertEqual(next_directory_entry_index(entries, selected_idx=0, direction=1), 1)
+        self.assertEqual(next_directory_entry_index(entries, selected_idx=2, direction=1), 3)
+        self.assertEqual(next_directory_entry_index(entries, selected_idx=4, direction=-1), 3)
+        self.assertEqual(next_directory_entry_index(entries, selected_idx=1, direction=-1), 0)
+        self.assertEqual(next_directory_entry_index(entries, selected_idx=0, direction=-1), None)
 
     def test_strict_substring_and_tree_projection_pipeline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -198,6 +220,49 @@ class TreeFilterBehaviorTests(unittest.TestCase):
             self.assertLessEqual(len(entries), 327)
             self.assertEqual(entries[0].path.resolve(), root)
             self.assertTrue(all(entry.path.is_relative_to(root) for entry in entries))
+
+    def test_filter_tree_entries_for_content_matches_adds_hit_rows_under_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            matches_by_file = {
+                root / "src" / "main.py": [
+                    ContentMatch(path=root / "src" / "main.py", line=10, column=3, preview="alpha = 1"),
+                    ContentMatch(path=root / "src" / "main.py", line=20, column=1, preview="beta = 2"),
+                ],
+                root / "docs" / "readme.md": [
+                    ContentMatch(path=root / "docs" / "readme.md", line=5, column=2, preview="search word"),
+                ],
+            }
+
+            entries, render_expanded = filter_tree_entries_for_content_matches(
+                root=root,
+                expanded={root},
+                matches_by_file=matches_by_file,
+            )
+
+            labels = []
+            for entry in entries:
+                if entry.path.resolve() == root:
+                    labels.append((".", entry.depth, entry.kind, entry.line, entry.display))
+                    continue
+                rel = entry.path.resolve().relative_to(root).as_posix()
+                labels.append((rel, entry.depth, entry.kind, entry.line, entry.display))
+
+            self.assertEqual(
+                labels,
+                [
+                    (".", 0, "path", None, None),
+                    ("docs", 1, "path", None, None),
+                    ("docs/readme.md", 2, "path", None, None),
+                    ("docs/readme.md", 3, "search_hit", 5, "search word"),
+                    ("src", 1, "path", None, None),
+                    ("src/main.py", 2, "path", None, None),
+                    ("src/main.py", 3, "search_hit", 10, "alpha = 1"),
+                    ("src/main.py", 3, "search_hit", 20, "beta = 2"),
+                ],
+            )
+            self.assertIn((root / "docs").resolve(), render_expanded)
+            self.assertIn((root / "src").resolve(), render_expanded)
 
 
 if __name__ == "__main__":
