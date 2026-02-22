@@ -331,6 +331,7 @@ def handle_normal_key(
     toggle_wrap_mode: Callable[[], None],
     toggle_help_panel: Callable[[], None],
     toggle_git_features: Callable[[], None],
+    launch_lazygit: Callable[[], None],
     handle_tree_mouse_wheel: Callable[[str], bool],
     handle_tree_mouse_click: Callable[[str], bool],
     move_tree_selection: Callable[[int], bool],
@@ -372,6 +373,9 @@ def handle_normal_key(
         toggle_help_panel()
         return False
     if key == "CTRL_G":
+        launch_lazygit()
+        return False
+    if key == "CTRL_O":
         toggle_git_features()
         return False
     if key == "CTRL_U" or key == "CTRL_D":

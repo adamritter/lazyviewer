@@ -14,7 +14,7 @@ HELP_PANEL_TREE_LINES: tuple[str, ...] = (
     "\033[38;5;229mCtrl+P\033[0m jump to file",
     "\033[38;5;229m/\033[0m find in all files",
     "\033[38;5;229mShift+Left/Right\033[0m resize tree",
-    "\033[38;5;229mCtrl+G\033[0m git on/off",
+    "\033[38;5;229mCtrl+G\033[0m lazygit  \033[38;5;229mCtrl+O\033[0m git on/off",
     "\033[38;5;229mm{key}/'{key}\033[0m marks  \033[38;5;229mAlt+Left/Right\033[0m history",
 )
 
@@ -37,7 +37,7 @@ HELP_PANEL_TEXT_ONLY_LINES: tuple[str, ...] = (
     "\033[38;5;229mh/j/k/l\033[0m  \033[38;5;229mEnter\033[0m  \033[38;5;229mShift+Left/Right\033[0m",
     "\033[38;5;229mCtrl+P\033[0m jump file  \033[38;5;229m/\033[0m search all files",
     "\033[38;5;229me\033[0m edit  \033[38;5;229ms\033[0m symbols  \033[38;5;229m:\033[0m commands",
-    "\033[38;5;229mn/N\033[0m mods  \033[38;5;229mCtrl+G\033[0m git on/off",
+    "\033[38;5;229mn/N\033[0m mods  \033[38;5;229mCtrl+G\033[0m lazygit  \033[38;5;229mCtrl+O\033[0m git on/off",
     "\033[38;5;229mr/R\033[0m root  \033[38;5;229mm{key}/'{key}\033[0m marks",
     "\033[38;5;229m.\033[0m hidden+ignored  \033[38;5;229mAlt+Left/Right\033[0m  \033[38;5;229m?\033[0m/\033[38;5;229mq\033[0m",
 )
@@ -159,7 +159,8 @@ def render_help_page(width: int, height: int) -> None:
         "  \033[38;5;229mType/Backspace\033[0m edit query   \033[38;5;229mUp/Down\033[0m or \033[38;5;229mCtrl+J/K\033[0m move matches",
         "  \033[38;5;229mEnter\033[0m keeps content search active   \033[38;5;229mTab\033[0m edit query",
         "  \033[38;5;229mn/N\033[0m content hit (search) or git-mod file (normal mode, when git is on)",
-        "  \033[38;5;229mCtrl+G\033[0m toggle git overlays, git-mod nav, and git diff preview",
+        "  \033[38;5;229mCtrl+G\033[0m open lazygit (in current tree root)",
+        "  \033[38;5;229mCtrl+O\033[0m toggle git overlays, git-mod nav, and git diff preview",
         "  \033[38;5;229mAlt+Left/Right\033[0m jump back/forward in history",
         "  \033[38;5;229mm{key}\033[0m set named mark   \033[38;5;229m'{key}\033[0m jump to named mark",
         "  \033[38;5;229ms\033[0m symbol outline (functions/classes/imports) for current file",

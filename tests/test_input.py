@@ -84,6 +84,17 @@ class ReadKeyRegressionTests(unittest.TestCase):
 
         self.assertEqual(key, "CTRL_G")
 
+    def test_ctrl_o_is_recognized(self) -> None:
+        read_fd, write_fd = os.pipe()
+        try:
+            os.write(write_fd, b"\x0f")
+            key = input_mod.read_key(read_fd, timeout_ms=20)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+        self.assertEqual(key, "CTRL_O")
+
     def test_ctrl_question_is_recognized(self) -> None:
         read_fd, write_fd = os.pipe()
         try:

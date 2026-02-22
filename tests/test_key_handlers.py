@@ -40,6 +40,7 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         key: str,
         toggle_git_features,
         jump_to_next_git_modified,
+        launch_lazygit=lambda: None,
         launch_editor_for_path=None,
     ) -> bool:
         if launch_editor_for_path is None:
@@ -58,6 +59,7 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
             toggle_wrap_mode=lambda: None,
             toggle_help_panel=lambda: None,
             toggle_git_features=toggle_git_features,
+            launch_lazygit=launch_lazygit,
             handle_tree_mouse_wheel=lambda _key: False,
             handle_tree_mouse_click=lambda _key: False,
             move_tree_selection=lambda _delta: False,
@@ -73,14 +75,30 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
             jump_to_next_git_modified=jump_to_next_git_modified,
         )
 
-    def test_ctrl_g_toggles_git_features(self) -> None:
+    def test_ctrl_g_launches_lazygit(self) -> None:
         state = _make_state()
         called = {"count": 0}
 
         should_quit = self._invoke(
             state=state,
             key="CTRL_G",
+            toggle_git_features=lambda: None,
+            launch_lazygit=lambda: called.__setitem__("count", called["count"] + 1),
+            jump_to_next_git_modified=lambda _direction: False,
+        )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(called["count"], 1)
+
+    def test_ctrl_o_toggles_git_features(self) -> None:
+        state = _make_state()
+        called = {"count": 0}
+
+        should_quit = self._invoke(
+            state=state,
+            key="CTRL_O",
             toggle_git_features=lambda: called.__setitem__("count", called["count"] + 1),
+            launch_lazygit=lambda: None,
             jump_to_next_git_modified=lambda _direction: False,
         )
 
@@ -222,6 +240,7 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
             toggle_wrap_mode=lambda: None,
             toggle_help_panel=lambda: None,
             toggle_git_features=lambda: None,
+            launch_lazygit=lambda: None,
             handle_tree_mouse_wheel=lambda _key: False,
             handle_tree_mouse_click=lambda _key: False,
             move_tree_selection=lambda _delta: False,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import shutil
 import sys
 import threading
@@ -828,6 +829,68 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     def launch_editor_for_path(target: Path) -> str | None:
         return launch_editor(target, terminal.disable_tui_mode, terminal.enable_tui_mode)
 
+    def launch_lazygit() -> None:
+        if shutil.which("lazygit") is None:
+            state.rendered = "\033[31mlazygit not found in PATH\033[0m"
+            rebuild_screen_lines(preserve_scroll=False)
+            state.text_x = 0
+            state.dir_preview_path = None
+            state.dir_preview_truncated = False
+            state.preview_image_path = None
+            state.preview_image_format = None
+            state.dirty = True
+            return
+
+        launch_error: str | None = None
+        terminal.disable_tui_mode()
+        try:
+            try:
+                subprocess.run(
+                    ["lazygit"],
+                    cwd=state.tree_root.resolve(),
+                    check=False,
+                )
+            except Exception as exc:
+                launch_error = f"failed to launch lazygit: {exc}"
+        finally:
+            terminal.enable_tui_mode()
+
+        if launch_error is not None:
+            state.rendered = f"\033[31m{launch_error}\033[0m"
+            rebuild_screen_lines(preserve_scroll=False)
+            state.text_x = 0
+            state.dir_preview_path = None
+            state.dir_preview_truncated = False
+            state.preview_image_path = None
+            state.preview_image_format = None
+            state.dirty = True
+            return
+
+        previous_current_path = state.current_path.resolve()
+        rebuild_tree_entries(preferred_path=previous_current_path)
+        mark_tree_watch_dirty()
+        if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
+            selected_target = state.tree_entries[state.selected_idx].path.resolve()
+        else:
+            selected_target = state.tree_root.resolve()
+
+        if selected_target == previous_current_path:
+            refresh_rendered_for_current_path(
+                reset_scroll=False,
+                reset_dir_budget=False,
+                force_rebuild=True,
+            )
+        else:
+            state.current_path = selected_target
+            refresh_rendered_for_current_path(
+                reset_scroll=True,
+                reset_dir_budget=True,
+                force_rebuild=True,
+            )
+        schedule_tree_filter_index_warmup()
+        refresh_git_status_overlay(force=True)
+        state.dirty = True
+
     def handle_normal_key(key: str, term_columns: int) -> bool:
         return handle_normal_key_event(
             key=key,
@@ -843,6 +906,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             toggle_wrap_mode=navigation_ops.toggle_wrap_mode,
             toggle_help_panel=navigation_ops.toggle_help_panel,
             toggle_git_features=toggle_git_features,
+            launch_lazygit=launch_lazygit,
             handle_tree_mouse_wheel=handle_tree_mouse_wheel,
             handle_tree_mouse_click=handle_tree_mouse_click,
             move_tree_selection=move_tree_selection,

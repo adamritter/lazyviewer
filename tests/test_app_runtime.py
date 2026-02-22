@@ -252,6 +252,66 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertIn(".gitignore", snapshots["after"])
             self.assertIn("__pycache__", snapshots["after"])
 
+    def test_ctrl_g_launches_lazygit_and_ctrl_o_toggles_git_features(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "demo.py").write_text("x = 1\n", encoding="utf-8")
+            snapshots: dict[str, bool] = {}
+
+            class _FakeTerminalController:
+                disable_calls = 0
+                enable_calls = 0
+
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+                def disable_tui_mode(self) -> None:
+                    type(self).disable_calls += 1
+
+                def enable_tui_mode(self) -> None:
+                    type(self).enable_calls += 1
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_normal_key = kwargs["handle_normal_key"]
+                snapshots["before_ctrl_o"] = state.git_features_enabled
+                handle_normal_key("CTRL_O", 120)
+                snapshots["after_ctrl_o"] = state.git_features_enabled
+                handle_normal_key("CTRL_G", 120)
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.app_runtime.shutil.which", return_value="/usr/local/bin/lazygit"
+            ), mock.patch("lazyviewer.app_runtime.subprocess.run") as lazygit_run, mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            lazygit_calls = [
+                call
+                for call in lazygit_run.call_args_list
+                if call.args and call.args[0] == ["lazygit"]
+            ]
+            self.assertEqual(len(lazygit_calls), 1)
+            self.assertEqual(lazygit_calls[0].kwargs, {"cwd": root.resolve(), "check": False})
+            self.assertTrue(snapshots["before_ctrl_o"])
+            self.assertFalse(snapshots["after_ctrl_o"])
+            self.assertEqual(_FakeTerminalController.disable_calls, 1)
+            self.assertEqual(_FakeTerminalController.enable_calls, 1)
+
     def test_named_marks_persist_between_runs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
