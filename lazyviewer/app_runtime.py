@@ -7,6 +7,7 @@ This is the highest-level module where rendering, navigation, search, and git me
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import shutil
 import sys
@@ -24,7 +25,6 @@ from .config import (
     load_show_hidden,
 )
 from .editor import launch_editor
-from .fuzzy import collect_project_file_labels
 from .git_status import clear_diff_preview_cache, collect_git_status_overlay
 from .highlight import colorize_source
 from .key_handlers import handle_normal_key as handle_normal_key_event
@@ -39,6 +39,7 @@ from .render import help_panel_row_count
 from .runtime_loop import run_main_loop
 from .runtime_navigation import NavigationPickerOps
 from .runtime_tree_filter import TreeFilterOps
+from .search.fuzzy import collect_project_file_labels
 from .state import AppState
 from .terminal import TerminalController
 from .tree import (
@@ -59,6 +60,7 @@ CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT = 50.0
 CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT = 8.0
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR = 2
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR = 1
+_TRAILING_GIT_BADGES_RE = re.compile(r"^(.*?)(?:\s(?:\[(?:M|\?)\])+)$")
 
 
 def _skip_gitignored_for_hidden_mode(show_hidden: bool) -> bool:
@@ -430,6 +432,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state.git_status_overlay = collect_git_status_overlay(state.tree_root)
         state.git_status_last_refresh = time.monotonic()
         if state.git_status_overlay != previous:
+            if state.current_path.resolve().is_dir():
+                refresh_rendered_for_current_path(reset_scroll=False, reset_dir_budget=False)
             state.dirty = True
 
     def reset_git_watch_context() -> None:
@@ -568,6 +572,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             dir_max_entries=dir_limit,
             dir_skip_gitignored=_skip_gitignored_for_hidden_mode(state.show_hidden),
             prefer_git_diff=prefer_git_diff,
+            dir_git_status_overlay=(state.git_status_overlay if state.git_features_enabled else None),
         )
         state.rendered = rendered_for_path.text
         rebuild_screen_lines(preserve_scroll=not reset_scroll)
@@ -677,6 +682,74 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             return None
         line_idx = max(0, min(state.start + row - 1, len(state.lines) - 1))
         return line_idx, text_col
+
+    def _line_has_newline_terminator(line: str) -> bool:
+        return line.endswith("\n") or line.endswith("\r")
+
+    def display_line_to_source_line(display_idx: int) -> int | None:
+        if display_idx < 0 or display_idx >= len(state.lines):
+            return None
+        if not state.wrap_text:
+            return display_idx
+
+        source_idx = 0
+        for idx in range(display_idx):
+            if _line_has_newline_terminator(state.lines[idx]):
+                source_idx += 1
+        return source_idx
+
+    def directory_preview_target_for_display_line(display_idx: int) -> Path | None:
+        if state.dir_preview_path is None:
+            return None
+
+        source_idx = display_line_to_source_line(display_idx)
+        if source_idx is None:
+            return None
+
+        rendered_lines = state.rendered.splitlines()
+        if source_idx < 0 or source_idx >= len(rendered_lines):
+            return None
+
+        root = state.dir_preview_path.resolve()
+        dirs_by_depth: dict[int, Path] = {0: root}
+
+        for idx, raw_line in enumerate(rendered_lines):
+            plain_line = ANSI_ESCAPE_RE.sub("", raw_line).rstrip("\r\n")
+            target: Path | None = None
+            depth = 0
+            is_dir = False
+
+            if idx == 0:
+                target = root
+                depth = 0
+                is_dir = True
+            else:
+                branch_idx = plain_line.find("├─ ")
+                if branch_idx < 0:
+                    branch_idx = plain_line.find("└─ ")
+                if branch_idx >= 0:
+                    name_part = plain_line[branch_idx + 3 :]
+                    if name_part and not name_part.startswith("<error:"):
+                        badge_match = _TRAILING_GIT_BADGES_RE.match(name_part.rstrip())
+                        if badge_match is not None:
+                            name_part = badge_match.group(1)
+                        is_dir = name_part.endswith("/")
+                        if is_dir:
+                            name_part = name_part[:-1]
+                        if name_part:
+                            depth = (branch_idx // 3) + 1
+                            parent = dirs_by_depth.get(depth - 1, root)
+                            target = (parent / name_part).resolve()
+
+            if target is not None:
+                for key in [level for level in dirs_by_depth if level > depth]:
+                    dirs_by_depth.pop(key, None)
+                if is_dir:
+                    dirs_by_depth[depth] = target
+                if idx == source_idx:
+                    return target
+
+        return None
 
     def tick_source_selection_drag() -> None:
         if not source_selection_drag_active or state.source_selection_anchor is None:
@@ -854,8 +927,19 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 source_selection_drag_pointer = None
                 source_selection_drag_edge = None
                 return True
-            copy_selected_source_range(state.source_selection_anchor, selection_pos)
             state.source_selection_focus = selection_pos
+            preview_target = None
+            if state.source_selection_anchor == selection_pos and state.dir_preview_path is not None:
+                preview_target = directory_preview_target_for_display_line(selection_pos[0])
+            if preview_target is not None:
+                clear_source_selection()
+                source_selection_drag_active = False
+                source_selection_drag_pointer = None
+                source_selection_drag_edge = None
+                jump_to_path_proxy(preview_target)
+                state.dirty = True
+                return True
+            copy_selected_source_range(state.source_selection_anchor, selection_pos)
             source_selection_drag_active = False
             source_selection_drag_pointer = None
             source_selection_drag_edge = None
@@ -908,6 +992,21 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         preview_selected_entry()
         if state.selected_idx != prev_selected:
             state.dirty = True
+
+        clicked_entry = state.tree_entries[state.selected_idx]
+        arrow_col = 1 + (clicked_entry.depth * 2)
+        if is_left_down and clicked_entry.is_dir and arrow_col <= col <= (arrow_col + 1):
+            resolved = clicked_entry.path.resolve()
+            if resolved in state.expanded:
+                state.expanded.remove(resolved)
+            else:
+                state.expanded.add(resolved)
+            rebuild_tree_entries(preferred_path=resolved)
+            tree_watch_signature = None
+            state.last_click_idx = -1
+            state.last_click_time = 0.0
+            state.dirty = True
+            return True
 
         now = time.monotonic()
         is_double = clicked_idx == state.last_click_idx and (now - state.last_click_time) <= DOUBLE_CLICK_SECONDS

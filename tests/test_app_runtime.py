@@ -20,9 +20,10 @@ from lazyviewer.app_runtime import (
     _first_git_change_screen_line,
     _tree_order_key_for_relative_path,
 )
+from lazyviewer.git_status import GIT_STATUS_CHANGED
 from lazyviewer.navigation import JumpLocation
 from lazyviewer.render import help_panel_row_count, render_dual_page
-from lazyviewer.search import ContentMatch
+from lazyviewer.search.content import ContentMatch
 
 
 class AppRuntimeBehaviorTests(unittest.TestCase):
@@ -381,6 +382,116 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
                 },
             )
 
+    def test_single_click_directory_arrow_toggles_open_and_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            docs_dir = root / "docs"
+            docs_dir.mkdir()
+            nested_file = docs_dir / "guide.md"
+            nested_file.write_text("# guide\n", encoding="utf-8")
+            snapshots: dict[str, bool] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+
+                def find_docs_index() -> int:
+                    return next(
+                        idx
+                        for idx, entry in enumerate(state.tree_entries)
+                        if entry.path.resolve() == docs_dir.resolve()
+                    )
+
+                docs_idx = find_docs_index()
+                docs_entry = state.tree_entries[docs_idx]
+                docs_row = (docs_idx - state.tree_start) + 1
+                arrow_col = 1 + (docs_entry.depth * 2)
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{arrow_col}:{docs_row}")
+
+                snapshots["opened"] = docs_dir.resolve() in state.expanded
+                snapshots["child_visible_after_open"] = any(
+                    entry.path.resolve() == nested_file.resolve() for entry in state.tree_entries
+                )
+
+                docs_idx = find_docs_index()
+                docs_entry = state.tree_entries[docs_idx]
+                docs_row = (docs_idx - state.tree_start) + 1
+                arrow_col = 1 + (docs_entry.depth * 2)
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{arrow_col}:{docs_row}")
+
+                snapshots["closed"] = docs_dir.resolve() not in state.expanded
+                snapshots["child_hidden_after_close"] = not any(
+                    entry.path.resolve() == nested_file.resolve() for entry in state.tree_entries
+                )
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch("lazyviewer.app_runtime.sys.stdin.fileno", return_value=0), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch("lazyviewer.app_runtime.load_show_hidden", return_value=False), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            self.assertTrue(snapshots["opened"])
+            self.assertTrue(snapshots["child_visible_after_open"])
+            self.assertTrue(snapshots["closed"])
+            self.assertTrue(snapshots["child_hidden_after_close"])
+
+    def test_single_click_directory_name_does_not_toggle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            docs_dir = root / "docs"
+            docs_dir.mkdir()
+            (docs_dir / "guide.md").write_text("# guide\n", encoding="utf-8")
+            snapshots: dict[str, bool] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+                docs_idx = next(
+                    idx
+                    for idx, entry in enumerate(state.tree_entries)
+                    if entry.path.resolve() == docs_dir.resolve()
+                )
+                docs_entry = state.tree_entries[docs_idx]
+                docs_row = (docs_idx - state.tree_start) + 1
+                # Click name area, not the arrow marker.
+                name_col = (1 + (docs_entry.depth * 2)) + 2
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{name_col}:{docs_row}")
+                snapshots["still_collapsed"] = docs_dir.resolve() not in state.expanded
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch("lazyviewer.app_runtime.sys.stdin.fileno", return_value=0), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch("lazyviewer.app_runtime.load_show_hidden", return_value=False), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            self.assertTrue(snapshots["still_collapsed"])
+
     def test_source_mouse_drag_copies_selected_text_to_clipboard(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -444,6 +555,239 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             )
             self.assertEqual(snapshots["anchor"], (0, 6))
             self.assertEqual(snapshots["focus"], (1, 4))
+
+    def test_clicking_directory_name_in_preview_selects_it_in_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            docs_dir = root / "docs"
+            docs_dir.mkdir()
+            (docs_dir / "guide.md").write_text("# guide\n", encoding="utf-8")
+            (root / "main.py").write_text("print('x')\n", encoding="utf-8")
+            snapshots: dict[str, Path] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+                right_start_col = state.left_width + 2
+
+                target_row = None
+                for idx, line in enumerate(state.lines):
+                    plain = app_runtime.ANSI_ESCAPE_RE.sub("", line)
+                    if "docs/" in plain:
+                        target_row = idx + 1
+                        break
+                self.assertIsNotNone(target_row)
+                assert target_row is not None
+
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 3}:{target_row}")
+                handle_tree_mouse_click(f"MOUSE_LEFT_UP:{right_start_col + 3}:{target_row}")
+
+                snapshots["current_path"] = state.current_path.resolve()
+                snapshots["selected_path"] = state.tree_entries[state.selected_idx].path.resolve()
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            self.assertEqual(snapshots["current_path"], docs_dir.resolve())
+            self.assertEqual(snapshots["selected_path"], docs_dir.resolve())
+
+    def test_clicking_file_name_in_preview_selects_it_in_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            target_file = root / "README.md"
+            target_file.write_text("hello\n", encoding="utf-8")
+            (root / "other.txt").write_text("x\n", encoding="utf-8")
+            snapshots: dict[str, Path] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+                right_start_col = state.left_width + 2
+
+                target_row = None
+                for idx, line in enumerate(state.lines):
+                    plain = app_runtime.ANSI_ESCAPE_RE.sub("", line)
+                    if "README.md" in plain:
+                        target_row = idx + 1
+                        break
+                self.assertIsNotNone(target_row)
+                assert target_row is not None
+
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 3}:{target_row}")
+                handle_tree_mouse_click(f"MOUSE_LEFT_UP:{right_start_col + 3}:{target_row}")
+
+                snapshots["current_path"] = state.current_path.resolve()
+                snapshots["selected_path"] = state.tree_entries[state.selected_idx].path.resolve()
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            self.assertEqual(snapshots["current_path"], target_file.resolve())
+            self.assertEqual(snapshots["selected_path"], target_file.resolve())
+
+    def test_clicking_nested_file_name_in_preview_keeps_full_nested_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = (Path(tmp) / "lazyviewer").resolve()
+            root.mkdir()
+            nested_dir = root / "lazyviewer"
+            nested_dir.mkdir()
+            target_file = nested_dir / "app_runtime.py"
+            target_file.write_text("print('nested')\n", encoding="utf-8")
+            # Also create same leaf name at root to catch parent-level mis-resolution.
+            (root / "app_runtime.py").write_text("print('root')\n", encoding="utf-8")
+            snapshots: dict[str, Path] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+                right_start_col = state.left_width + 2
+
+                target_row = None
+                for idx, line in enumerate(state.lines):
+                    plain = app_runtime.ANSI_ESCAPE_RE.sub("", line)
+                    if "└─ app_runtime.py" in plain or "├─ app_runtime.py" in plain:
+                        if "lazyviewer" in plain:
+                            # This line is likely the nested one in narrow panes.
+                            pass
+                    if "app_runtime.py" in plain and ("│  " in plain or "   " in plain):
+                        target_row = idx + 1
+                        break
+                self.assertIsNotNone(target_row)
+                assert target_row is not None
+
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 3}:{target_row}")
+                handle_tree_mouse_click(f"MOUSE_LEFT_UP:{right_start_col + 3}:{target_row}")
+
+                snapshots["current_path"] = state.current_path.resolve()
+                snapshots["selected_path"] = state.tree_entries[state.selected_idx].path.resolve()
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            self.assertEqual(snapshots["current_path"], target_file.resolve())
+            self.assertEqual(snapshots["selected_path"], target_file.resolve())
+
+    def test_clicking_nested_file_name_in_preview_with_git_badge_keeps_full_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = (Path(tmp) / "lazyviewer").resolve()
+            root.mkdir()
+            nested_dir = root / "lazyviewer"
+            nested_dir.mkdir()
+            target_file = nested_dir / "app_runtime.py"
+            target_file.write_text("print('nested')\n", encoding="utf-8")
+            snapshots: dict[str, Path] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+                refresh_git_status_overlay = kwargs["refresh_git_status_overlay"]
+                right_start_col = state.left_width + 2
+
+                refresh_git_status_overlay(force=True)
+
+                target_row = None
+                for idx, line in enumerate(state.lines):
+                    plain = app_runtime.ANSI_ESCAPE_RE.sub("", line)
+                    if "app_runtime.py" in plain and "[M]" in plain and ("│  " in plain or "   " in plain):
+                        target_row = idx + 1
+                        break
+                self.assertIsNotNone(target_row)
+                assert target_row is not None
+
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 3}:{target_row}")
+                handle_tree_mouse_click(f"MOUSE_LEFT_UP:{right_start_col + 3}:{target_row}")
+
+                snapshots["current_path"] = state.current_path.resolve()
+                snapshots["selected_path"] = state.tree_entries[state.selected_idx].path.resolve()
+
+            overlay = {target_file.resolve(): GIT_STATUS_CHANGED, nested_dir.resolve(): GIT_STATUS_CHANGED}
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.app_runtime.collect_git_status_overlay", return_value=overlay
+            ), mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            self.assertEqual(snapshots["current_path"], target_file.resolve())
+            self.assertEqual(snapshots["selected_path"], target_file.resolve())
 
     def test_source_mouse_drag_autoscrolls_when_pointer_moves_below_view(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
