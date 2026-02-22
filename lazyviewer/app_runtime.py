@@ -337,6 +337,18 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
         git_watch_signature = signature
         refresh_git_status_overlay(force=True)
+        # Git HEAD/index changes can invalidate the current file's diff preview
+        # even when the selected path hasn't changed.
+        previous_rendered = state.rendered
+        previous_start = state.start
+        previous_max_start = state.max_start
+        refresh_rendered_for_current_path(reset_scroll=False, reset_dir_budget=False)
+        if (
+            state.rendered != previous_rendered
+            or state.start != previous_start
+            or state.max_start != previous_max_start
+        ):
+            state.dirty = True
 
     def sorted_git_modified_file_paths() -> list[Path]:
         if not state.git_status_overlay:
