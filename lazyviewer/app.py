@@ -611,6 +611,29 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             else:
                 state.skip_next_lf = False
 
+            if key == "SHIFT_LEFT":
+                prev_left = state.left_width
+                state.left_width = clamp_left_width(term.columns, state.left_width - 2)
+                if state.left_width != prev_left:
+                    save_left_pane_percent(term.columns, state.left_width)
+                    state.right_width = max(1, term.columns - state.left_width - 2)
+                    if state.right_width != state.last_right_width:
+                        state.last_right_width = state.right_width
+                        rebuild_screen_lines(columns=term.columns)
+                    state.dirty = True
+                continue
+            if key == "SHIFT_RIGHT":
+                prev_left = state.left_width
+                state.left_width = clamp_left_width(term.columns, state.left_width + 2)
+                if state.left_width != prev_left:
+                    save_left_pane_percent(term.columns, state.left_width)
+                    state.right_width = max(1, term.columns - state.left_width - 2)
+                    if state.right_width != state.last_right_width:
+                        state.last_right_width = state.right_width
+                        rebuild_screen_lines(columns=term.columns)
+                    state.dirty = True
+                continue
+
             if key == "CTRL_P":
                 state.count_buffer = ""
                 if state.tree_filter_active:
@@ -945,29 +968,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                                     refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
                                     state.dirty = True
                 continue
-            if key == "SHIFT_LEFT":
-                prev_left = state.left_width
-                state.left_width = clamp_left_width(term.columns, state.left_width - 2)
-                if state.left_width != prev_left:
-                    save_left_pane_percent(term.columns, state.left_width)
-                    state.right_width = max(1, term.columns - state.left_width - 2)
-                    if state.right_width != state.last_right_width:
-                        state.last_right_width = state.right_width
-                        rebuild_screen_lines(columns=term.columns)
-                    state.dirty = True
-                continue
-            if key == "SHIFT_RIGHT":
-                prev_left = state.left_width
-                state.left_width = clamp_left_width(term.columns, state.left_width + 2)
-                if state.left_width != prev_left:
-                    save_left_pane_percent(term.columns, state.left_width)
-                    state.right_width = max(1, term.columns - state.left_width - 2)
-                    if state.right_width != state.last_right_width:
-                        state.last_right_width = state.right_width
-                        rebuild_screen_lines(columns=term.columns)
-                    state.dirty = True
-                continue
-
             if state.browser_visible and key.lower() == "j":
                 prev_selected = state.selected_idx
                 state.selected_idx = min(len(state.tree_entries) - 1, state.selected_idx + 1)
