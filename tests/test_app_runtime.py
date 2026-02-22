@@ -258,6 +258,43 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertIn(".gitignore", snapshots["after"])
             self.assertIn("__pycache__", snapshots["after"])
 
+    def test_run_pager_starts_with_mouse_capture_enabled_for_source_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            file_path = root / "demo.py"
+            file_path.write_text("line 1\nline 2\n", encoding="utf-8")
+            snapshots: dict[str, object] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                snapshots["mouse_capture_enabled"] = state.mouse_capture_enabled
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", file_path, "monokai", True, False)
+
+            self.assertIn("mouse_capture_enabled", snapshots)
+            self.assertTrue(bool(snapshots["mouse_capture_enabled"]))
+
     def test_ctrl_g_launches_lazygit_and_ctrl_o_toggles_git_features(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -317,6 +354,127 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertFalse(snapshots["after_ctrl_o"])
             self.assertEqual(_FakeTerminalController.disable_calls, 1)
             self.assertEqual(_FakeTerminalController.enable_calls, 1)
+
+    def test_double_click_file_copies_file_name_to_clipboard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            file_path = root / "demo.py"
+            file_path.write_text("print('x')\n", encoding="utf-8")
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+                target_idx = next(
+                    idx
+                    for idx, entry in enumerate(state.tree_entries)
+                    if entry.path.resolve() == file_path.resolve()
+                )
+                row = (target_idx - state.tree_start) + 1
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:1:{row}")
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:1:{row}")
+
+            def fake_which(cmd: str) -> str | None:
+                if cmd == "pbcopy":
+                    return "/usr/bin/pbcopy"
+                return None
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.app_runtime.shutil.which", side_effect=fake_which
+            ), mock.patch("lazyviewer.app_runtime.subprocess.run") as subprocess_run, mock.patch(
+                "lazyviewer.app_runtime.time.monotonic", return_value=100.0
+            ), mock.patch("lazyviewer.app_runtime.os.isatty", return_value=True), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            clipboard_calls = [
+                call
+                for call in subprocess_run.call_args_list
+                if call.args and call.args[0] == ["pbcopy"]
+            ]
+            self.assertEqual(len(clipboard_calls), 1)
+            self.assertEqual(
+                clipboard_calls[0].kwargs,
+                {
+                    "input": "demo.py",
+                    "text": True,
+                    "check": False,
+                },
+            )
+
+    def test_source_mouse_drag_copies_selected_text_to_clipboard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            file_path = root / "demo.py"
+            file_path.write_text("alpha beta\nsecond line\n", encoding="utf-8")
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+                right_start_col = state.left_width + 2
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 6}:1")
+                handle_tree_mouse_click(f"MOUSE_LEFT_UP:{right_start_col + 4}:2")
+
+            def fake_which(cmd: str) -> str | None:
+                if cmd == "pbcopy":
+                    return "/usr/bin/pbcopy"
+                return None
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.app_runtime.shutil.which", side_effect=fake_which
+            ), mock.patch("lazyviewer.app_runtime.subprocess.run") as subprocess_run, mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", file_path, "monokai", True, False)
+
+            clipboard_calls = [
+                call
+                for call in subprocess_run.call_args_list
+                if call.args and call.args[0] == ["pbcopy"]
+            ]
+            self.assertEqual(len(clipboard_calls), 1)
+            self.assertEqual(
+                clipboard_calls[0].kwargs,
+                {
+                    "input": "beta\nseco",
+                    "text": True,
+                    "check": False,
+                },
+            )
 
     def test_named_marks_persist_between_runs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

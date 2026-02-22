@@ -119,6 +119,41 @@ def _tree_order_key_for_relative_path(
     return tuple(out)
 
 
+def _copy_text_to_clipboard(text: str) -> bool:
+    if not text:
+        return False
+
+    command_candidates: list[list[str]] = []
+    if sys.platform == "darwin":
+        command_candidates.append(["pbcopy"])
+    elif os.name == "nt":
+        command_candidates.append(["clip"])
+    else:
+        command_candidates.extend(
+            [
+                ["wl-copy"],
+                ["xclip", "-selection", "clipboard"],
+                ["xsel", "--clipboard", "--input"],
+            ]
+        )
+
+    for command in command_candidates:
+        if shutil.which(command[0]) is None:
+            continue
+        try:
+            proc = subprocess.run(
+                command,
+                input=text,
+                text=True,
+                check=False,
+            )
+        except Exception:
+            continue
+        if proc.returncode == 0:
+            return True
+    return False
+
+
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
     if nopager or not os.isatty(sys.stdin.fileno()):
         rendered = content
@@ -216,6 +251,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     git_watch_signature: str | None = None
     git_watch_repo_root: Path | None = None
     git_watch_dir: Path | None = None
+    source_selection_anchor: tuple[int, int] | None = None
 
     def index_warmup_worker() -> None:
         nonlocal index_warmup_pending, index_warmup_running
@@ -608,6 +644,66 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         except Exception:
             return None, None
 
+    def source_selection_position(col: int, row: int) -> tuple[int, int] | None:
+        visible_rows = visible_content_rows()
+        if row < 1 or row > visible_rows:
+            return None
+
+        if state.browser_visible:
+            right_start_col = state.left_width + 2
+            if col < right_start_col:
+                return None
+            text_col = max(0, col - right_start_col + state.text_x)
+        else:
+            right_start_col = 1
+            if col < right_start_col:
+                return None
+            text_col = max(0, col - right_start_col + state.text_x)
+
+        if not state.lines:
+            return None
+        line_idx = max(0, min(state.start + row - 1, len(state.lines) - 1))
+        return line_idx, text_col
+
+    def copy_selected_source_range(
+        start_pos: tuple[int, int],
+        end_pos: tuple[int, int],
+    ) -> bool:
+        if not state.lines:
+            return False
+
+        start_line, start_col = start_pos
+        end_line, end_col = end_pos
+        if (end_line, end_col) < (start_line, start_col):
+            start_line, start_col, end_line, end_col = end_line, end_col, start_line, start_col
+
+        start_line = max(0, min(start_line, len(state.lines) - 1))
+        end_line = max(0, min(end_line, len(state.lines) - 1))
+
+        selected_parts: list[str] = []
+        for idx in range(start_line, end_line + 1):
+            plain = ANSI_ESCAPE_RE.sub("", state.lines[idx]).rstrip("\r\n")
+            if idx == start_line and idx == end_line:
+                left = max(0, min(start_col, len(plain)))
+                right = max(left, min(end_col, len(plain)))
+                selected_parts.append(plain[left:right])
+            elif idx == start_line:
+                left = max(0, min(start_col, len(plain)))
+                selected_parts.append(plain[left:])
+            elif idx == end_line:
+                right = max(0, min(end_col, len(plain)))
+                selected_parts.append(plain[:right])
+            else:
+                selected_parts.append(plain)
+
+        selected_text = "\n".join(selected_parts)
+        if not selected_text:
+            fallback = ANSI_ESCAPE_RE.sub("", state.lines[start_line]).rstrip("\r\n")
+            selected_text = fallback
+        if not selected_text:
+            return False
+        return _copy_text_to_clipboard(selected_text)
+
     def handle_tree_mouse_wheel(mouse_key: str) -> bool:
         if not (mouse_key.startswith("MOUSE_WHEEL_UP:") or mouse_key.startswith("MOUSE_WHEEL_DOWN:")):
             return False
@@ -628,15 +724,34 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         return True
 
     def handle_tree_mouse_click(mouse_key: str) -> bool:
-        nonlocal tree_watch_signature
-        if not mouse_key.startswith("MOUSE_LEFT_DOWN:"):
+        nonlocal tree_watch_signature, source_selection_anchor
+        is_left_down = mouse_key.startswith("MOUSE_LEFT_DOWN:")
+        is_left_up = mouse_key.startswith("MOUSE_LEFT_UP:")
+        if not (is_left_down or is_left_up):
             return False
 
         col, row = parse_mouse_col_row(mouse_key)
+        if col is None or row is None:
+            return True
+
+        selection_pos = source_selection_position(col, row)
+        if selection_pos is not None:
+            if is_left_down:
+                source_selection_anchor = selection_pos
+                return True
+            if source_selection_anchor is None:
+                return True
+            copy_selected_source_range(source_selection_anchor, selection_pos)
+            source_selection_anchor = None
+            state.dirty = True
+            return True
+
+        if is_left_up:
+            source_selection_anchor = None
+            return True
+
         if not (
             state.browser_visible
-            and col is not None
-            and row is not None
             and 1 <= row <= visible_content_rows()
             and col <= state.left_width
         ):
@@ -682,10 +797,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             state.dirty = True
             return True
 
-        origin = current_jump_location()
-        state.current_path = entry.path.resolve()
-        refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
-        record_jump_if_changed(origin)
+        _copy_text_to_clipboard(entry.path.name)
         state.dirty = True
         return True
 

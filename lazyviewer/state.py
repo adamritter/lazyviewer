@@ -34,11 +34,14 @@ class AppState:
     last_right_width: int
     browser_visible: bool = True
     show_help: bool = False
+    mouse_capture_enabled: bool = True
     dirty: bool = True
     skip_next_lf: bool = False
     count_buffer: str = ""
     last_click_idx: int = -1
     last_click_time: float = 0.0
+    source_selection_anchor: tuple[int, int] | None = None
+    source_selection_focus: tuple[int, int] | None = None
     tree_filter_active: bool = False
     tree_filter_editing: bool = False
     tree_filter_mode: str = "files"

@@ -60,6 +60,24 @@ class TerminalBehaviorTests(unittest.TestCase):
         with mock.patch.dict("lazyviewer.terminal.os.environ", {"TERM": "xterm-256color"}, clear=True):
             self.assertFalse(controller.supports_kitty_graphics())
 
+    def test_set_mouse_reporting_toggles_and_is_idempotent(self) -> None:
+        with mock.patch("lazyviewer.terminal.termios.tcgetattr", return_value=[0]), mock.patch(
+            "lazyviewer.terminal.os.write"
+        ) as write_mock:
+            controller = TerminalController(stdin_fd=0, stdout_fd=1)
+            controller.set_mouse_reporting(False)
+            controller.set_mouse_reporting(True)
+            controller.set_mouse_reporting(True)
+            controller.set_mouse_reporting(False)
+
+        self.assertEqual(
+            write_mock.call_args_list,
+            [
+                mock.call(1, b"\x1b[?1000h\x1b[?1006h"),
+                mock.call(1, b"\x1b[?1000l\x1b[?1006l"),
+            ],
+        )
+
     def test_kitty_graphics_commands_emit_expected_sequences(self) -> None:
         with mock.patch("lazyviewer.terminal.termios.tcgetattr", return_value=[0]), mock.patch(
             "lazyviewer.terminal.os.write"

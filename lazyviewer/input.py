@@ -42,6 +42,8 @@ def read_key(fd: int, timeout_ms: int | None = None) -> str:
         return "CTRL_O"
     if ch == b"\x07":
         return "CTRL_G"
+    if ch == b"\x19":
+        return "CTRL_Y"
     if ch == b"\x1f":
         return "CTRL_QUESTION"
     if ch == b"\t":
