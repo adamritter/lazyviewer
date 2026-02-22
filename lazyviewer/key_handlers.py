@@ -464,6 +464,9 @@ def handle_normal_key(
         error = launch_editor_for_path(edit_target)
         state.current_path = edit_target
         if error is None:
+            if edit_target.is_dir():
+                rebuild_tree_entries(preferred_path=edit_target)
+                mark_tree_watch_dirty()
             refresh_rendered_for_current_path(
                 reset_scroll=True,
                 reset_dir_budget=True,

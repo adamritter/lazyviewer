@@ -309,6 +309,61 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertEqual(snapshots["selected_kind"], "search_hit")
             self.assertGreater(int(snapshots["start"]), 0)
 
+    def test_editing_directory_rebuilds_tree_and_shows_new_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "existing.txt").write_text("existing\n", encoding="utf-8")
+            created = root / "created-from-editor.txt"
+            snapshots: dict[str, object] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+                def disable_tui_mode(self) -> None:
+                    return
+
+                def enable_tui_mode(self) -> None:
+                    return
+
+            def fake_launch_editor(target: Path, _disable, _enable) -> str | None:
+                if target.resolve() == root:
+                    created.write_text("new\n", encoding="utf-8")
+                return None
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_normal_key = kwargs["handle_normal_key"]
+                before = {entry.path.resolve() for entry in state.tree_entries}
+                snapshots["before_has_created"] = created.resolve() in before
+                handle_normal_key("e", 120)
+                after = {entry.path.resolve() for entry in state.tree_entries}
+                snapshots["after_has_created"] = created.resolve() in after
+                snapshots["current_path"] = state.current_path.resolve()
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.app_runtime.launch_editor", side_effect=fake_launch_editor
+            ), mock.patch("lazyviewer.app_runtime.os.isatty", return_value=True), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            self.assertFalse(bool(snapshots["before_has_created"]))
+            self.assertTrue(bool(snapshots["after_has_created"]))
+            self.assertEqual(snapshots["current_path"], root)
+
 
 if __name__ == "__main__":
     unittest.main()
