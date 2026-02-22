@@ -38,6 +38,10 @@ from .tree import (
 DOUBLE_CLICK_SECONDS = 0.35
 PICKER_RESULT_LIMIT = 200
 FILTER_CURSOR_BLINK_SECONDS = 0.5
+TREE_FILTER_MATCH_LIMIT_1CHAR = 300
+TREE_FILTER_MATCH_LIMIT_2CHAR = 1_000
+TREE_FILTER_MATCH_LIMIT_3CHAR = 3_000
+TREE_FILTER_MATCH_LIMIT_DEFAULT = 8_000
 
 
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
@@ -226,6 +230,15 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             return max(1, rows - 1)
         return rows
 
+    def tree_filter_match_limit(query: str) -> int:
+        if len(query) <= 1:
+            return TREE_FILTER_MATCH_LIMIT_1CHAR
+        if len(query) == 2:
+            return TREE_FILTER_MATCH_LIMIT_2CHAR
+        if len(query) == 3:
+            return TREE_FILTER_MATCH_LIMIT_3CHAR
+        return TREE_FILTER_MATCH_LIMIT_DEFAULT
+
     def rebuild_tree_entries(
         preferred_path: Path | None = None,
         center_selection: bool = False,
@@ -239,12 +252,13 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
         if state.tree_filter_active and state.tree_filter_query:
             refresh_tree_filter_file_index()
+            match_limit = min(len(state.picker_files), tree_filter_match_limit(state.tree_filter_query))
             matched = fuzzy_match_file_index(
                 state.tree_filter_query,
                 state.picker_files,
                 state.picker_file_labels,
                 state.picker_file_labels_folded,
-                limit=max(1, len(state.picker_files)),
+                limit=max(1, match_limit),
             )
             matched_paths = [path for path, _, _ in matched]
             state.tree_filter_match_count = len(matched_paths)

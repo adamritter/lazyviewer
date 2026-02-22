@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import heapq
 import os
 import shutil
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 from .gitignore import get_gitignore_matcher
@@ -151,23 +153,53 @@ def fuzzy_match_file_index(
     if labels_folded is None:
         labels_folded = [label.casefold() for label in labels]
 
+    max_results = max(1, limit)
     query_folded = query.casefold()
-    substring_scored: list[tuple[int, int, str, Path]] = []
-    for idx, label in enumerate(labels):
-        match_idx = labels_folded[idx].find(query_folded)
-        if match_idx < 0:
-            continue
-        substring_scored.append((match_idx, len(label), label, files[idx]))
+
+    # For very large projects, stay in strict substring mode and keep cache order.
+    # This path exits as soon as we have enough matches.
+    if len(files) >= strict_substring_only_min_files:
+        strict_matches: list[tuple[Path, str, int]] = []
+        for idx, label_folded in enumerate(labels_folded):
+            match_idx = label_folded.find(query_folded)
+            if match_idx < 0:
+                continue
+            label = labels[idx]
+            strict_matches.append((files[idx], label, 10_000 - (match_idx * 50) - len(label)))
+            if len(strict_matches) >= max_results:
+                break
+        return strict_matches
+
+    substring_scored: list[tuple[int, int, str, Path]]
+
+    if max_results >= len(files):
+        substring_scored = []
+        for idx, label in enumerate(labels):
+            match_idx = labels_folded[idx].find(query_folded)
+            if match_idx < 0:
+                continue
+            substring_scored.append((match_idx, len(label), label, files[idx]))
+    else:
+        def iter_substring_matches() -> Iterator[tuple[int, int, str, Path]]:
+            for idx, label in enumerate(labels):
+                match_idx = labels_folded[idx].find(query_folded)
+                if match_idx < 0:
+                    continue
+                yield (match_idx, len(label), label, files[idx])
+
+        substring_scored = heapq.nsmallest(
+            max_results,
+            iter_substring_matches(),
+            key=lambda item: (item[0], item[1], item[2]),
+        )
 
     if substring_scored:
-        substring_scored.sort(key=lambda item: (item[0], item[1], item[2]))
+        if max_results >= len(files):
+            substring_scored.sort(key=lambda item: (item[0], item[1], item[2]))
         return [
             (path, label, 10_000 - (match_idx * 50) - label_len)
-            for match_idx, label_len, label, path in substring_scored[: max(1, limit)]
+            for match_idx, label_len, label, path in substring_scored[:max_results]
         ]
-
-    if len(files) >= strict_substring_only_min_files:
-        return []
 
     scored: list[tuple[int, int, str, Path]] = []
     for idx, label in enumerate(labels):
@@ -176,7 +208,7 @@ def fuzzy_match_file_index(
             continue
         scored.append((score, len(label), label, files[idx]))
     scored.sort(key=lambda item: (-item[0], item[1], item[2]))
-    return [(path, label, score) for score, _, label, path in scored[: max(1, limit)]]
+    return [(path, label, score) for score, _, label, path in scored[:max_results]]
 
 
 def fuzzy_match_paths(

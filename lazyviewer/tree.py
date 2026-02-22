@@ -75,37 +75,56 @@ def filter_tree_entries_for_files(
     skip_gitignored: bool = False,
 ) -> tuple[list[TreeEntry], set[Path]]:
     root = root.resolve()
-    visible_paths: set[Path] = {root}
+    visible_dirs: set[Path] = {root}
+    visible_files: set[Path] = set()
     forced_expanded: set[Path] = {root}
 
     for raw_path in matched_files:
-        file_path = raw_path.resolve()
-        try:
-            file_path.relative_to(root)
-        except ValueError:
-            continue
+        # matched_files comes from the cached project index and is already absolute.
+        file_path = raw_path if raw_path.is_absolute() else (root / raw_path)
+        if not file_path.is_relative_to(root):
+            file_path = file_path.resolve()
+            if not file_path.is_relative_to(root):
+                continue
 
-        visible_paths.add(file_path)
-        parent = file_path.parent.resolve()
+        visible_files.add(file_path)
+        parent = file_path.parent
         while True:
-            try:
-                parent.relative_to(root)
-            except ValueError:
+            if not parent.is_relative_to(root):
                 break
-            visible_paths.add(parent)
+            visible_dirs.add(parent)
             forced_expanded.add(parent)
             if parent == root or parent.parent == parent:
                 break
-            parent = parent.parent.resolve()
+            parent = parent.parent
 
     render_expanded = set(expanded) | forced_expanded
-    source_entries = build_tree_entries(
-        root,
-        render_expanded,
-        show_hidden,
-        skip_gitignored=skip_gitignored,
-    )
-    filtered_entries = [entry for entry in source_entries if entry.path.resolve() in visible_paths]
+    children_by_parent: dict[Path, list[Path]] = {}
+    for path in visible_dirs | visible_files:
+        if path == root:
+            continue
+        parent = path.parent
+        children_by_parent.setdefault(parent, []).append(path)
+
+    def child_sort_key(path: Path) -> tuple[bool, str]:
+        is_dir = path in visible_dirs
+        return (not is_dir, path.name.lower())
+
+    for parent, children in children_by_parent.items():
+        children.sort(key=child_sort_key)
+
+    filtered_entries: list[TreeEntry] = [TreeEntry(root, 0, True)]
+
+    def walk(directory: Path, depth: int) -> None:
+        for child in children_by_parent.get(directory, []):
+            is_dir = child in visible_dirs
+            filtered_entries.append(TreeEntry(child, depth, is_dir))
+            if is_dir and child in render_expanded:
+                walk(child, depth + 1)
+
+    if root in render_expanded:
+        walk(root, 1)
+
     if not filtered_entries:
         filtered_entries = [TreeEntry(root, 0, True)]
     return filtered_entries, render_expanded

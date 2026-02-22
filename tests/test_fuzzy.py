@@ -165,6 +165,32 @@ class FuzzyBehaviorTests(unittest.TestCase):
 
         self.assertEqual(matches, [])
 
+    def test_fuzzy_match_file_index_strict_mode_uses_cache_order_and_limit(self) -> None:
+        files = [
+            Path("/tmp/docs/a-first.md"),
+            Path("/tmp/src/a-second.py"),
+            Path("/tmp/src/a-third.txt"),
+        ]
+        labels = [
+            "docs/a-first.md",
+            "src/a-second.py",
+            "src/a-third.txt",
+        ]
+        labels_folded = [label.casefold() for label in labels]
+
+        matches = fuzzy_match_file_index(
+            "a",
+            files,
+            labels,
+            labels_folded=labels_folded,
+            limit=2,
+            strict_substring_only_min_files=1,  # force strict mode for this test
+        )
+
+        self.assertEqual(len(matches), 2)
+        self.assertEqual(matches[0][1], "docs/a-first.md")
+        self.assertEqual(matches[1][1], "src/a-second.py")
+
     def test_collect_project_files_prefers_rg_and_uses_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
