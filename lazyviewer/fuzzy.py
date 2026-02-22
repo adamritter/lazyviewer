@@ -8,6 +8,7 @@ from pathlib import Path
 from .gitignore import get_gitignore_matcher
 
 _PROJECT_FILES_CACHE: dict[tuple[Path, bool, bool], list[Path]] = {}
+STRICT_SUBSTRING_ONLY_MIN_FILES = 1_000
 
 
 def clear_project_files_cache() -> None:
@@ -133,32 +134,56 @@ def substring_index(query: str, candidate: str) -> int | None:
     return idx
 
 
-def fuzzy_match_paths(
-    query: str, files: list[Path], root: Path, limit: int = 200
+def fuzzy_match_file_index(
+    query: str,
+    files: list[Path],
+    labels: list[str],
+    labels_folded: list[str] | None = None,
+    limit: int = 200,
+    strict_substring_only_min_files: int = STRICT_SUBSTRING_ONLY_MIN_FILES,
 ) -> list[tuple[Path, str, int]]:
+    if len(files) != len(labels):
+        raise ValueError("files and labels must have the same length")
+
+    if labels_folded is not None and len(labels_folded) != len(labels):
+        raise ValueError("labels_folded must have the same length as labels")
+
+    if labels_folded is None:
+        labels_folded = [label.casefold() for label in labels]
+
+    query_folded = query.casefold()
     substring_scored: list[tuple[int, int, str, Path]] = []
-    for path in files:
-        label = to_project_relative(path, root)
-        idx = substring_index(query, label)
-        if idx is None:
+    for idx, label in enumerate(labels):
+        match_idx = labels_folded[idx].find(query_folded)
+        if match_idx < 0:
             continue
-        substring_scored.append((idx, len(label), label, path))
+        substring_scored.append((match_idx, len(label), label, files[idx]))
+
     if substring_scored:
         substring_scored.sort(key=lambda item: (item[0], item[1], item[2]))
         return [
-            (path, label, 10_000 - (idx * 50) - label_len)
-            for idx, label_len, label, path in substring_scored[: max(1, limit)]
+            (path, label, 10_000 - (match_idx * 50) - label_len)
+            for match_idx, label_len, label, path in substring_scored[: max(1, limit)]
         ]
 
+    if len(files) >= strict_substring_only_min_files:
+        return []
+
     scored: list[tuple[int, int, str, Path]] = []
-    for path in files:
-        label = to_project_relative(path, root)
+    for idx, label in enumerate(labels):
         score = fuzzy_score(query, label)
         if score is None:
             continue
-        scored.append((score, len(label), label, path))
+        scored.append((score, len(label), label, files[idx]))
     scored.sort(key=lambda item: (-item[0], item[1], item[2]))
     return [(path, label, score) for score, _, label, path in scored[: max(1, limit)]]
+
+
+def fuzzy_match_paths(
+    query: str, files: list[Path], root: Path, limit: int = 200
+) -> list[tuple[Path, str, int]]:
+    labels = [to_project_relative(path, root) for path in files]
+    return fuzzy_match_file_index(query, files, labels, limit=limit)
 
 
 def fuzzy_match_labels(query: str, labels: list[str], limit: int = 200) -> list[tuple[int, str, int]]:

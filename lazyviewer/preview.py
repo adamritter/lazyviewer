@@ -6,14 +6,15 @@ import os
 import sys
 from pathlib import Path
 
-from .highlight import colorize_source, read_text
+from .gitignore import get_gitignore_matcher
+from .highlight import colorize_source, read_text, sanitize_terminal_text
 
 DIR_PREVIEW_DEFAULT_DEPTH = 3
 DIR_PREVIEW_INITIAL_MAX_ENTRIES = 400
 DIR_PREVIEW_GROWTH_STEP = 400
 DIR_PREVIEW_HARD_MAX_ENTRIES = 20_000
 DIR_PREVIEW_CACHE_MAX = 128
-_DIR_PREVIEW_CACHE: OrderedDict[tuple[str, bool, int, int, int], tuple[str, bool]] = OrderedDict()
+_DIR_PREVIEW_CACHE: OrderedDict[tuple[str, bool, int, int, bool, int], tuple[str, bool]] = OrderedDict()
 
 
 @dataclass(frozen=True)
@@ -23,16 +24,22 @@ class RenderedPath:
     truncated: bool
 
 
-def _cache_key_for_directory(root_dir: Path, show_hidden: bool, max_depth: int, max_entries: int) -> tuple[str, bool, int, int, int] | None:
+def _cache_key_for_directory(
+    root_dir: Path,
+    show_hidden: bool,
+    max_depth: int,
+    max_entries: int,
+    skip_gitignored: bool,
+) -> tuple[str, bool, int, int, bool, int] | None:
     try:
         resolved = root_dir.resolve()
         mtime_ns = resolved.stat().st_mtime_ns
     except Exception:
         return None
-    return (str(resolved), show_hidden, max_depth, max_entries, int(mtime_ns))
+    return (str(resolved), show_hidden, max_depth, max_entries, skip_gitignored, int(mtime_ns))
 
 
-def _cache_get(key: tuple[str, bool, int, int, int] | None) -> tuple[str, bool] | None:
+def _cache_get(key: tuple[str, bool, int, int, bool, int] | None) -> tuple[str, bool] | None:
     if key is None:
         return None
     cached = _DIR_PREVIEW_CACHE.get(key)
@@ -42,7 +49,7 @@ def _cache_get(key: tuple[str, bool, int, int, int] | None) -> tuple[str, bool] 
     return cached
 
 
-def _cache_put(key: tuple[str, bool, int, int, int] | None, preview: str, truncated: bool) -> None:
+def _cache_put(key: tuple[str, bool, int, int, bool, int] | None, preview: str, truncated: bool) -> None:
     if key is None:
         return
     _DIR_PREVIEW_CACHE[key] = (preview, truncated)
@@ -56,11 +63,13 @@ def build_directory_preview(
     show_hidden: bool,
     max_depth: int = DIR_PREVIEW_DEFAULT_DEPTH,
     max_entries: int = DIR_PREVIEW_INITIAL_MAX_ENTRIES,
+    skip_gitignored: bool = False,
 ) -> tuple[str, bool]:
-    cache_key = _cache_key_for_directory(root_dir, show_hidden, max_depth, max_entries)
+    cache_key = _cache_key_for_directory(root_dir, show_hidden, max_depth, max_entries, skip_gitignored)
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
+    ignore_matcher = get_gitignore_matcher(root_dir) if skip_gitignored else None
 
     dir_color = "\033[1;34m"
     file_color = "\033[38;5;252m"
@@ -83,11 +92,14 @@ def build_directory_preview(
                     name = child.name
                     if not show_hidden and name.startswith("."):
                         continue
+                    child_path = Path(child.path)
+                    if ignore_matcher is not None and ignore_matcher.is_ignored(child_path):
+                        continue
                     try:
                         is_dir = child.is_dir(follow_symlinks=False)
                     except OSError:
                         is_dir = False
-                    children.append((name, Path(child.path), is_dir))
+                    children.append((name, child_path, is_dir))
         except (PermissionError, OSError) as exc:
             return [], exc
 
@@ -135,6 +147,7 @@ def build_rendered_for_path(
     no_color: bool,
     dir_max_depth: int = DIR_PREVIEW_DEFAULT_DEPTH,
     dir_max_entries: int = DIR_PREVIEW_INITIAL_MAX_ENTRIES,
+    dir_skip_gitignored: bool = False,
 ) -> RenderedPath:
     if target.is_dir():
         preview, truncated = build_directory_preview(
@@ -142,6 +155,7 @@ def build_rendered_for_path(
             show_hidden,
             max_depth=dir_max_depth,
             max_entries=dir_max_entries,
+            skip_gitignored=dir_skip_gitignored,
         )
         return RenderedPath(text=preview, is_directory=True, truncated=truncated)
     try:
@@ -152,6 +166,7 @@ def build_rendered_for_path(
             is_directory=False,
             truncated=False,
         )
+    source = sanitize_terminal_text(source)
     if no_color:
         return RenderedPath(text=source, is_directory=False, truncated=False)
     if os.isatty(sys.stdout.fileno()):

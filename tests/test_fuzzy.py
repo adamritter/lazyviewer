@@ -6,9 +6,11 @@ from unittest import mock
 from pathlib import Path
 
 from lazyviewer.fuzzy import (
+    STRICT_SUBSTRING_ONLY_MIN_FILES,
     clear_project_files_cache,
     collect_project_files,
     fuzzy_match_labels,
+    fuzzy_match_file_index,
     fuzzy_match_paths,
     fuzzy_score,
     to_project_relative,
@@ -129,6 +131,39 @@ class FuzzyBehaviorTests(unittest.TestCase):
         idx, label, _score = matches[0]
         self.assertEqual(idx, 0)
         self.assertEqual(label, "BetaThing")
+
+    def test_fuzzy_match_file_index_uses_fuzzy_below_threshold(self) -> None:
+        files = [Path("/tmp/alpha.py"), Path("/tmp/other.txt")]
+        labels = ["alpha.py", "other.txt"]
+        labels_folded = [label.casefold() for label in labels]
+
+        matches = fuzzy_match_file_index(
+            "alh",  # no substring match, fuzzy should still match alpha
+            files,
+            labels,
+            labels_folded=labels_folded,
+            limit=10,
+            strict_substring_only_min_files=STRICT_SUBSTRING_ONLY_MIN_FILES,
+        )
+
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0][1], "alpha.py")
+
+    def test_fuzzy_match_file_index_skips_fuzzy_at_large_scale(self) -> None:
+        files = [Path("/tmp/alpha.py"), Path("/tmp/other.txt")]
+        labels = ["alpha.py", "other.txt"]
+        labels_folded = [label.casefold() for label in labels]
+
+        matches = fuzzy_match_file_index(
+            "alh",  # would be fuzzy-only
+            files,
+            labels,
+            labels_folded=labels_folded,
+            limit=10,
+            strict_substring_only_min_files=1,  # force strict mode for this test
+        )
+
+        self.assertEqual(matches, [])
 
     def test_collect_project_files_prefers_rg_and_uses_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

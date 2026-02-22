@@ -14,7 +14,7 @@ from .config import (
     save_show_hidden,
 )
 from .editor import launch_editor
-from .fuzzy import collect_project_files, fuzzy_match_labels, fuzzy_match_paths
+from .fuzzy import collect_project_files, fuzzy_match_file_index, fuzzy_match_labels, to_project_relative
 from .highlight import colorize_source
 from .input import read_key
 from .preview import (
@@ -54,7 +54,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     expanded: set[Path] = {tree_root.resolve()}
     show_hidden = load_show_hidden()
 
-    tree_entries = build_tree_entries(tree_root, expanded, show_hidden)
+    tree_entries = build_tree_entries(tree_root, expanded, show_hidden, skip_gitignored=show_hidden)
     selected_path = current_path if current_path.exists() else tree_root
     selected_idx = 0
     for idx, entry in enumerate(tree_entries):
@@ -77,6 +77,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         style,
         no_color,
         dir_max_entries=DIR_PREVIEW_INITIAL_MAX_ENTRIES,
+        dir_skip_gitignored=show_hidden,
     )
     rendered = initial_render.text
     lines = build_screen_lines(rendered, right_width, wrap=False)
@@ -158,6 +159,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             style,
             no_color,
             dir_max_entries=dir_limit,
+            dir_skip_gitignored=state.show_hidden,
         )
         state.rendered = rendered_for_path.text
         rebuild_screen_lines(preserve_scroll=not reset_scroll)
@@ -201,7 +203,9 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         root = state.tree_root.resolve()
         if state.picker_files_root == root and state.picker_files_show_hidden == state.show_hidden:
             return
-        state.picker_files = collect_project_files(root, state.show_hidden)
+        state.picker_files = collect_project_files(root, state.show_hidden, skip_gitignored=state.show_hidden)
+        state.picker_file_labels = [to_project_relative(path, root) for path in state.picker_files]
+        state.picker_file_labels_folded = [label.casefold() for label in state.picker_file_labels]
         state.picker_files_root = root
         state.picker_files_show_hidden = state.show_hidden
 
@@ -235,10 +239,11 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
         if state.tree_filter_active and state.tree_filter_query:
             refresh_tree_filter_file_index()
-            matched = fuzzy_match_paths(
+            matched = fuzzy_match_file_index(
                 state.tree_filter_query,
                 state.picker_files,
-                state.tree_root,
+                state.picker_file_labels,
+                state.picker_file_labels_folded,
                 limit=max(1, len(state.picker_files)),
             )
             matched_paths = [path for path, _, _ in matched]
@@ -248,11 +253,17 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 state.expanded,
                 state.show_hidden,
                 matched_paths,
+                skip_gitignored=state.show_hidden,
             )
         else:
             state.tree_filter_match_count = 0
             state.tree_render_expanded = set(state.expanded)
-            state.tree_entries = build_tree_entries(state.tree_root, state.expanded, state.show_hidden)
+            state.tree_entries = build_tree_entries(
+                state.tree_root,
+                state.expanded,
+                state.show_hidden,
+                skip_gitignored=state.show_hidden,
+            )
 
         if force_first_file:
             first_file_idx = next_file_entry_index(state.tree_entries, -1, 1)

@@ -92,6 +92,23 @@ class PreviewBehaviorTests(unittest.TestCase):
             self.assertFalse(rendered.truncated)
             self.assertEqual(rendered.text, "print('ok')\n")
 
+    def test_build_rendered_for_path_escapes_terminal_bell_and_escape_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            file_path = Path(tmp) / "binary-ish.bin"
+            # Include BEL and ESC to ensure terminal side effects are neutralized.
+            file_path.write_bytes(b"ok\x07beep\x1b[31mred\n")
+
+            rendered = preview.build_rendered_for_path(
+                file_path,
+                show_hidden=False,
+                style="monokai",
+                no_color=True,
+            )
+
+            self.assertIn("ok\\x07beep\\x1b[31mred\n", rendered.text)
+            self.assertNotIn("\x07", rendered.text)
+            self.assertNotIn("\x1b", rendered.text)
+
     def test_build_rendered_for_path_directory_reports_truncation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

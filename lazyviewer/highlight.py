@@ -12,6 +12,22 @@ def read_text(path: Path) -> str:
     return path.read_bytes().decode("utf-8", errors="replace")
 
 
+def sanitize_terminal_text(source: str) -> str:
+    """Escape terminal control bytes to avoid side effects (bell, cursor moves, etc.)."""
+    out: list[str] = []
+    for ch in source:
+        code = ord(ch)
+        if ch in {"\n", "\r", "\t"}:
+            out.append(ch)
+            continue
+        # C0 controls + DEL + C1 controls.
+        if code < 32 or code == 127 or 0x80 <= code <= 0x9F:
+            out.append(f"\\x{code:02x}")
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
 def fallback_highlight(source: str) -> str:
     try:
         import io

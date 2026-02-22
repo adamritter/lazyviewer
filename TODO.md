@@ -1,5 +1,4 @@
 
-  1. Ctrl+P fuzzy file jump across project.
   2. / live in-file search with n/N.
   3. Symbol outline (s) using Tree-sitter (functions/classes/imports), jump on Enter.
   4. Back/forward nav stack (Alt-Left/Alt-Right).

@@ -250,7 +250,7 @@ def render_help_page(width: int, height: int) -> None:
     inner_w = max(1, modal_w - 2)
     inner_h = max(1, modal_h - 2)
 
-    title = "\033[1;38;5;45mqbrowser help\033[0m"
+    title = "\033[1;38;5;45mlazyviewer help\033[0m"
     lines = [
         "",
         "\033[1;38;5;81mGeneral\033[0m",
@@ -299,7 +299,7 @@ def render_help_page(width: int, height: int) -> None:
     out.append("╯\033[0m")
 
     # Title
-    title_x = x + max(2, (modal_w - 2 - len("qbrowser help")) // 2)
+    title_x = x + max(2, (modal_w - 2 - len("lazyviewer help")) // 2)
     out.append(f"\033[{y + 1};{title_x + 1}H")
     out.append(title)
 
