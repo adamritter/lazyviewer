@@ -165,6 +165,40 @@ class TreeFilterBehaviorTests(unittest.TestCase):
             self.assertIn((root / "src").resolve(), render_expanded)
             self.assertIn((root / "src" / "pkg").resolve(), render_expanded)
 
+    def test_large_pipeline_limits_projection_size(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            files = []
+            for idx in range(10_000):
+                bucket = idx % 25
+                files.append(root / "src" / f"pkg{bucket:02d}" / f"{idx:05d}_alpha.py")
+
+            files = sorted(files, key=lambda p: to_project_relative(p, root).casefold())
+            labels = [to_project_relative(path, root) for path in files]
+            labels_folded = [label.casefold() for label in labels]
+
+            matches = fuzzy_match_file_index(
+                "a",
+                files,
+                labels,
+                labels_folded=labels_folded,
+                limit=300,
+                strict_substring_only_min_files=1,  # force strict mode
+            )
+            matched_paths = [path for path, _, _ in matches]
+            entries, _render_expanded = filter_tree_entries_for_files(
+                root=root,
+                expanded={root},
+                show_hidden=False,
+                matched_files=matched_paths,
+            )
+
+            self.assertEqual(len(matches), 300)
+            # root + src + up to 25 package dirs + 300 files
+            self.assertLessEqual(len(entries), 327)
+            self.assertEqual(entries[0].path.resolve(), root)
+            self.assertTrue(all(entry.path.is_relative_to(root) for entry in entries))
+
 
 if __name__ == "__main__":
     unittest.main()

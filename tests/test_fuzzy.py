@@ -191,6 +191,37 @@ class FuzzyBehaviorTests(unittest.TestCase):
         self.assertEqual(matches[0][1], "docs/a-first.md")
         self.assertEqual(matches[1][1], "src/a-second.py")
 
+    def test_fuzzy_match_file_index_strict_mode_stops_after_limit(self) -> None:
+        class CountingList(list[str]):
+            def __init__(self, values: list[str]) -> None:
+                super().__init__(values)
+                self.iterations = 0
+
+            def __iter__(self):
+                for value in super().__iter__():
+                    self.iterations += 1
+                    yield value
+
+        total = 20_000
+        limit = 300
+        files = [Path(f"/tmp/src/{idx:05d}_alpha.py") for idx in range(total)]
+        labels = [f"src/{idx:05d}_alpha.py" for idx in range(total)]
+        labels_folded = CountingList([label.casefold() for label in labels])
+
+        matches = fuzzy_match_file_index(
+            "a",
+            files,
+            labels,
+            labels_folded=labels_folded,
+            limit=limit,
+            strict_substring_only_min_files=1,  # force strict mode
+        )
+
+        self.assertEqual(len(matches), limit)
+        self.assertEqual(labels_folded.iterations, limit)
+        self.assertEqual(matches[0][1], "src/00000_alpha.py")
+        self.assertEqual(matches[-1][1], "src/00299_alpha.py")
+
     def test_collect_project_files_prefers_rg_and_uses_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
