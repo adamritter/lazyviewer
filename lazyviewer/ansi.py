@@ -74,10 +74,16 @@ def slice_ansi_line(text: str, start_cols: int, max_cols: int) -> str:
             match = ANSI_ESCAPE_RE.match(text, i)
             if match:
                 seq = match.group(0)
-                if seq.endswith("m"):
+                is_sgr = seq.endswith("m")
+                if is_sgr:
                     pending_sgr = seq
                 if col >= start_cols:
+                    if not injected_style and pending_sgr and not is_sgr:
+                        out.append(pending_sgr)
+                        injected_style = True
                     out.append(seq)
+                    if is_sgr:
+                        injected_style = True
                 i = match.end()
                 continue
         ch = text[i]
