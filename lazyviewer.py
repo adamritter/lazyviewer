@@ -9,6 +9,8 @@ import json
 import os
 import re
 import select
+import shlex
+import subprocess
 import sys
 import shutil
 import termios
@@ -18,7 +20,7 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
-CONFIG_PATH = Path.home() / ".config" / "self_highlight.json"
+CONFIG_PATH = Path.home() / ".config" / "lazyviewer.json"
 DOUBLE_CLICK_SECONDS = 0.35
 
 
@@ -120,11 +122,24 @@ def clamp_left_width(total_width: int, desired_left: int) -> int:
     return max(min_left, min(desired_left, max_left))
 
 
-def load_left_pane_percent() -> float | None:
+def load_config() -> dict[str, object]:
     try:
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except Exception:
-        return None
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_config(data: dict[str, object]) -> None:
+    try:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_PATH.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def load_left_pane_percent() -> float | None:
+    data = load_config()
     value = data.get("left_pane_percent")
     if not isinstance(value, (int, float)):
         return None
@@ -137,26 +152,34 @@ def save_left_pane_percent(total_width: int, left_width: int) -> None:
     if total_width <= 0:
         return
     percent = max(1.0, min(99.0, (left_width / total_width) * 100.0))
-    payload = {"left_pane_percent": round(percent, 2)}
-    try:
-        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CONFIG_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    except Exception:
-        pass
+    config = load_config()
+    config["left_pane_percent"] = round(percent, 2)
+    save_config(config)
 
 
-def build_tree_entries(root: Path, expanded: set[Path]) -> list[TreeEntry]:
+def load_show_hidden() -> bool:
+    value = load_config().get("show_hidden")
+    return bool(value) if isinstance(value, bool) else False
+
+
+def save_show_hidden(show_hidden: bool) -> None:
+    config = load_config()
+    config["show_hidden"] = bool(show_hidden)
+    save_config(config)
+
+
+def build_tree_entries(root: Path, expanded: set[Path], show_hidden: bool) -> list[TreeEntry]:
     root = root.resolve()
     entries: list[TreeEntry] = [TreeEntry(root, 0, True)]
 
     def walk(directory: Path, depth: int) -> None:
         try:
-            children = sorted(
-                directory.iterdir(),
-                key=lambda p: (not p.is_dir(), p.name.lower()),
-            )
+            children = list(directory.iterdir())
         except (PermissionError, OSError):
             return
+        if not show_hidden:
+            children = [p for p in children if not p.name.startswith(".")]
+        children = sorted(children, key=lambda p: (not p.is_dir(), p.name.lower()))
         for child in children:
             is_dir = child.is_dir()
             entries.append(TreeEntry(child, depth, is_dir))
@@ -202,6 +225,7 @@ def render_dual_page(
     left_width: int,
     text_x: int,
     browser_visible: bool,
+    show_hidden: bool,
 ) -> None:
     out = []
     out.append("\033[H\033[J")
@@ -221,7 +245,8 @@ def render_dual_page(
             out.append("\r\n")
         status = (
             f" {current_path} ({text_start + 1}-{text_end}/{len(text_lines)} {text_percent:5.1f}%) "
-            f"[t tree] [Text: ENTER/j/k, d/u, f/Space down, B page up, g/G, 10G, h/l x:{text_x}] [? help] [q/esc quit] "
+            f"[t tree] [. hidden:{'on' if show_hidden else 'off'}] "
+            f"[Text: ENTER/↑/↓ or j/k, ←/→ or h/l x:{text_x}, d/u, f/Space down, B page up, g/G, 10G, e edit] [? help] [q/esc quit] "
         )
         status = (status[:width - 1] if width > 1 else "") or " "
         status = status.ljust(max(1, width - 1))
@@ -270,9 +295,10 @@ def render_dual_page(
 
     status = (
         f" {current_path} ({text_start + 1}-{text_end}/{len(text_lines)} {text_percent:5.1f}%) "
-        f"[t tree] [Tree: arrows (up/down/left/right)] "
+        f"[t tree] [Tree: h/j/k/l, ENTER toggle] "
+        f"[. hidden:{'on' if show_hidden else 'off'}] "
         f"[Resize: Shift+left/right] "
-        f"[Text: ENTER/j/k, d/u, f/Space down, B page up, g/G, 10G, h/l x:{text_x}] [? help] [q/esc quit] "
+        f"[Text: ENTER/↑/↓, ←/→ x:{text_x}, d/u, f/Space down, B page up, g/G, 10G, e edit] [? help] [q/esc quit] "
     )
     status = (status[:width - 1] if width > 1 else "") or " "
     status = status.ljust(max(1, width - 1))
@@ -300,16 +326,19 @@ def render_help_page(width: int, height: int) -> None:
         "\033[1;38;5;81mGeneral\033[0m",
         "  \033[38;5;229m?\033[0m toggle help   \033[38;5;229mq\033[0m/\033[38;5;229mEsc\033[0m close help",
         "  \033[38;5;229mt\033[0m show/hide tree pane",
+        "  \033[38;5;229m.\033[0m show/hide hidden files and directories",
         "  \033[38;5;229mCtrl+U\033[0m tree root -> parent directory",
         "",
         "\033[1;38;5;81mTree pane\033[0m",
-        "  arrows move/select   right open/expand   left collapse/parent",
+        "  h/j/k/l move/select   l open/expand   h collapse/parent",
+        "  Enter toggles selected directory",
         "  mouse wheel scrolls tree (when pointer is on left pane)",
         "  click select + preview   double-click toggle dir/open file",
         "",
         "\033[1;38;5;81mSource pane\033[0m",
-        "  \033[38;5;229mj/k\033[0m line   \033[38;5;229md/u\033[0m half-page   \033[38;5;229mf/b\033[0m page   \033[38;5;229mg/G\033[0m top/bottom   \033[38;5;229m10G\033[0m goto",
-        "  \033[38;5;229mh/l\033[0m horizontal scroll   mouse wheel scrolls source",
+        "  \033[38;5;229mUp/Down\033[0m line   \033[38;5;229md/u\033[0m half-page   \033[38;5;229mf/B\033[0m page   \033[38;5;229mg/G\033[0m top/bottom   \033[38;5;229m10G\033[0m goto",
+        "  \033[38;5;229mLeft/Right\033[0m horizontal scroll   \033[38;5;229me\033[0m edit in $EDITOR",
+        "  mouse wheel scrolls source",
         "",
         "\033[1;38;5;81mLayout\033[0m",
         "  \033[38;5;229mShift+Left/Right\033[0m resize tree pane",
@@ -602,6 +631,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     current_path = initial_path
     tree_root = initial_path if initial_path.is_dir() else initial_path.parent
     expanded: set[Path] = {tree_root.resolve()}
+    show_hidden = load_show_hidden()
 
     def build_directory_preview(root_dir: Path, max_depth: int = 4, max_entries: int = 1200) -> str:
         dir_color = "\033[1;34m"
@@ -618,13 +648,13 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             if depth > max_depth or emitted >= max_entries:
                 return
             try:
-                children = sorted(
-                    directory.iterdir(),
-                    key=lambda p: (not p.is_dir(), p.name.lower()),
-                )
+                children = list(directory.iterdir())
             except (PermissionError, OSError) as exc:
                 lines_out.append(f"{branch_color}{prefix}└─{reset} {note_color}<error: {exc}>{reset}")
                 return
+            if not show_hidden:
+                children = [p for p in children if not p.name.startswith(".")]
+            children = sorted(children, key=lambda p: (not p.is_dir(), p.name.lower()))
             for idx, child in enumerate(children):
                 if emitted >= max_entries:
                     break
@@ -658,13 +688,13 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             return pygments_highlight(source, target, style) or fallback_highlight(source)
         return source
 
-    def preview_selected_entry() -> None:
+    def preview_selected_entry(force: bool = False) -> None:
         nonlocal current_path, rendered, lines, max_start, start, text_x
         if not tree_entries:
             return
         entry = tree_entries[selected_idx]
         selected_target = entry.path.resolve()
-        if selected_target == current_path:
+        if not force and selected_target == current_path:
             return
         current_path = selected_target
         rendered = build_rendered_for_path(current_path)
@@ -673,7 +703,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         start = 0
         text_x = 0
 
-    tree_entries = build_tree_entries(tree_root, expanded)
+    tree_entries = build_tree_entries(tree_root, expanded, show_hidden)
     selected_path = current_path if current_path.exists() else tree_root
     selected_idx = 0
     for idx, entry in enumerate(tree_entries):
@@ -697,19 +727,42 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     tree_start = 0
     text_x = 0
     browser_visible = True
+    stdin_fd = sys.stdin.fileno()
+    stdout_fd = sys.stdout.fileno()
+    saved_tty_state = termios.tcgetattr(stdin_fd)
+
+    def enable_tui_mode() -> None:
+        tty.setraw(stdin_fd, termios.TCSAFLUSH)
+        # Enable mouse wheel reporting (xterm compatible) and hide cursor.
+        os.write(stdout_fd, b"\x1b[?25l\x1b[?1000h\x1b[?1006h")
+
+    def disable_tui_mode() -> None:
+        os.write(stdout_fd, b"\x1b[?1000l\x1b[?1006l\x1b[?25h")
+        termios.tcsetattr(stdin_fd, termios.TCSAFLUSH, saved_tty_state)
+
+    def launch_editor(target: Path) -> str | None:
+        editor_env = os.environ.get("EDITOR", "").strip()
+        if not editor_env:
+            return "Cannot edit: $EDITOR is not set."
+        cmd = shlex.split(editor_env)
+        if not cmd:
+            return "Cannot edit: $EDITOR is empty."
+        disable_tui_mode()
+        try:
+            subprocess.run([*cmd, str(target)], check=False)
+        except Exception as exc:
+            return f"Failed to launch editor: {exc}"
+        finally:
+            enable_tui_mode()
+        return None
 
     @contextlib.contextmanager
     def raw_mode() -> object:
-        fd = sys.stdin.fileno()
-        prev = termios.tcgetattr(fd)
         try:
-            tty.setraw(fd, termios.TCSAFLUSH)
-            # Enable mouse wheel reporting (xterm compatible).
-            os.write(sys.stdout.fileno(), b"\x1b[?25l\x1b[?1000h\x1b[?1006h")
+            enable_tui_mode()
             yield
         finally:
-            os.write(sys.stdout.fileno(), b"\x1b[?1000l\x1b[?1006l\x1b[?25h")
-            termios.tcsetattr(fd, termios.TCSAFLUSH, prev)
+            disable_tui_mode()
 
     with raw_mode():
         skip_next_lf = False
@@ -757,6 +810,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                         left_width,
                         text_x,
                         browser_visible,
+                        show_hidden,
                     )
                 dirty = False
 
@@ -797,7 +851,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 if parent_root != old_root:
                     tree_root = parent_root
                     expanded = {tree_root, old_root}
-                    tree_entries = build_tree_entries(tree_root, expanded)
+                    tree_entries = build_tree_entries(tree_root, expanded, show_hidden)
                     selected_idx = 0
                     for idx, entry in enumerate(tree_entries):
                         if entry.path.resolve() == old_root:
@@ -806,8 +860,50 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     tree_start = max(0, selected_idx - max(1, usable // 2))
                     dirty = True
                 continue
+            if key == ".":
+                show_hidden = not show_hidden
+                save_show_hidden(show_hidden)
+                selected_path = tree_entries[selected_idx].path.resolve() if tree_entries else tree_root
+                tree_entries = build_tree_entries(tree_root, expanded, show_hidden)
+                selected_idx = 0
+                for idx, entry in enumerate(tree_entries):
+                    if entry.path.resolve() == selected_path:
+                        selected_idx = idx
+                        break
+                preview_selected_entry(force=True)
+                dirty = True
+                continue
             if key.lower() == "t":
                 browser_visible = not browser_visible
+                dirty = True
+                continue
+            if key.lower() == "e":
+                edit_target: Path | None = None
+                if browser_visible and tree_entries:
+                    selected_entry = tree_entries[selected_idx]
+                    if not selected_entry.is_dir and selected_entry.path.is_file():
+                        edit_target = selected_entry.path.resolve()
+                if edit_target is None and current_path.is_file():
+                    edit_target = current_path.resolve()
+                if edit_target is None:
+                    rendered = "\033[31m<cannot edit a directory>\033[0m"
+                    lines = build_screen_lines(rendered, right_width)
+                    max_start = max(0, len(lines) - usable)
+                    start = 0
+                    text_x = 0
+                    dirty = True
+                    continue
+
+                error = launch_editor(edit_target)
+                current_path = edit_target
+                if error is None:
+                    rendered = build_rendered_for_path(current_path)
+                else:
+                    rendered = f"\033[31m{error}\033[0m"
+                lines = build_screen_lines(rendered, right_width)
+                max_start = max(0, len(lines) - usable)
+                start = 0
+                text_x = 0
                 dirty = True
                 continue
             if key.lower() == "q" or key == "\x03":
@@ -863,7 +959,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                                         expanded.remove(resolved)
                                     else:
                                         expanded.add(resolved)
-                                    tree_entries = build_tree_entries(tree_root, expanded)
+                                    tree_entries = build_tree_entries(tree_root, expanded, show_hidden)
                                     selected_idx = min(selected_idx, len(tree_entries) - 1)
                                     dirty = True
                                 else:
@@ -902,27 +998,27 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     dirty = True
                 continue
 
-            if browser_visible and key == "DOWN":
+            if browser_visible and key.lower() == "j":
                 prev_selected = selected_idx
                 selected_idx = min(len(tree_entries) - 1, selected_idx + 1)
                 preview_selected_entry()
                 if selected_idx != prev_selected:
                     dirty = True
                 continue
-            if browser_visible and key == "UP":
+            if browser_visible and key.lower() == "k":
                 prev_selected = selected_idx
                 selected_idx = max(0, selected_idx - 1)
                 preview_selected_entry()
                 if selected_idx != prev_selected:
                     dirty = True
                 continue
-            if browser_visible and key == "RIGHT":
+            if browser_visible and key.lower() == "l":
                 entry = tree_entries[selected_idx]
                 if entry.is_dir:
                     resolved = entry.path.resolve()
                     if resolved not in expanded:
                         expanded.add(resolved)
-                        tree_entries = build_tree_entries(tree_root, expanded)
+                        tree_entries = build_tree_entries(tree_root, expanded, show_hidden)
                         selected_idx = min(selected_idx, len(tree_entries) - 1)
                         preview_selected_entry()
                         dirty = True
@@ -941,11 +1037,11 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     text_x = 0
                     dirty = True
                 continue
-            if browser_visible and key == "LEFT":
+            if browser_visible and key.lower() == "h":
                 entry = tree_entries[selected_idx]
                 if entry.is_dir and entry.path.resolve() in expanded and entry.path.resolve() != tree_root:
                     expanded.remove(entry.path.resolve())
-                    tree_entries = build_tree_entries(tree_root, expanded)
+                    tree_entries = build_tree_entries(tree_root, expanded, show_hidden)
                     selected_idx = min(selected_idx, len(tree_entries) - 1)
                     preview_selected_entry()
                     dirty = True
@@ -967,7 +1063,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                             expanded.remove(resolved)
                     else:
                         expanded.add(resolved)
-                    tree_entries = build_tree_entries(tree_root, expanded)
+                    tree_entries = build_tree_entries(tree_root, expanded, show_hidden)
                     selected_idx = min(selected_idx, len(tree_entries) - 1)
                     preview_selected_entry()
                     dirty = True
@@ -984,9 +1080,9 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             elif key.lower() == "u":
                 mult = count if count is not None else 1
                 start -= max(1, usable // 2) * max(1, mult)
-            elif key.lower() == "j" or key == "DOWN":
+            elif key == "DOWN" or (not browser_visible and key.lower() == "j"):
                 start += count if count is not None else 1
-            elif key.lower() == "k" or key == "UP":
+            elif key == "UP" or (not browser_visible and key.lower() == "k"):
                 start -= count if count is not None else 1
             elif key == "g":
                 if count is None:
@@ -1003,10 +1099,10 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             elif key == "B":
                 pages = count if count is not None else 1
                 start -= usable * max(1, pages)
-            elif key.lower() == "h":
+            elif key == "LEFT" or (not browser_visible and key.lower() == "h"):
                 step = count if count is not None else 4
                 text_x = max(0, text_x - max(1, step))
-            elif key.lower() == "l":
+            elif key == "RIGHT" or (not browser_visible and key.lower() == "l"):
                 step = count if count is not None else 4
                 text_x += max(1, step)
             elif key == "HOME":
