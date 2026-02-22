@@ -48,7 +48,6 @@ class AppState:
     picker_matches: list[Path] = field(default_factory=list)
     picker_match_labels: list[str] = field(default_factory=list)
     picker_match_lines: list[int] = field(default_factory=list)
-    picker_files: list[Path] = field(default_factory=list)
     picker_file_labels: list[str] = field(default_factory=list)
     picker_file_labels_folded: list[str] = field(default_factory=list)
     picker_files_root: Path | None = None

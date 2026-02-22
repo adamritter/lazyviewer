@@ -14,7 +14,12 @@ from .config import (
     save_show_hidden,
 )
 from .editor import launch_editor
-from .fuzzy import collect_project_files, fuzzy_match_file_index, fuzzy_match_labels, to_project_relative
+from .fuzzy import (
+    STRICT_SUBSTRING_ONLY_MIN_FILES,
+    collect_project_file_labels,
+    fuzzy_match_label_index,
+    fuzzy_match_labels,
+)
 from .highlight import colorize_source
 from .input import read_key
 from .preview import (
@@ -207,9 +212,12 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         root = state.tree_root.resolve()
         if state.picker_files_root == root and state.picker_files_show_hidden == state.show_hidden:
             return
-        state.picker_files = collect_project_files(root, state.show_hidden, skip_gitignored=state.show_hidden)
-        state.picker_file_labels = [to_project_relative(path, root) for path in state.picker_files]
-        state.picker_file_labels_folded = [label.casefold() for label in state.picker_file_labels]
+        state.picker_file_labels = collect_project_file_labels(
+            root,
+            state.show_hidden,
+            skip_gitignored=state.show_hidden,
+        )
+        state.picker_file_labels_folded = []
         state.picker_files_root = root
         state.picker_files_show_hidden = state.show_hidden
 
@@ -252,15 +260,20 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
         if state.tree_filter_active and state.tree_filter_query:
             refresh_tree_filter_file_index()
-            match_limit = min(len(state.picker_files), tree_filter_match_limit(state.tree_filter_query))
-            matched = fuzzy_match_file_index(
+            match_limit = min(len(state.picker_file_labels), tree_filter_match_limit(state.tree_filter_query))
+            labels_folded: list[str] | None = None
+            if len(state.picker_file_labels) < STRICT_SUBSTRING_ONLY_MIN_FILES:
+                if len(state.picker_file_labels_folded) != len(state.picker_file_labels):
+                    state.picker_file_labels_folded = [label.casefold() for label in state.picker_file_labels]
+                labels_folded = state.picker_file_labels_folded
+            matched = fuzzy_match_label_index(
                 state.tree_filter_query,
-                state.picker_files,
                 state.picker_file_labels,
-                state.picker_file_labels_folded,
+                labels_folded=labels_folded,
                 limit=max(1, match_limit),
             )
-            matched_paths = [path for path, _, _ in matched]
+            root = state.tree_root.resolve()
+            matched_paths = [root / label for _, label, _ in matched]
             state.tree_filter_match_count = len(matched_paths)
             state.tree_entries, state.tree_render_expanded = filter_tree_entries_for_files(
                 state.tree_root,

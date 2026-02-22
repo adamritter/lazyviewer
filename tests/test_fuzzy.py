@@ -8,7 +8,9 @@ from pathlib import Path
 from lazyviewer.fuzzy import (
     STRICT_SUBSTRING_ONLY_MIN_FILES,
     clear_project_files_cache,
+    collect_project_file_labels,
     collect_project_files,
+    fuzzy_match_label_index,
     fuzzy_match_labels,
     fuzzy_match_file_index,
     fuzzy_match_paths,
@@ -241,6 +243,37 @@ class FuzzyBehaviorTests(unittest.TestCase):
             self.assertEqual(labels, ["a.txt", "src/main.py"])
             self.assertEqual([to_project_relative(path, root) for path in second], labels)
             self.assertEqual(run_mock.call_count, 1)
+
+    def test_collect_project_file_labels_prefers_rg_and_uses_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cp = mock.Mock(stdout="src/main.py\na.txt\n")
+            with mock.patch("lazyviewer.fuzzy.shutil.which", return_value="/usr/bin/rg"), mock.patch(
+                "lazyviewer.fuzzy.subprocess.run",
+                return_value=cp,
+            ) as run_mock:
+                first = collect_project_file_labels(root, show_hidden=False)
+                second = collect_project_file_labels(root, show_hidden=False)
+
+            self.assertEqual(first, ["src/main.py", "a.txt"])
+            self.assertEqual(second, first)
+            self.assertEqual(run_mock.call_count, 1)
+
+    def test_fuzzy_match_label_index_strict_mode_stops_after_limit(self) -> None:
+        labels = [f"src/{idx:05d}_alpha.py" for idx in range(20_000)]
+        labels_folded = [label.casefold() for label in labels]
+
+        matched = fuzzy_match_label_index(
+            "a",
+            labels,
+            labels_folded=labels_folded,
+            limit=300,
+            strict_substring_only_min_files=1,  # force strict mode
+        )
+
+        self.assertEqual(len(matched), 300)
+        self.assertEqual(matched[0][1], "src/00000_alpha.py")
+        self.assertEqual(matched[-1][1], "src/00299_alpha.py")
 
     def test_collect_project_files_falls_back_when_rg_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

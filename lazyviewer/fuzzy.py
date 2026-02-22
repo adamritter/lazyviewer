@@ -10,11 +10,13 @@ from pathlib import Path
 from .gitignore import get_gitignore_matcher
 
 _PROJECT_FILES_CACHE: dict[tuple[Path, bool, bool], list[Path]] = {}
+_PROJECT_FILE_LABELS_CACHE: dict[tuple[Path, bool, bool], list[str]] = {}
 STRICT_SUBSTRING_ONLY_MIN_FILES = 1_000
 
 
 def clear_project_files_cache() -> None:
     _PROJECT_FILES_CACHE.clear()
+    _PROJECT_FILE_LABELS_CACHE.clear()
 
 
 def _collect_project_files_walk(root: Path, show_hidden: bool, skip_gitignored: bool) -> list[Path]:
@@ -75,6 +77,36 @@ def _collect_project_files_rg(root: Path, show_hidden: bool, skip_gitignored: bo
     return files
 
 
+def _collect_project_file_labels_rg(root: Path, show_hidden: bool, skip_gitignored: bool) -> list[str] | None:
+    if shutil.which("rg") is None:
+        return None
+
+    cmd = ["rg", "--files"]
+    if not skip_gitignored:
+        cmd.append("--no-ignore")
+    if show_hidden:
+        cmd.append("--hidden")
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=True,
+        )
+    except Exception:
+        return None
+
+    labels: list[str] = []
+    for raw in proc.stdout.splitlines():
+        if not raw:
+            continue
+        labels.append(raw)
+    return labels
+
+
 def collect_project_files(root: Path, show_hidden: bool, skip_gitignored: bool = False) -> list[Path]:
     root = root.resolve()
     cache_key = (root, show_hidden, skip_gitignored)
@@ -89,6 +121,22 @@ def collect_project_files(root: Path, show_hidden: bool, skip_gitignored: bool =
     files = sorted(files, key=lambda p: to_project_relative(p, root).casefold())
     _PROJECT_FILES_CACHE[cache_key] = files
     return list(files)
+
+
+def collect_project_file_labels(root: Path, show_hidden: bool, skip_gitignored: bool = False) -> list[str]:
+    root = root.resolve()
+    cache_key = (root, show_hidden, skip_gitignored)
+    cached = _PROJECT_FILE_LABELS_CACHE.get(cache_key)
+    if cached is not None:
+        return list(cached)
+
+    labels = _collect_project_file_labels_rg(root, show_hidden, skip_gitignored)
+    if labels is None:
+        files = _collect_project_files_walk(root, show_hidden, skip_gitignored)
+        labels = [to_project_relative(path, root) for path in files]
+
+    _PROJECT_FILE_LABELS_CACHE[cache_key] = labels
+    return list(labels)
 
 
 def to_project_relative(path: Path, root: Path) -> str:
@@ -136,6 +184,86 @@ def substring_index(query: str, candidate: str) -> int | None:
     return idx
 
 
+def fuzzy_match_label_index(
+    query: str,
+    labels: list[str],
+    labels_folded: list[str] | None = None,
+    limit: int = 200,
+    strict_substring_only_min_files: int = STRICT_SUBSTRING_ONLY_MIN_FILES,
+) -> list[tuple[int, str, int]]:
+    if labels_folded is not None and len(labels_folded) != len(labels):
+        raise ValueError("labels_folded must have the same length as labels")
+
+    max_results = max(1, limit)
+    query_folded = query.casefold()
+
+    # For very large projects, stay in strict substring mode and keep cache order.
+    # This path exits as soon as we have enough matches.
+    if len(labels) >= strict_substring_only_min_files:
+        strict_matches: list[tuple[int, str, int]] = []
+        if labels_folded is not None:
+            for idx, label_folded in enumerate(labels_folded):
+                match_idx = label_folded.find(query_folded)
+                if match_idx < 0:
+                    continue
+                label = labels[idx]
+                strict_matches.append((idx, label, 10_000 - (match_idx * 50) - len(label)))
+                if len(strict_matches) >= max_results:
+                    break
+        else:
+            for idx, label in enumerate(labels):
+                match_idx = label.casefold().find(query_folded)
+                if match_idx < 0:
+                    continue
+                strict_matches.append((idx, label, 10_000 - (match_idx * 50) - len(label)))
+                if len(strict_matches) >= max_results:
+                    break
+        return strict_matches
+
+    if labels_folded is None:
+        labels_folded = [label.casefold() for label in labels]
+
+    substring_scored: list[tuple[int, int, str, int]]
+
+    if max_results >= len(labels):
+        substring_scored = []
+        for idx, label in enumerate(labels):
+            match_idx = labels_folded[idx].find(query_folded)
+            if match_idx < 0:
+                continue
+            substring_scored.append((match_idx, len(label), label, idx))
+    else:
+        def iter_substring_matches() -> Iterator[tuple[int, int, str, int]]:
+            for idx, label in enumerate(labels):
+                match_idx = labels_folded[idx].find(query_folded)
+                if match_idx < 0:
+                    continue
+                yield (match_idx, len(label), label, idx)
+
+        substring_scored = heapq.nsmallest(
+            max_results,
+            iter_substring_matches(),
+            key=lambda item: (item[0], item[1], item[2]),
+        )
+
+    if substring_scored:
+        if max_results >= len(labels):
+            substring_scored.sort(key=lambda item: (item[0], item[1], item[2]))
+        return [
+            (idx, label, 10_000 - (match_idx * 50) - label_len)
+            for match_idx, label_len, label, idx in substring_scored[:max_results]
+        ]
+
+    scored: list[tuple[int, int, str, int]] = []
+    for idx, label in enumerate(labels):
+        score = fuzzy_score(query, label)
+        if score is None:
+            continue
+        scored.append((score, len(label), label, idx))
+    scored.sort(key=lambda item: (-item[0], item[1], item[2]))
+    return [(idx, label, score) for score, _, label, idx in scored[:max_results]]
+
+
 def fuzzy_match_file_index(
     query: str,
     files: list[Path],
@@ -147,68 +275,14 @@ def fuzzy_match_file_index(
     if len(files) != len(labels):
         raise ValueError("files and labels must have the same length")
 
-    if labels_folded is not None and len(labels_folded) != len(labels):
-        raise ValueError("labels_folded must have the same length as labels")
-
-    if labels_folded is None:
-        labels_folded = [label.casefold() for label in labels]
-
-    max_results = max(1, limit)
-    query_folded = query.casefold()
-
-    # For very large projects, stay in strict substring mode and keep cache order.
-    # This path exits as soon as we have enough matches.
-    if len(files) >= strict_substring_only_min_files:
-        strict_matches: list[tuple[Path, str, int]] = []
-        for idx, label_folded in enumerate(labels_folded):
-            match_idx = label_folded.find(query_folded)
-            if match_idx < 0:
-                continue
-            label = labels[idx]
-            strict_matches.append((files[idx], label, 10_000 - (match_idx * 50) - len(label)))
-            if len(strict_matches) >= max_results:
-                break
-        return strict_matches
-
-    substring_scored: list[tuple[int, int, str, Path]]
-
-    if max_results >= len(files):
-        substring_scored = []
-        for idx, label in enumerate(labels):
-            match_idx = labels_folded[idx].find(query_folded)
-            if match_idx < 0:
-                continue
-            substring_scored.append((match_idx, len(label), label, files[idx]))
-    else:
-        def iter_substring_matches() -> Iterator[tuple[int, int, str, Path]]:
-            for idx, label in enumerate(labels):
-                match_idx = labels_folded[idx].find(query_folded)
-                if match_idx < 0:
-                    continue
-                yield (match_idx, len(label), label, files[idx])
-
-        substring_scored = heapq.nsmallest(
-            max_results,
-            iter_substring_matches(),
-            key=lambda item: (item[0], item[1], item[2]),
-        )
-
-    if substring_scored:
-        if max_results >= len(files):
-            substring_scored.sort(key=lambda item: (item[0], item[1], item[2]))
-        return [
-            (path, label, 10_000 - (match_idx * 50) - label_len)
-            for match_idx, label_len, label, path in substring_scored[:max_results]
-        ]
-
-    scored: list[tuple[int, int, str, Path]] = []
-    for idx, label in enumerate(labels):
-        score = fuzzy_score(query, label)
-        if score is None:
-            continue
-        scored.append((score, len(label), label, files[idx]))
-    scored.sort(key=lambda item: (-item[0], item[1], item[2]))
-    return [(path, label, score) for score, _, label, path in scored[:max_results]]
+    matched = fuzzy_match_label_index(
+        query,
+        labels,
+        labels_folded=labels_folded,
+        limit=limit,
+        strict_substring_only_min_files=strict_substring_only_min_files,
+    )
+    return [(files[idx], label, score) for idx, label, score in matched]
 
 
 def fuzzy_match_paths(
