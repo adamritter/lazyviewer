@@ -306,7 +306,33 @@ class NavigationPickerOps:
     def toggle_help_panel(self) -> None:
         self.state.show_help = not self.state.show_help
         self.rebuild_screen_lines(columns=self.current_term_columns())
+        self._ensure_selected_content_hit_visible()
         self.state.dirty = True
+
+    def _ensure_selected_content_hit_visible(self) -> None:
+        if not (
+            self.state.tree_filter_active
+            and self.state.tree_filter_mode == "content"
+            and self.state.tree_filter_query
+            and self.state.tree_entries
+            and 0 <= self.state.selected_idx < len(self.state.tree_entries)
+        ):
+            return
+
+        selected_entry = self.state.tree_entries[self.state.selected_idx]
+        if selected_entry.kind != "search_hit" or selected_entry.line is None:
+            return
+
+        visible_rows = max(1, self.visible_content_rows())
+        self.state.max_start = max(0, len(self.state.lines) - visible_rows)
+        max_line_index = max(0, len(self.state.lines) - 1)
+        anchor = max(0, min(selected_entry.line - 1, max_line_index))
+        view_end = self.state.start + visible_rows - 1
+        if self.state.start <= anchor <= view_end:
+            return
+
+        centered = max(0, anchor - max(1, visible_rows // 3))
+        self.state.start = max(0, min(centered, self.state.max_start))
 
     def execute_command_palette_action(self, command_id: str) -> bool:
         if command_id == "filter_files":
@@ -449,8 +475,10 @@ class NavigationPickerOps:
         self.refresh_rendered_for_current_path()
 
     def jump_to_line(self, line_number: int) -> None:
-        self.state.max_start = max(0, len(self.state.lines) - self.visible_content_rows())
-        anchor = max(0, min(line_number, self.state.max_start))
-        centered = max(0, anchor - max(1, self.visible_content_rows() // 3))
+        visible_rows = max(1, self.visible_content_rows())
+        self.state.max_start = max(0, len(self.state.lines) - visible_rows)
+        max_line_index = max(0, len(self.state.lines) - 1)
+        anchor = max(0, min(line_number, max_line_index))
+        centered = max(0, anchor - max(1, visible_rows // 3))
         self.state.start = max(0, min(centered, self.state.max_start))
         self.state.text_x = 0

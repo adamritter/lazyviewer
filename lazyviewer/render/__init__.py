@@ -354,6 +354,7 @@ def render_dual_page(
     help_rows = help_panel_row_count(
         max_lines,
         show_help,
+        browser_visible=browser_visible,
         tree_filter_active=tree_filter_active,
         tree_filter_mode=tree_filter_mode,
         tree_filter_editing=tree_filter_editing,

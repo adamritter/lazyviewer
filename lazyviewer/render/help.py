@@ -114,6 +114,7 @@ def help_panel_row_count(
     max_lines: int,
     show_help: bool,
     *,
+    browser_visible: bool = True,
     tree_filter_active: bool = False,
     tree_filter_mode: str = "files",
     tree_filter_editing: bool = False,
@@ -127,11 +128,13 @@ def help_panel_row_count(
         tree_filter_mode=tree_filter_mode,
         tree_filter_editing=tree_filter_editing,
     )
-    required_rows = max(
-        len(tree_help_lines),
-        len(text_help_lines),
-        len(text_only_help_lines),
-    )
+    if browser_visible:
+        required_rows = max(
+            len(tree_help_lines),
+            len(text_help_lines),
+        )
+    else:
+        required_rows = len(text_only_help_lines)
     return min(required_rows, max_lines - 1)
 
 

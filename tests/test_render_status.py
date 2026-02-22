@@ -14,6 +14,21 @@ class RenderStatusTests(unittest.TestCase):
         self.assertEqual(help_panel_row_count(1, show_help=True), 0)
         self.assertGreaterEqual(help_panel_row_count(6, show_help=True), 1)
 
+    def test_help_panel_row_count_uses_text_only_rows_when_browser_hidden(self) -> None:
+        with (
+            mock.patch("lazyviewer.render.help.HELP_PANEL_TREE_LINES", ("tree-1", "tree-2", "tree-3")),
+            mock.patch("lazyviewer.render.help.HELP_PANEL_TEXT_LINES", ("text-1", "text-2")),
+            mock.patch("lazyviewer.render.help.HELP_PANEL_TEXT_ONLY_LINES", ("text-only-1",)),
+        ):
+            self.assertEqual(
+                help_panel_row_count(
+                    20,
+                    show_help=True,
+                    browser_visible=False,
+                ),
+                1,
+            )
+
     def test_build_status_line_places_help_on_right(self) -> None:
         line = build_status_line("file.py (1-10/200  4.5%)", width=60)
         self.assertEqual(len(line), 59)
