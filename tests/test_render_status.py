@@ -341,6 +341,42 @@ class RenderStatusTests(unittest.TestCase):
         self.assertIn("  0.0%)", top_status)
         self.assertIn("100.0%)", bottom_status)
 
+    def test_status_line_numbers_stay_in_source_space_when_wrapped(self) -> None:
+        writes: list[bytes] = []
+        text_lines = [
+            "alpha-part-1",
+            "alpha-part-2\n",
+            "beta\n",
+            "gamma\n",
+        ]
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            render_dual_page(
+                text_lines=text_lines,
+                text_start=1,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=2,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=100,
+                left_width=40,
+                text_x=0,
+                wrap_text=True,
+                browser_visible=False,
+                show_hidden=False,
+            )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        status = re.findall(r"\x1b\[7m([^\x1b]*)\x1b\[0m", rendered)[-1]
+        self.assertIn("(1-2/3", status)
+
     def test_command_picker_query_row_uses_command_prefix(self) -> None:
         writes: list[bytes] = []
 

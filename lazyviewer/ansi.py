@@ -160,5 +160,17 @@ def build_screen_lines(rendered: str, width: int, wrap: bool = False) -> list[st
 
     wrapped: list[str] = []
     for line in lines:
-        wrapped.extend(wrap_ansi_line(line.rstrip("\r\n"), width))
+        newline = ""
+        if line.endswith("\r\n"):
+            body = line[:-2]
+            newline = "\r\n"
+        elif line.endswith("\n") or line.endswith("\r"):
+            body = line[:-1]
+            newline = line[-1]
+        else:
+            body = line
+        chunks = wrap_ansi_line(body, width)
+        if newline and chunks:
+            chunks[-1] = f"{chunks[-1]}{newline}"
+        wrapped.extend(chunks)
     return wrapped or [""]

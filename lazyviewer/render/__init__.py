@@ -134,6 +134,44 @@ def _scroll_percent(text_start: int, total_lines: int, visible_rows: int) -> flo
     return (clamped_start / max_start) * 100.0
 
 
+def _line_has_newline_terminator(line: str) -> bool:
+    return line.endswith("\n") or line.endswith("\r")
+
+
+def _status_line_range(
+    text_lines: list[str],
+    text_start: int,
+    content_rows: int,
+    wrap_text: bool,
+) -> tuple[int, int, int]:
+    if not text_lines:
+        return 1, 1, 1
+
+    if not wrap_text:
+        total = len(text_lines)
+        clamped_start = max(0, min(text_start, total - 1))
+        end = min(total, clamped_start + max(1, content_rows))
+        return clamped_start + 1, end, total
+
+    display_to_source: list[int] = []
+    source_line = 1
+    for line in text_lines:
+        display_to_source.append(source_line)
+        if _line_has_newline_terminator(line):
+            source_line += 1
+
+    if _line_has_newline_terminator(text_lines[-1]):
+        total_source_lines = max(1, source_line - 1)
+    else:
+        total_source_lines = max(1, source_line)
+
+    clamped_start = max(0, min(text_start, len(text_lines) - 1))
+    clamped_end = max(clamped_start, min(len(text_lines) - 1, clamped_start + max(1, content_rows) - 1))
+    start_source = display_to_source[clamped_start]
+    end_source = display_to_source[clamped_end]
+    return start_source, end_source, total_source_lines
+
+
 def _highlight_ansi_substrings(
     text: str,
     query: str,
@@ -307,8 +345,13 @@ def render_dual_page(
 
     if not browser_visible:
         line_width = max(1, width - 1)
-        text_end = min(len(text_lines), text_start + content_rows)
         text_percent = _scroll_percent(text_start, len(text_lines), content_rows)
+        status_start, status_end, status_total = _status_line_range(
+            text_lines,
+            text_start,
+            content_rows,
+            wrap_text,
+        )
         for row in range(content_rows):
             text_idx = text_start + row
             if text_idx < len(text_lines):
@@ -334,7 +377,7 @@ def render_dual_page(
             if "\033" in help_text:
                 out.append("\033[0m")
             out.append("\r\n")
-        left_status = f"{current_path} ({text_start + 1}-{text_end}/{len(text_lines)} {text_percent:5.1f}%)"
+        left_status = f"{current_path} ({status_start}-{status_end}/{status_total} {text_percent:5.1f}%)"
         status = build_status_line(left_status, width)
         out.append("\033[7m")
         out.append(status)
@@ -346,8 +389,13 @@ def render_dual_page(
     divider_width = 1
     right_width = max(1, width - left_width - divider_width - 1)
 
-    text_end = min(len(text_lines), text_start + content_rows)
     text_percent = _scroll_percent(text_start, len(text_lines), content_rows)
+    status_start, status_end, status_total = _status_line_range(
+        text_lines,
+        text_start,
+        content_rows,
+        wrap_text,
+    )
     picker_overlay_active = picker_active and picker_mode in {"symbols", "commands"}
     tree_filter_row_visible = tree_filter_active and not picker_overlay_active
     tree_row_offset = 1 if tree_filter_row_visible else 0
@@ -469,7 +517,7 @@ def render_dual_page(
             out.append("\033[0m")
         out.append("\r\n")
 
-    left_status = f"{current_path} ({text_start + 1}-{text_end}/{len(text_lines)} {text_percent:5.1f}%)"
+    left_status = f"{current_path} ({status_start}-{status_end}/{status_total} {text_percent:5.1f}%)"
     status = build_status_line(left_status, width)
     out.append("\033[7m")
     out.append(status)

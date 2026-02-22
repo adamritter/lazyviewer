@@ -12,7 +12,7 @@ class BuildScreenLinesTests(unittest.TestCase):
     def test_wrapped_mode_splits_lines_to_width(self) -> None:
         rendered = "abcdef\nxy\n"
         lines = ansi_mod.build_screen_lines(rendered, width=3, wrap=True)
-        self.assertEqual(lines, ["abc", "def", "xy"])
+        self.assertEqual(lines, ["abc", "def\n", "xy\n"])
 
     def test_wrapped_mode_handles_empty_input(self) -> None:
         lines = ansi_mod.build_screen_lines("", width=5, wrap=True)

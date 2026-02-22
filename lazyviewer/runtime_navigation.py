@@ -13,6 +13,36 @@ from .symbols import collect_symbols
 PICKER_RESULT_LIMIT = 200
 
 
+def _line_has_newline_terminator(line: str) -> bool:
+    return line.endswith("\n") or line.endswith("\r")
+
+
+def _source_line_for_display_index(lines: list[str], display_index: int) -> int:
+    if not lines:
+        return 1
+
+    clamped = max(0, min(display_index, len(lines) - 1))
+    source_line = 1
+    for idx in range(clamped):
+        if _line_has_newline_terminator(lines[idx]):
+            source_line += 1
+    return source_line
+
+
+def _first_display_index_for_source_line(lines: list[str], source_line: int) -> int:
+    if not lines:
+        return 0
+
+    target = max(1, source_line)
+    current_source = 1
+    for idx, line in enumerate(lines):
+        if current_source >= target:
+            return idx
+        if _line_has_newline_terminator(line):
+            current_source += 1
+    return len(lines) - 1
+
+
 class NavigationPickerOps:
     def __init__(
         self,
@@ -264,10 +294,13 @@ class NavigationPickerOps:
         self.state.dirty = True
 
     def toggle_wrap_mode(self) -> None:
+        top_source_line = _source_line_for_display_index(self.state.lines, self.state.start)
         self.state.wrap_text = not self.state.wrap_text
         if self.state.wrap_text:
             self.state.text_x = 0
         self.rebuild_screen_lines(columns=self.current_term_columns())
+        self.state.start = _first_display_index_for_source_line(self.state.lines, top_source_line)
+        self.state.start = max(0, min(self.state.start, self.state.max_start))
         self.state.dirty = True
 
     def toggle_help_panel(self) -> None:
