@@ -457,16 +457,9 @@ def handle_normal_key(
         edit_target: Path | None = None
         if state.browser_visible and state.tree_entries:
             selected_entry = state.tree_entries[state.selected_idx]
-            if not selected_entry.is_dir and selected_entry.path.is_file():
-                edit_target = selected_entry.path.resolve()
-        if edit_target is None and state.current_path.is_file():
-            edit_target = state.current_path.resolve()
+            edit_target = selected_entry.path.resolve()
         if edit_target is None:
-            state.rendered = "\033[31m<cannot edit a directory>\033[0m"
-            rebuild_screen_lines(columns=term_columns, preserve_scroll=False)
-            state.text_x = 0
-            state.dirty = True
-            return False
+            edit_target = state.current_path.resolve()
 
         error = launch_editor_for_path(edit_target)
         state.current_path = edit_target

@@ -40,7 +40,10 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         key: str,
         toggle_git_features,
         jump_to_next_git_modified,
+        launch_editor_for_path=None,
     ) -> bool:
+        if launch_editor_for_path is None:
+            launch_editor_for_path = lambda _path: None
         return handle_normal_key(
             key=key,
             term_columns=120,
@@ -66,7 +69,7 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
             visible_content_rows=lambda: 20,
             rebuild_screen_lines=lambda **_kwargs: None,
             mark_tree_watch_dirty=lambda: None,
-            launch_editor_for_path=lambda _path: None,
+            launch_editor_for_path=launch_editor_for_path,
             jump_to_next_git_modified=jump_to_next_git_modified,
         )
 
@@ -161,6 +164,43 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         self.assertTrue(handled)
         self.assertEqual(called["apply"], 0)
         self.assertEqual(called["toggle_help"], 1)
+
+    def test_e_launches_selected_directory_when_browser_visible(self) -> None:
+        state = _make_state()
+        state.browser_visible = True
+        state.tree_entries = [TreeEntry(path=Path("/tmp").resolve(), depth=0, is_dir=True)]
+        state.selected_idx = 0
+        launched: list[Path] = []
+
+        should_quit = self._invoke(
+            state=state,
+            key="e",
+            toggle_git_features=lambda: None,
+            jump_to_next_git_modified=lambda _direction: False,
+            launch_editor_for_path=lambda path: launched.append(path) or None,
+        )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(launched, [Path("/tmp").resolve()])
+        self.assertEqual(state.current_path, Path("/tmp").resolve())
+
+    def test_e_launches_current_directory_when_browser_hidden(self) -> None:
+        state = _make_state()
+        state.browser_visible = False
+        state.current_path = Path("/tmp").resolve()
+        launched: list[Path] = []
+
+        should_quit = self._invoke(
+            state=state,
+            key="e",
+            toggle_git_features=lambda: None,
+            jump_to_next_git_modified=lambda _direction: False,
+            launch_editor_for_path=lambda path: launched.append(path) or None,
+        )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(launched, [Path("/tmp").resolve()])
+        self.assertEqual(state.current_path, Path("/tmp").resolve())
 
 
 if __name__ == "__main__":
