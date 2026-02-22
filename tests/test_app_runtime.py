@@ -27,6 +27,11 @@ from lazyviewer.render import help_panel_row_count, render_dual_page
 from lazyviewer.search.content import ContentMatch
 
 
+def _callback(kwargs: dict[str, object], name: str):
+    callbacks = kwargs["callbacks"]
+    return getattr(callbacks, name)
+
+
 class AppRuntimeBehaviorTests(unittest.TestCase):
     def test_first_git_change_screen_line_handles_plain_and_ansi_markers(self) -> None:
         plain_lines = [
@@ -117,7 +122,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_normal_key = kwargs["handle_normal_key"]
+                handle_normal_key = _callback(kwargs, "handle_normal_key")
                 snapshots["initial"] = state.current_path.resolve()
                 handle_normal_key("n", 120)
                 snapshots["after_n_1"] = state.current_path.resolve()
@@ -143,6 +148,67 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertEqual(snapshots["after_n_1"], nested_file.resolve())
             self.assertEqual(snapshots["after_n_2"], root_file.resolve())
             self.assertEqual(snapshots["after_N"], nested_file.resolve())
+
+    @unittest.skipIf(shutil.which("git") is None, "git is required for same-file git hunk navigation tests")
+    def test_n_and_shift_n_navigate_between_change_blocks_within_same_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "tests@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Tests"], cwd=root, check=True)
+
+            file_path = root / "demo.py"
+            original_lines = [f"line_{idx:03d} = {idx}\n" for idx in range(1, 161)]
+            file_path.write_text("".join(original_lines), encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=root, check=True)
+
+            updated_lines = list(original_lines)
+            updated_lines[9] = "line_010 = 'first-change'\n"
+            updated_lines[119] = "line_120 = 'second-change'\n"
+            file_path.write_text("".join(updated_lines), encoding="utf-8")
+            snapshots: dict[str, object] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_normal_key = _callback(kwargs, "handle_normal_key")
+                snapshots["initial_path"] = state.current_path.resolve()
+                snapshots["initial_start"] = state.start
+                snapshots["initial_is_diff"] = state.preview_is_git_diff
+                handle_normal_key("n", 120)
+                snapshots["after_n_path"] = state.current_path.resolve()
+                snapshots["after_n_start"] = state.start
+                handle_normal_key("N", 120)
+                snapshots["after_N_path"] = state.current_path.resolve()
+                snapshots["after_N_start"] = state.start
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch("lazyviewer.app_runtime.sys.stdin.fileno", return_value=0), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch("lazyviewer.app_runtime.load_show_hidden", return_value=False), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ), mock.patch(
+                "lazyviewer.app_runtime.GIT_STATUS_REFRESH_SECONDS", 0.0
+            ):
+                app_runtime.run_pager("", file_path, "monokai", True, False)
+
+            self.assertTrue(bool(snapshots["initial_is_diff"]))
+            self.assertEqual(snapshots["initial_path"], file_path.resolve())
+            self.assertEqual(snapshots["after_n_path"], file_path.resolve())
+            self.assertEqual(snapshots["after_N_path"], file_path.resolve())
+            self.assertGreater(int(snapshots["after_n_start"]), int(snapshots["initial_start"]))
+            self.assertLess(int(snapshots["after_N_start"]), int(snapshots["after_n_start"]))
 
     @unittest.skipIf(shutil.which("git") is None, "git is required for git watch integration test")
     def test_git_watch_refresh_rebuilds_preview_after_commit(self) -> None:
@@ -170,7 +236,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                maybe_refresh_git_watch = kwargs["maybe_refresh_git_watch"]
+                maybe_refresh_git_watch = _callback(kwargs, "maybe_refresh_git_watch")
                 snapshots["before_commit"] = state.rendered
 
                 subprocess.run(["git", "add", "-A"], cwd=root, check=True)
@@ -226,7 +292,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_normal_key = kwargs["handle_normal_key"]
+                handle_normal_key = _callback(kwargs, "handle_normal_key")
 
                 def current_labels() -> set[str]:
                     labels: set[str] = set()
@@ -285,7 +351,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_normal_key = kwargs["handle_normal_key"]
+                handle_normal_key = _callback(kwargs, "handle_normal_key")
                 snapshots["before_ctrl_o"] = state.git_features_enabled
                 handle_normal_key("CTRL_O", 120)
                 snapshots["after_ctrl_o"] = state.git_features_enabled
@@ -336,7 +402,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
                 target_idx = next(
                     idx
                     for idx, entry in enumerate(state.tree_entries)
@@ -402,7 +468,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
 
                 def find_docs_index() -> int:
                     return next(
@@ -467,7 +533,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
                 docs_idx = next(
                     idx
                     for idx, entry in enumerate(state.tree_entries)
@@ -510,7 +576,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
                 right_start_col = state.left_width + 2
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 6}:1")
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 4}:2")
@@ -576,7 +642,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
                 right_start_col = state.left_width + 2
 
                 target_row = None
@@ -630,7 +696,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
                 right_start_col = state.left_width + 2
 
                 target_row = None
@@ -688,7 +754,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
                 right_start_col = state.left_width + 2
 
                 target_row = None
@@ -748,8 +814,8 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
-                refresh_git_status_overlay = kwargs["refresh_git_status_overlay"]
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
+                refresh_git_status_overlay = _callback(kwargs, "refresh_git_status_overlay")
                 right_start_col = state.left_width + 2
 
                 refresh_git_status_overlay(force=True)
@@ -810,8 +876,8 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
-                tick_source_selection_drag = kwargs["tick_source_selection_drag"]
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
+                tick_source_selection_drag = _callback(kwargs, "tick_source_selection_drag")
                 right_start_col = state.left_width + 2
                 snapshots["start_before"] = state.start
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 2}:1")
@@ -875,8 +941,8 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
-                tick_source_selection_drag = kwargs["tick_source_selection_drag"]
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
+                tick_source_selection_drag = _callback(kwargs, "tick_source_selection_drag")
                 right_start_col = state.left_width + 2
                 state.start = min(state.max_start, 80)
                 snapshots["start_before"] = state.start
@@ -936,8 +1002,8 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
-                tick_source_selection_drag = kwargs["tick_source_selection_drag"]
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
+                tick_source_selection_drag = _callback(kwargs, "tick_source_selection_drag")
                 right_start_col = state.left_width + 2
                 right_edge_col = right_start_col + state.right_width - 1
                 row = 2
@@ -1002,7 +1068,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_tree_mouse_wheel = kwargs["handle_tree_mouse_wheel"]
+                handle_tree_mouse_wheel = _callback(kwargs, "handle_tree_mouse_wheel")
                 right_col = state.left_width + 2
                 row = 1
 
@@ -1063,7 +1129,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_tree_mouse_wheel = kwargs["handle_tree_mouse_wheel"]
+                handle_tree_mouse_wheel = _callback(kwargs, "handle_tree_mouse_wheel")
                 right_col = state.left_width + 2
                 row = 1
                 snapshots["before"] = state.text_x
@@ -1110,7 +1176,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
                 nonlocal run_count
                 run_count += 1
                 state = kwargs["state"]
-                set_named_mark = kwargs["set_named_mark"]
+                set_named_mark = _callback(kwargs, "set_named_mark")
                 if run_count == 1:
                     state.start = 9
                     state.text_x = 4
@@ -1167,8 +1233,8 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                open_tree_filter = kwargs["open_tree_filter"]
-                apply_tree_filter_query = kwargs["apply_tree_filter_query"]
+                open_tree_filter = _callback(kwargs, "open_tree_filter")
+                apply_tree_filter_query = _callback(kwargs, "apply_tree_filter_query")
                 open_tree_filter("content")
                 apply_tree_filter_query("line", preview_selection=True, select_first_file=True)
                 snapshots["current_path"] = state.current_path.resolve()
@@ -1367,8 +1433,8 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_normal_key = kwargs["handle_normal_key"]
-                rebuild_screen_lines = kwargs["rebuild_screen_lines"]
+                handle_normal_key = _callback(kwargs, "handle_normal_key")
+                rebuild_screen_lines = _callback(kwargs, "rebuild_screen_lines")
                 state.browser_visible = False
                 state.usable = 3
                 rebuild_screen_lines(columns=120, preserve_scroll=True)
@@ -1432,9 +1498,9 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                open_tree_filter = kwargs["open_tree_filter"]
-                apply_tree_filter_query = kwargs["apply_tree_filter_query"]
-                handle_normal_key = kwargs["handle_normal_key"]
+                open_tree_filter = _callback(kwargs, "open_tree_filter")
+                apply_tree_filter_query = _callback(kwargs, "apply_tree_filter_query")
+                handle_normal_key = _callback(kwargs, "handle_normal_key")
 
                 open_tree_filter("content")
                 apply_tree_filter_query("line", preview_selection=True, select_first_file=True)
@@ -1516,7 +1582,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_normal_key = kwargs["handle_normal_key"]
+                handle_normal_key = _callback(kwargs, "handle_normal_key")
                 before = {entry.path.resolve() for entry in state.tree_entries}
                 snapshots["before_has_created"] = created.resolve() in before
                 handle_normal_key("e", 120)
@@ -1562,10 +1628,10 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                open_tree_filter = kwargs["open_tree_filter"]
-                apply_tree_filter_query = kwargs["apply_tree_filter_query"]
-                close_tree_filter = kwargs["close_tree_filter"]
-                save_left_pane_width = kwargs["save_left_pane_width"]
+                open_tree_filter = _callback(kwargs, "open_tree_filter")
+                apply_tree_filter_query = _callback(kwargs, "apply_tree_filter_query")
+                close_tree_filter = _callback(kwargs, "close_tree_filter")
+                save_left_pane_width = _callback(kwargs, "save_left_pane_width")
 
                 snapshots["initial_left"] = state.left_width
                 save_left_pane_width(100, state.left_width)
@@ -1626,8 +1692,8 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
                 return {}, False, None
 
             def fake_run_main_loop(**kwargs) -> None:
-                open_tree_filter = kwargs["open_tree_filter"]
-                apply_tree_filter_query = kwargs["apply_tree_filter_query"]
+                open_tree_filter = _callback(kwargs, "open_tree_filter")
+                apply_tree_filter_query = _callback(kwargs, "apply_tree_filter_query")
                 open_tree_filter("content")
                 apply_tree_filter_query("a", preview_selection=False, select_first_file=True)
                 apply_tree_filter_query("ab", preview_selection=False, select_first_file=True)
@@ -1699,15 +1765,15 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                handle_normal_key = kwargs["handle_normal_key"]
-                handle_tree_mouse_wheel = kwargs["handle_tree_mouse_wheel"]
-                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
-                open_tree_filter = kwargs["open_tree_filter"]
-                apply_tree_filter_query = kwargs["apply_tree_filter_query"]
-                close_tree_filter = kwargs["close_tree_filter"]
-                maybe_refresh_git_watch = kwargs["maybe_refresh_git_watch"]
-                refresh_git_status_overlay = kwargs["refresh_git_status_overlay"]
-                tick_source_selection_drag = kwargs["tick_source_selection_drag"]
+                handle_normal_key = _callback(kwargs, "handle_normal_key")
+                handle_tree_mouse_wheel = _callback(kwargs, "handle_tree_mouse_wheel")
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
+                open_tree_filter = _callback(kwargs, "open_tree_filter")
+                apply_tree_filter_query = _callback(kwargs, "apply_tree_filter_query")
+                close_tree_filter = _callback(kwargs, "close_tree_filter")
+                maybe_refresh_git_watch = _callback(kwargs, "maybe_refresh_git_watch")
+                refresh_git_status_overlay = _callback(kwargs, "refresh_git_status_overlay")
+                tick_source_selection_drag = _callback(kwargs, "tick_source_selection_drag")
 
                 def assert_state_coherent() -> None:
                     self.assertTrue(state.tree_entries)

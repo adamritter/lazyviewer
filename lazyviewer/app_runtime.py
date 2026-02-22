@@ -39,7 +39,7 @@ from .preview import (
     clear_directory_preview_cache,
 )
 from .render import help_panel_row_count
-from .runtime_loop import run_main_loop
+from .runtime_loop import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
 from .runtime_navigation import NavigationPickerOps
 from .runtime_tree_filter import TreeFilterOps
 from .search.fuzzy import collect_project_file_labels
@@ -64,49 +64,6 @@ CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT = 8.0
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR = 2
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR = 1
 _TRAILING_GIT_BADGES_RE = re.compile(r"^(.*?)(?:\s(?:\[(?:M|\?)\])+)$")
-
-
-@dataclass(frozen=True)
-class RuntimeLoopTiming:
-    double_click_seconds: float
-    filter_cursor_blink_seconds: float
-    tree_filter_spinner_frame_seconds: float
-
-
-@dataclass(frozen=True)
-class RuntimeLoopCallbacks:
-    get_tree_filter_loading_until: Callable[[], float]
-    tree_view_rows: Callable[[], int]
-    tree_filter_prompt_prefix: Callable[[], str]
-    tree_filter_placeholder: Callable[[], str]
-    visible_content_rows: Callable[[], int]
-    rebuild_screen_lines: Callable[..., None]
-    maybe_refresh_tree_watch: Callable[[], None]
-    maybe_refresh_git_watch: Callable[[], None]
-    refresh_git_status_overlay: Callable[..., None]
-    current_preview_image_path: Callable[[], Path | None]
-    current_preview_image_geometry: Callable[[int], tuple[int, int, int, int]]
-    open_tree_filter: Callable[[str], None]
-    open_command_picker: Callable[[], None]
-    close_picker: Callable[..., None]
-    refresh_command_picker_matches: Callable[..., None]
-    activate_picker_selection: Callable[[], bool]
-    refresh_active_picker_matches: Callable[..., None]
-    handle_tree_mouse_wheel: Callable[[str], bool]
-    handle_tree_mouse_click: Callable[[str], bool]
-    toggle_help_panel: Callable[[], None]
-    close_tree_filter: Callable[..., None]
-    activate_tree_filter_selection: Callable[[], None]
-    move_tree_selection: Callable[[int], bool]
-    apply_tree_filter_query: Callable[..., None]
-    jump_to_next_content_hit: Callable[[int], bool]
-    set_named_mark: Callable[[str], bool]
-    jump_to_named_mark: Callable[[str], bool]
-    jump_back_in_history: Callable[[], bool]
-    jump_forward_in_history: Callable[[], bool]
-    handle_normal_key: Callable[[str, int], bool]
-    save_left_pane_width: Callable[[int, int], None]
-    tick_source_selection_drag: Callable[[], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -135,56 +92,6 @@ class NormalKeyCallbacks:
     mark_tree_watch_dirty: Callable[[], None]
     launch_editor_for_path: Callable[[Path], str | None]
     jump_to_next_git_modified: Callable[[int], bool]
-
-
-def _run_main_loop_with_config(
-    *,
-    state: AppState,
-    terminal: TerminalController,
-    stdin_fd: int,
-    timing: RuntimeLoopTiming,
-    callbacks: RuntimeLoopCallbacks,
-) -> None:
-    run_main_loop(
-        state=state,
-        terminal=terminal,
-        stdin_fd=stdin_fd,
-        double_click_seconds=timing.double_click_seconds,
-        filter_cursor_blink_seconds=timing.filter_cursor_blink_seconds,
-        tree_filter_spinner_frame_seconds=timing.tree_filter_spinner_frame_seconds,
-        get_tree_filter_loading_until=callbacks.get_tree_filter_loading_until,
-        tree_view_rows=callbacks.tree_view_rows,
-        tree_filter_prompt_prefix=callbacks.tree_filter_prompt_prefix,
-        tree_filter_placeholder=callbacks.tree_filter_placeholder,
-        visible_content_rows=callbacks.visible_content_rows,
-        rebuild_screen_lines=callbacks.rebuild_screen_lines,
-        maybe_refresh_tree_watch=callbacks.maybe_refresh_tree_watch,
-        maybe_refresh_git_watch=callbacks.maybe_refresh_git_watch,
-        refresh_git_status_overlay=callbacks.refresh_git_status_overlay,
-        current_preview_image_path=callbacks.current_preview_image_path,
-        current_preview_image_geometry=callbacks.current_preview_image_geometry,
-        open_tree_filter=callbacks.open_tree_filter,
-        open_command_picker=callbacks.open_command_picker,
-        close_picker=callbacks.close_picker,
-        refresh_command_picker_matches=callbacks.refresh_command_picker_matches,
-        activate_picker_selection=callbacks.activate_picker_selection,
-        refresh_active_picker_matches=callbacks.refresh_active_picker_matches,
-        handle_tree_mouse_wheel=callbacks.handle_tree_mouse_wheel,
-        handle_tree_mouse_click=callbacks.handle_tree_mouse_click,
-        toggle_help_panel=callbacks.toggle_help_panel,
-        close_tree_filter=callbacks.close_tree_filter,
-        activate_tree_filter_selection=callbacks.activate_tree_filter_selection,
-        move_tree_selection=callbacks.move_tree_selection,
-        apply_tree_filter_query=callbacks.apply_tree_filter_query,
-        jump_to_next_content_hit=callbacks.jump_to_next_content_hit,
-        set_named_mark=callbacks.set_named_mark,
-        jump_to_named_mark=callbacks.jump_to_named_mark,
-        jump_back_in_history=callbacks.jump_back_in_history,
-        jump_forward_in_history=callbacks.jump_forward_in_history,
-        handle_normal_key=callbacks.handle_normal_key,
-        save_left_pane_width=callbacks.save_left_pane_width,
-        tick_source_selection_drag=callbacks.tick_source_selection_drag,
-    )
 
 
 def _handle_normal_key_with_callbacks(
@@ -245,18 +152,35 @@ COMMAND_PALETTE_ITEMS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _first_git_change_screen_line(screen_lines: list[str]) -> int | None:
+def _line_has_git_change_marker(line: str) -> bool:
+    plain = ANSI_ESCAPE_RE.sub("", line)
+    if plain.startswith("+ ") or plain.startswith("- "):
+        return True
+    for match in ANSI_ESCAPE_RE.finditer(line):
+        seq = match.group(0)
+        if not seq.endswith("m"):
+            continue
+        if seq.startswith("\x1b[48;") or ";48;" in seq:
+            return True
+    return False
+
+
+def _git_change_block_start_lines(screen_lines: list[str]) -> list[int]:
+    starts: list[int] = []
+    in_block = False
     for idx, line in enumerate(screen_lines):
-        plain = ANSI_ESCAPE_RE.sub("", line)
-        if plain.startswith("+ ") or plain.startswith("- "):
-            return idx
-        for match in ANSI_ESCAPE_RE.finditer(line):
-            seq = match.group(0)
-            if not seq.endswith("m"):
-                continue
-            if seq.startswith("\x1b[48;") or ";48;" in seq:
-                return idx
-    return None
+        is_change = _line_has_git_change_marker(line)
+        if is_change and not in_block:
+            starts.append(idx)
+        in_block = is_change
+    return starts
+
+
+def _first_git_change_screen_line(screen_lines: list[str]) -> int | None:
+    starts = _git_change_block_start_lines(screen_lines)
+    if not starts:
+        return None
+    return starts[0]
 
 
 def _centered_scroll_start(target_line: int, max_start: int, visible_rows: int) -> int:
@@ -1358,6 +1282,43 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         if direction == 0:
             return False
 
+        if state.preview_is_git_diff and state.current_path.is_file():
+            change_blocks = _git_change_block_start_lines(state.lines)
+            if change_blocks:
+                probe_line = state.start + max(0, visible_content_rows() // 3)
+                current_block: int | None = None
+                for line_idx in change_blocks:
+                    if line_idx <= probe_line:
+                        current_block = line_idx
+                    else:
+                        break
+
+                target_line: int | None = None
+                if direction > 0:
+                    if current_block is None:
+                        target_line = change_blocks[0]
+                    else:
+                        for line_idx in change_blocks:
+                            if line_idx > current_block:
+                                target_line = line_idx
+                                break
+                else:
+                    if current_block is not None:
+                        for line_idx in reversed(change_blocks):
+                            if line_idx < current_block:
+                                target_line = line_idx
+                                break
+
+                if target_line is not None:
+                    next_start = _centered_scroll_start(
+                        target_line,
+                        state.max_start,
+                        visible_content_rows(),
+                    )
+                    if next_start != state.start:
+                        state.start = next_start
+                        return True
+
         refresh_git_status_overlay()
         modified_paths = sorted_git_modified_file_paths()
         if not modified_paths:
@@ -1561,7 +1522,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         tick_source_selection_drag=tick_source_selection_drag,
     )
 
-    _run_main_loop_with_config(
+    run_main_loop(
         state=state,
         terminal=terminal,
         stdin_fd=stdin_fd,

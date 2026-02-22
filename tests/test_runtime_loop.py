@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 import time
 import unittest
 from unittest import mock
 
-from lazyviewer.runtime_loop import run_main_loop
+from lazyviewer.runtime_loop import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
 from lazyviewer.state import AppState
 from lazyviewer.terminal import TerminalController
 from lazyviewer.tree import TreeEntry
@@ -53,6 +54,58 @@ class _FakeTerminal:
         pass
 
 
+def _loop_timing() -> RuntimeLoopTiming:
+    return RuntimeLoopTiming(
+        double_click_seconds=0.35,
+        filter_cursor_blink_seconds=0.5,
+        tree_filter_spinner_frame_seconds=0.12,
+    )
+
+
+def _loop_callbacks(
+    *,
+    handle_normal_key,
+    **overrides,
+) -> RuntimeLoopCallbacks:
+    base = RuntimeLoopCallbacks(
+        get_tree_filter_loading_until=lambda: 0.0,
+        tree_view_rows=lambda: 20,
+        tree_filter_prompt_prefix=lambda: "p>",
+        tree_filter_placeholder=lambda: "type",
+        visible_content_rows=lambda: 20,
+        rebuild_screen_lines=lambda **_kwargs: None,
+        maybe_refresh_tree_watch=lambda: None,
+        maybe_refresh_git_watch=lambda: None,
+        refresh_git_status_overlay=lambda **_kwargs: None,
+        current_preview_image_path=lambda: None,
+        current_preview_image_geometry=lambda _columns: (1, 1, 1, 1),
+        open_tree_filter=lambda _mode: None,
+        open_command_picker=lambda: None,
+        close_picker=lambda **_kwargs: None,
+        refresh_command_picker_matches=lambda **_kwargs: None,
+        activate_picker_selection=lambda: False,
+        refresh_active_picker_matches=lambda **_kwargs: None,
+        handle_tree_mouse_wheel=lambda _key: False,
+        handle_tree_mouse_click=lambda _key: False,
+        toggle_help_panel=lambda: None,
+        close_tree_filter=lambda **_kwargs: None,
+        activate_tree_filter_selection=lambda: None,
+        move_tree_selection=lambda _direction: False,
+        apply_tree_filter_query=lambda *_args, **_kwargs: None,
+        jump_to_next_content_hit=lambda _direction: False,
+        set_named_mark=lambda _key: False,
+        jump_to_named_mark=lambda _key: False,
+        jump_back_in_history=lambda: False,
+        jump_forward_in_history=lambda: False,
+        handle_normal_key=handle_normal_key,
+        save_left_pane_width=lambda _total, _left: None,
+        tick_source_selection_drag=None,
+    )
+    if not overrides:
+        return base
+    return replace(base, **overrides)
+
+
 class RuntimeLoopBehaviorTests(unittest.TestCase):
     def test_runtime_loop_requests_mouse_reporting_enabled(self) -> None:
         state = _make_state()
@@ -73,40 +126,8 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
                 state=state,
                 terminal=terminal,  # type: ignore[arg-type]
                 stdin_fd=0,
-                double_click_seconds=0.35,
-                filter_cursor_blink_seconds=0.5,
-                tree_filter_spinner_frame_seconds=0.12,
-                get_tree_filter_loading_until=lambda: 0.0,
-                tree_view_rows=lambda: 20,
-                tree_filter_prompt_prefix=lambda: "p>",
-                tree_filter_placeholder=lambda: "type",
-                visible_content_rows=lambda: 20,
-                rebuild_screen_lines=lambda **_kwargs: None,
-                maybe_refresh_tree_watch=lambda: None,
-                maybe_refresh_git_watch=lambda: None,
-                refresh_git_status_overlay=lambda **_kwargs: None,
-                current_preview_image_path=lambda: None,
-                current_preview_image_geometry=lambda _columns: (1, 1, 1, 1),
-                open_tree_filter=lambda _mode: None,
-                open_command_picker=lambda: None,
-                close_picker=lambda **_kwargs: None,
-                refresh_command_picker_matches=lambda **_kwargs: None,
-                activate_picker_selection=lambda: False,
-                refresh_active_picker_matches=lambda **_kwargs: None,
-                handle_tree_mouse_wheel=lambda _key: False,
-                handle_tree_mouse_click=lambda _key: False,
-                toggle_help_panel=lambda: None,
-                close_tree_filter=lambda **_kwargs: None,
-                activate_tree_filter_selection=lambda: None,
-                move_tree_selection=lambda _direction: False,
-                apply_tree_filter_query=lambda *_args, **_kwargs: None,
-                jump_to_next_content_hit=lambda _direction: False,
-                set_named_mark=lambda _key: False,
-                jump_to_named_mark=lambda _key: False,
-                jump_back_in_history=lambda: False,
-                jump_forward_in_history=lambda: False,
-                handle_normal_key=lambda key, _columns: key == "q",
-                save_left_pane_width=lambda _total, _left: None,
+                timing=_loop_timing(),
+                callbacks=_loop_callbacks(handle_normal_key=lambda key, _columns: key == "q"),
             )
 
         self.assertTrue(terminal.mouse_reporting_calls)
@@ -137,40 +158,8 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
                 state=state,
                 terminal=terminal,
                 stdin_fd=0,
-                double_click_seconds=0.35,
-                filter_cursor_blink_seconds=0.5,
-                tree_filter_spinner_frame_seconds=0.12,
-                get_tree_filter_loading_until=lambda: 0.0,
-                tree_view_rows=lambda: 20,
-                tree_filter_prompt_prefix=lambda: "p>",
-                tree_filter_placeholder=lambda: "type",
-                visible_content_rows=lambda: 20,
-                rebuild_screen_lines=lambda **_kwargs: None,
-                maybe_refresh_tree_watch=lambda: None,
-                maybe_refresh_git_watch=lambda: None,
-                refresh_git_status_overlay=lambda **_kwargs: None,
-                current_preview_image_path=lambda: None,
-                current_preview_image_geometry=lambda _columns: (1, 1, 1, 1),
-                open_tree_filter=lambda _mode: None,
-                open_command_picker=lambda: None,
-                close_picker=lambda **_kwargs: None,
-                refresh_command_picker_matches=lambda **_kwargs: None,
-                activate_picker_selection=lambda: False,
-                refresh_active_picker_matches=lambda **_kwargs: None,
-                handle_tree_mouse_wheel=lambda _key: False,
-                handle_tree_mouse_click=lambda _key: False,
-                toggle_help_panel=lambda: None,
-                close_tree_filter=lambda **_kwargs: None,
-                activate_tree_filter_selection=lambda: None,
-                move_tree_selection=lambda _direction: False,
-                apply_tree_filter_query=lambda *_args, **_kwargs: None,
-                jump_to_next_content_hit=lambda _direction: False,
-                set_named_mark=lambda _key: False,
-                jump_to_named_mark=lambda _key: False,
-                jump_back_in_history=lambda: False,
-                jump_forward_in_history=lambda: False,
-                handle_normal_key=lambda key, _columns: key == "q",
-                save_left_pane_width=lambda _total, _left: None,
+                timing=_loop_timing(),
+                callbacks=_loop_callbacks(handle_normal_key=lambda key, _columns: key == "q"),
             )
 
         self.assertTrue(writes)
@@ -196,40 +185,8 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
                 state=state,
                 terminal=terminal,  # type: ignore[arg-type]
                 stdin_fd=0,
-                double_click_seconds=0.35,
-                filter_cursor_blink_seconds=0.5,
-                tree_filter_spinner_frame_seconds=0.12,
-                get_tree_filter_loading_until=lambda: 0.0,
-                tree_view_rows=lambda: 20,
-                tree_filter_prompt_prefix=lambda: "p>",
-                tree_filter_placeholder=lambda: "type",
-                visible_content_rows=lambda: 20,
-                rebuild_screen_lines=lambda **_kwargs: None,
-                maybe_refresh_tree_watch=lambda: None,
-                maybe_refresh_git_watch=lambda: None,
-                refresh_git_status_overlay=lambda **_kwargs: None,
-                current_preview_image_path=lambda: None,
-                current_preview_image_geometry=lambda _columns: (1, 1, 1, 1),
-                open_tree_filter=lambda _mode: None,
-                open_command_picker=lambda: None,
-                close_picker=lambda **_kwargs: None,
-                refresh_command_picker_matches=lambda **_kwargs: None,
-                activate_picker_selection=lambda: False,
-                refresh_active_picker_matches=lambda **_kwargs: None,
-                handle_tree_mouse_wheel=lambda _key: False,
-                handle_tree_mouse_click=lambda _key: False,
-                toggle_help_panel=lambda: None,
-                close_tree_filter=lambda **_kwargs: None,
-                activate_tree_filter_selection=lambda: None,
-                move_tree_selection=lambda _direction: False,
-                apply_tree_filter_query=lambda *_args, **_kwargs: None,
-                jump_to_next_content_hit=lambda _direction: False,
-                set_named_mark=lambda _key: False,
-                jump_to_named_mark=lambda _key: False,
-                jump_back_in_history=lambda: False,
-                jump_forward_in_history=lambda: False,
-                handle_normal_key=lambda key, _columns: key == "q",
-                save_left_pane_width=lambda _total, _left: None,
+                timing=_loop_timing(),
+                callbacks=_loop_callbacks(handle_normal_key=lambda key, _columns: key == "q"),
             )
 
         self.assertTrue(terminal.mouse_reporting_calls)
@@ -262,40 +219,8 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
                 state=state,
                 terminal=terminal,  # type: ignore[arg-type]
                 stdin_fd=0,
-                double_click_seconds=0.35,
-                filter_cursor_blink_seconds=0.5,
-                tree_filter_spinner_frame_seconds=0.12,
-                get_tree_filter_loading_until=lambda: 0.0,
-                tree_view_rows=lambda: 20,
-                tree_filter_prompt_prefix=lambda: "p>",
-                tree_filter_placeholder=lambda: "type",
-                visible_content_rows=lambda: 20,
-                rebuild_screen_lines=lambda **_kwargs: None,
-                maybe_refresh_tree_watch=lambda: None,
-                maybe_refresh_git_watch=lambda: None,
-                refresh_git_status_overlay=lambda **_kwargs: None,
-                current_preview_image_path=lambda: None,
-                current_preview_image_geometry=lambda _columns: (1, 1, 1, 1),
-                open_tree_filter=lambda _mode: None,
-                open_command_picker=lambda: None,
-                close_picker=lambda **_kwargs: None,
-                refresh_command_picker_matches=lambda **_kwargs: None,
-                activate_picker_selection=lambda: False,
-                refresh_active_picker_matches=lambda **_kwargs: None,
-                handle_tree_mouse_wheel=lambda _key: False,
-                handle_tree_mouse_click=lambda _key: False,
-                toggle_help_panel=lambda: None,
-                close_tree_filter=lambda **_kwargs: None,
-                activate_tree_filter_selection=lambda: None,
-                move_tree_selection=lambda _direction: False,
-                apply_tree_filter_query=lambda *_args, **_kwargs: None,
-                jump_to_next_content_hit=lambda _direction: False,
-                set_named_mark=lambda _key: False,
-                jump_to_named_mark=lambda _key: False,
-                jump_back_in_history=lambda: False,
-                jump_forward_in_history=lambda: False,
-                handle_normal_key=lambda key, _columns: key == "q",
-                save_left_pane_width=lambda _total, _left: None,
+                timing=_loop_timing(),
+                callbacks=_loop_callbacks(handle_normal_key=lambda key, _columns: key == "q"),
             )
 
         self.assertGreaterEqual(read_calls["count"], 2)
@@ -336,40 +261,13 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
                 state=state,
                 terminal=terminal,  # type: ignore[arg-type]
                 stdin_fd=0,
-                double_click_seconds=0.35,
-                filter_cursor_blink_seconds=0.5,
-                tree_filter_spinner_frame_seconds=0.12,
-                get_tree_filter_loading_until=lambda: 0.0,
-                tree_view_rows=lambda: 20,
-                tree_filter_prompt_prefix=lambda: "p>",
-                tree_filter_placeholder=lambda: "type",
-                visible_content_rows=lambda: 20,
-                rebuild_screen_lines=lambda **_kwargs: None,
-                maybe_refresh_tree_watch=slow_tree_refresh,
-                maybe_refresh_git_watch=slow_git_refresh,
-                refresh_git_status_overlay=slow_overlay_refresh,
-                current_preview_image_path=lambda: None,
-                current_preview_image_geometry=lambda _columns: (1, 1, 1, 1),
-                open_tree_filter=lambda _mode: None,
-                open_command_picker=lambda: None,
-                close_picker=lambda **_kwargs: None,
-                refresh_command_picker_matches=lambda **_kwargs: None,
-                activate_picker_selection=lambda: False,
-                refresh_active_picker_matches=lambda **_kwargs: None,
-                handle_tree_mouse_wheel=lambda _key: False,
-                handle_tree_mouse_click=lambda _key: False,
-                toggle_help_panel=lambda: None,
-                close_tree_filter=lambda **_kwargs: None,
-                activate_tree_filter_selection=lambda: None,
-                move_tree_selection=lambda _direction: False,
-                apply_tree_filter_query=lambda *_args, **_kwargs: None,
-                jump_to_next_content_hit=lambda _direction: False,
-                set_named_mark=lambda _key: False,
-                jump_to_named_mark=lambda _key: False,
-                jump_back_in_history=lambda: False,
-                jump_forward_in_history=lambda: False,
-                handle_normal_key=lambda key, _columns: key == "q",
-                save_left_pane_width=lambda _total, _left: None,
+                timing=_loop_timing(),
+                callbacks=_loop_callbacks(
+                    handle_normal_key=lambda key, _columns: key == "q",
+                    maybe_refresh_tree_watch=slow_tree_refresh,
+                    maybe_refresh_git_watch=slow_git_refresh,
+                    refresh_git_status_overlay=slow_overlay_refresh,
+                ),
             )
 
         self.assertIn("render_start", marks)
@@ -397,40 +295,15 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
                 state=state,
                 terminal=terminal,  # type: ignore[arg-type]
                 stdin_fd=0,
-                double_click_seconds=0.35,
-                filter_cursor_blink_seconds=0.5,
-                tree_filter_spinner_frame_seconds=0.12,
-                get_tree_filter_loading_until=lambda: 0.0,
-                tree_view_rows=lambda: 20,
-                tree_filter_prompt_prefix=lambda: "p>",
-                tree_filter_placeholder=lambda: "type",
-                visible_content_rows=lambda: 20,
-                rebuild_screen_lines=lambda **_kwargs: None,
-                maybe_refresh_tree_watch=lambda: calls.__setitem__("tree", calls["tree"] + 1),
-                maybe_refresh_git_watch=lambda: calls.__setitem__("git", calls["git"] + 1),
-                refresh_git_status_overlay=lambda **_kwargs: calls.__setitem__("overlay", calls["overlay"] + 1),
-                current_preview_image_path=lambda: None,
-                current_preview_image_geometry=lambda _columns: (1, 1, 1, 1),
-                open_tree_filter=lambda _mode: None,
-                open_command_picker=lambda: None,
-                close_picker=lambda **_kwargs: None,
-                refresh_command_picker_matches=lambda **_kwargs: None,
-                activate_picker_selection=lambda: False,
-                refresh_active_picker_matches=lambda **_kwargs: None,
-                handle_tree_mouse_wheel=lambda _key: False,
-                handle_tree_mouse_click=lambda _key: False,
-                toggle_help_panel=lambda: None,
-                close_tree_filter=lambda **_kwargs: None,
-                activate_tree_filter_selection=lambda: None,
-                move_tree_selection=lambda _direction: False,
-                apply_tree_filter_query=lambda *_args, **_kwargs: None,
-                jump_to_next_content_hit=lambda _direction: False,
-                set_named_mark=lambda _key: False,
-                jump_to_named_mark=lambda _key: False,
-                jump_back_in_history=lambda: False,
-                jump_forward_in_history=lambda: False,
-                handle_normal_key=lambda key, _columns: key == "q",
-                save_left_pane_width=lambda _total, _left: None,
+                timing=_loop_timing(),
+                callbacks=_loop_callbacks(
+                    handle_normal_key=lambda key, _columns: key == "q",
+                    maybe_refresh_tree_watch=lambda: calls.__setitem__("tree", calls["tree"] + 1),
+                    maybe_refresh_git_watch=lambda: calls.__setitem__("git", calls["git"] + 1),
+                    refresh_git_status_overlay=lambda **_kwargs: calls.__setitem__(
+                        "overlay", calls["overlay"] + 1
+                    ),
+                ),
             )
 
         self.assertEqual(calls, {"tree": 0, "git": 0, "overlay": 0})
