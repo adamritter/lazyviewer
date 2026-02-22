@@ -21,7 +21,7 @@ from lazyviewer.app_runtime import (
     _tree_order_key_for_relative_path,
 )
 from lazyviewer.navigation import JumpLocation
-from lazyviewer.render import help_panel_row_count
+from lazyviewer.render import help_panel_row_count, render_dual_page
 from lazyviewer.search import ContentMatch
 
 
@@ -258,43 +258,6 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertIn(".gitignore", snapshots["after"])
             self.assertIn("__pycache__", snapshots["after"])
 
-    def test_run_pager_starts_with_mouse_capture_enabled_for_source_selection(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp).resolve()
-            file_path = root / "demo.py"
-            file_path.write_text("line 1\nline 2\n", encoding="utf-8")
-            snapshots: dict[str, object] = {}
-
-            class _FakeTerminalController:
-                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
-                    self.stdin_fd = stdin_fd
-                    self.stdout_fd = stdout_fd
-
-                def supports_kitty_graphics(self) -> bool:
-                    return False
-
-            def fake_run_main_loop(**kwargs) -> None:
-                state = kwargs["state"]
-                snapshots["mouse_capture_enabled"] = state.mouse_capture_enabled
-
-            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
-                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.app_runtime.os.isatty", return_value=True
-            ), mock.patch(
-                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
-            ), mock.patch(
-                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
-            ), mock.patch(
-                "lazyviewer.app_runtime.load_show_hidden", return_value=False
-            ), mock.patch(
-                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
-            ):
-                app_runtime.run_pager("", file_path, "monokai", True, False)
-
-            self.assertIn("mouse_capture_enabled", snapshots)
-            self.assertTrue(bool(snapshots["mouse_capture_enabled"]))
-
     def test_ctrl_g_launches_lazygit_and_ctrl_o_toggles_git_features(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -423,6 +386,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             root = Path(tmp).resolve()
             file_path = root / "demo.py"
             file_path.write_text("alpha beta\nsecond line\n", encoding="utf-8")
+            snapshots: dict[str, object] = {}
 
             class _FakeTerminalController:
                 def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
@@ -437,7 +401,10 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
                 handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
                 right_start_col = state.left_width + 2
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 6}:1")
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 4}:2")
                 handle_tree_mouse_click(f"MOUSE_LEFT_UP:{right_start_col + 4}:2")
+                snapshots["anchor"] = state.source_selection_anchor
+                snapshots["focus"] = state.source_selection_focus
 
             def fake_which(cmd: str) -> str | None:
                 if cmd == "pbcopy":
@@ -475,6 +442,8 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
                     "check": False,
                 },
             )
+            self.assertEqual(snapshots["anchor"], (0, 6))
+            self.assertEqual(snapshots["focus"], (1, 4))
 
     def test_named_marks_persist_between_runs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -580,6 +549,99 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertEqual(snapshots["current_path"], file_path.resolve())
             self.assertEqual(snapshots["selected_kind"], "search_hit")
             self.assertGreater(int(snapshots["start"]), 0)
+
+    def test_runtime_render_shows_full_nested_sticky_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            file_path = root / "demo.py"
+            file_path.write_text(
+                (
+                    "class Outer:\n"
+                    "    class Inner:\n"
+                    "        def run(self):\n"
+                    "            value = 2\n"
+                    "            return value\n"
+                ),
+                encoding="utf-8",
+            )
+            writes: list[bytes] = []
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                state.browser_visible = False
+                state.start = 4
+
+                with mock.patch("lazyviewer.render.os.write", side_effect=lambda _fd, data: writes.append(data) or len(data)):
+                    render_dual_page(
+                        text_lines=state.lines,
+                        text_start=state.start,
+                        tree_entries=state.tree_entries,
+                        tree_start=state.tree_start,
+                        tree_selected=state.selected_idx,
+                        max_lines=6,
+                        current_path=state.current_path,
+                        tree_root=state.tree_root,
+                        expanded=state.tree_render_expanded,
+                        width=120,
+                        left_width=state.left_width,
+                        text_x=state.text_x,
+                        wrap_text=state.wrap_text,
+                        browser_visible=state.browser_visible,
+                        show_hidden=state.show_hidden,
+                        show_help=state.show_help,
+                        tree_filter_active=state.tree_filter_active,
+                        tree_filter_mode=state.tree_filter_mode,
+                        tree_filter_query=state.tree_filter_query,
+                        tree_filter_editing=state.tree_filter_editing,
+                        tree_filter_cursor_visible=False,
+                        tree_filter_match_count=state.tree_filter_match_count,
+                        tree_filter_truncated=state.tree_filter_truncated,
+                        tree_filter_loading=state.tree_filter_loading,
+                        tree_filter_spinner_frame=0,
+                        tree_filter_prefix="p>",
+                        tree_filter_placeholder="type to filter files",
+                        picker_active=state.picker_active,
+                        picker_mode=state.picker_mode,
+                        picker_query=state.picker_query,
+                        picker_items=state.picker_match_labels,
+                        picker_selected=state.picker_selected,
+                        picker_focus=state.picker_focus,
+                        picker_list_start=state.picker_list_start,
+                        picker_message=state.picker_message,
+                        git_status_overlay=state.git_status_overlay,
+                        tree_search_query="",
+                        text_search_query="",
+                        text_search_current_line=0,
+                        text_search_current_column=0,
+                        preview_is_git_diff=state.preview_is_git_diff,
+                    )
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch("lazyviewer.app_runtime.sys.stdin.fileno", return_value=0), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch("lazyviewer.app_runtime.load_show_hidden", return_value=False), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", file_path, "monokai", True, False)
+
+            rendered = b"".join(writes).decode("utf-8", errors="replace")
+            outer_idx = rendered.find("class Outer:")
+            inner_idx = rendered.find("class Inner:")
+            run_idx = rendered.find("def run(self):")
+            self.assertGreaterEqual(outer_idx, 0)
+            self.assertGreater(inner_idx, outer_idx)
+            self.assertGreater(run_idx, inner_idx)
 
     def test_content_search_selected_hit_stays_visible_when_help_toggles_on(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

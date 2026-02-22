@@ -53,7 +53,7 @@ class _FakeTerminal:
 
 
 class RuntimeLoopBehaviorTests(unittest.TestCase):
-    def test_mouse_capture_is_enabled_by_default_for_in_app_selection(self) -> None:
+    def test_runtime_loop_requests_mouse_reporting_enabled(self) -> None:
         state = _make_state()
         terminal = _FakeTerminal()
         keys = iter(["q"])
@@ -108,13 +108,11 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
                 save_left_pane_width=lambda _total, _left: None,
             )
 
-        self.assertTrue(state.mouse_capture_enabled)
         self.assertTrue(terminal.mouse_reporting_calls)
         self.assertTrue(terminal.mouse_reporting_calls[0])
 
-    def test_runtime_loop_disables_terminal_mouse_reporting_when_state_off(self) -> None:
+    def test_terminal_raw_mode_still_brackets_with_mouse_on_off_sequences(self) -> None:
         state = _make_state()
-        state.mouse_capture_enabled = False
         writes: list[bytes] = []
         keys = iter(["q"])
 
@@ -175,14 +173,13 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
             )
 
         self.assertTrue(writes)
-        self.assertEqual(writes[0], b"\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h")
-        self.assertIn(b"\x1b[?1000l\x1b[?1006l", writes)
+        self.assertEqual(writes[0], b"\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1002h\x1b[?1006h")
+        self.assertTrue(any(b"\x1b[?1000l\x1b[?1002l\x1b[?1006l" in chunk for chunk in writes))
 
-    def test_ctrl_y_toggles_mouse_capture_mode(self) -> None:
+    def test_ctrl_y_byte_no_longer_toggles_mouse_reporting(self) -> None:
         state = _make_state()
-        state.mouse_capture_enabled = True
         terminal = _FakeTerminal()
-        keys = iter(["CTRL_Y", "q"])
+        keys = iter(["\x19", "q"])
 
         with mock.patch(
             "lazyviewer.runtime_loop.shutil.get_terminal_size",
@@ -234,8 +231,8 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
                 save_left_pane_width=lambda _total, _left: None,
             )
 
-        self.assertFalse(state.mouse_capture_enabled)
-        self.assertIn(False, terminal.mouse_reporting_calls)
+        self.assertTrue(terminal.mouse_reporting_calls)
+        self.assertNotIn(False, terminal.mouse_reporting_calls)
 
 
 if __name__ == "__main__":

@@ -34,7 +34,6 @@ class AppState:
     last_right_width: int
     browser_visible: bool = True
     show_help: bool = False
-    mouse_capture_enabled: bool = True
     dirty: bool = True
     skip_next_lf: bool = False
     count_buffer: str = ""

@@ -167,7 +167,6 @@ def render_help_page(width: int, height: int) -> None:
         "  \033[38;5;229mn/N\033[0m content hit (search) or git-mod file (normal mode, when git is on)",
         "  \033[38;5;229mCtrl+G\033[0m open lazygit (in current tree root)",
         "  \033[38;5;229mCtrl+O\033[0m toggle git overlays, git-mod nav, and git diff preview",
-        "  \033[38;5;229mCtrl+Y\033[0m toggle native terminal selection mode (mouse capture on by default)",
         "  \033[38;5;229mAlt+Left/Right\033[0m jump back/forward in history",
         "  \033[38;5;229mm{key}\033[0m set named mark   \033[38;5;229m'{key}\033[0m jump to named mark",
         "  \033[38;5;229ms\033[0m symbol outline (functions/classes/imports) for current file",

@@ -337,6 +337,71 @@ class RenderStatusTests(unittest.TestCase):
         rendered = b"".join(writes).decode("utf-8", errors="replace")
         self.assertIn("/> hello_", rendered)
 
+    def test_source_selection_uses_truecolor_background_highlight(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            render_dual_page(
+                text_lines=["alpha beta", "second line"],
+                text_start=0,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=4,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=90,
+                left_width=30,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=True,
+                show_hidden=False,
+                source_selection_anchor=(0, 6),
+                source_selection_focus=(1, 4),
+            )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertIn("beta", rendered)
+        self.assertIn("seco", rendered)
+        self.assertGreaterEqual(rendered.count("\033[48;2;58;92;188m"), 2)
+
+    def test_source_selection_keeps_background_after_ansi_resets(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            render_dual_page(
+                text_lines=["\033[38;5;81malpha\033[39;49;00m beta"],
+                text_start=0,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=3,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=90,
+                left_width=30,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=True,
+                show_hidden=False,
+                source_selection_anchor=(0, 0),
+                source_selection_focus=(0, 10),
+            )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertIn("\033[39;49;00;48;2;58;92;188m", rendered)
+        self.assertIn("beta", rendered)
+
     def test_tree_filter_query_row_shows_match_count_and_truncated_status(self) -> None:
         writes: list[bytes] = []
 
@@ -755,10 +820,228 @@ class RenderStatusTests(unittest.TestCase):
                 )
 
         rendered = b"".join(writes).decode("utf-8", errors="replace")
-        self.assertIn("class Demo", rendered)
-        self.assertIn("fn run", rendered)
+        self.assertRegex(rendered, r"\x1b\[4mclass Demo:")
+        self.assertRegex(rendered, r"\x1b\[4m\s+def run\(self\):")
+        self.assertNotIn("fn run", rendered)
         self.assertIn("─", rendered)
         self.assertIn("y = 2", rendered)
+
+    def test_render_shows_full_nested_sticky_chain(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        source = (
+            "class Outer:\n"
+            "    class Inner:\n"
+            "        def run(self):\n"
+            "            value = 2\n"
+            "            return value\n"
+        )
+        text_lines = source.splitlines()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "demo.py"
+            path.write_text(source, encoding="utf-8")
+            with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+                render_dual_page(
+                    text_lines=text_lines,
+                    text_start=4,
+                    tree_entries=[],
+                    tree_start=0,
+                    tree_selected=0,
+                    max_lines=7,
+                    current_path=path,
+                    tree_root=path.parent,
+                    expanded=set(),
+                    width=120,
+                    left_width=30,
+                    text_x=0,
+                    wrap_text=False,
+                    browser_visible=False,
+                    show_hidden=False,
+                )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        outer_idx = rendered.find("class Outer:")
+        inner_idx = rendered.find("class Inner:")
+        run_idx = rendered.find("def run(self):")
+        self.assertGreaterEqual(outer_idx, 0)
+        self.assertGreater(inner_idx, outer_idx)
+        self.assertGreater(run_idx, inner_idx)
+        self.assertIn("return value", rendered)
+
+    def test_render_enter_from_header_advances_to_first_body_line(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        source = (
+            "def run():\n"
+            "    first = 1\n"
+            "    second = 2\n"
+            "    return first + second\n"
+        )
+        text_lines = source.splitlines()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "demo.py"
+            path.write_text(source, encoding="utf-8")
+            with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+                render_dual_page(
+                    text_lines=text_lines,
+                    text_start=1,
+                    tree_entries=[],
+                    tree_start=0,
+                    tree_selected=0,
+                    max_lines=5,
+                    current_path=path,
+                    tree_root=path.parent,
+                    expanded=set(),
+                    width=100,
+                    left_width=30,
+                    text_x=0,
+                    wrap_text=False,
+                    browser_visible=False,
+                    show_hidden=False,
+                )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertRegex(rendered, r"^\x1b\[H\x1b\[J\s+first = 1")
+        self.assertNotIn("─", rendered)
+
+    def test_render_keeps_sticky_header_on_blank_line_inside_function(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        source = (
+            "def run():\n"
+            "    first = 1\n"
+            "\n"
+            "    second = 2\n"
+            "    return first + second\n"
+        )
+        text_lines = source.splitlines()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "demo.py"
+            path.write_text(source, encoding="utf-8")
+            with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+                render_dual_page(
+                    text_lines=text_lines,
+                    text_start=2,
+                    tree_entries=[],
+                    tree_start=0,
+                    tree_selected=0,
+                    max_lines=5,
+                    current_path=path,
+                    tree_root=path.parent,
+                    expanded=set(),
+                    width=100,
+                    left_width=30,
+                    text_x=0,
+                    wrap_text=False,
+                    browser_visible=False,
+                    show_hidden=False,
+                )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertIn("def run():", rendered)
+        self.assertIn("─", rendered)
+        self.assertIn("second = 2", rendered)
+
+    def test_render_does_not_show_sticky_header_on_blank_separator_line(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        source = (
+            "def first():\n"
+            "    return 1\n"
+            "\n"
+            "def second():\n"
+            "    return 2\n"
+        )
+        text_lines = source.splitlines()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "demo.py"
+            path.write_text(source, encoding="utf-8")
+            with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+                render_dual_page(
+                    text_lines=text_lines,
+                    text_start=2,
+                    tree_entries=[],
+                    tree_start=0,
+                    tree_selected=0,
+                    max_lines=5,
+                    current_path=path,
+                    tree_root=path.parent,
+                    expanded=set(),
+                    width=100,
+                    left_width=30,
+                    text_x=0,
+                    wrap_text=False,
+                    browser_visible=False,
+                    show_hidden=False,
+                )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertNotIn("def first():", rendered)
+        self.assertNotIn("─", rendered)
+        self.assertIn("def second():", rendered)
+
+    def test_render_sticky_headers_preserve_source_highlighting(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        source = (
+            "def run():\n"
+            "    return 1\n"
+            "    return 2\n"
+        )
+        text_lines = [
+            "\033[1;34mdef\033[39;49;00m run():",
+            "    return 1",
+            "    return 2",
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "demo.py"
+            path.write_text(source, encoding="utf-8")
+            with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+                render_dual_page(
+                    text_lines=text_lines,
+                    text_start=2,
+                    tree_entries=[],
+                    tree_start=0,
+                    tree_selected=0,
+                    max_lines=4,
+                    current_path=path,
+                    tree_root=path.parent,
+                    expanded=set(),
+                    width=100,
+                    left_width=30,
+                    text_x=0,
+                    wrap_text=False,
+                    browser_visible=False,
+                    show_hidden=False,
+                )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertIn("\033[39;49;00;4m run():", rendered)
 
     def test_render_sticky_headers_work_for_javascript_without_tree_sitter(self) -> None:
         writes: list[bytes] = []
@@ -791,7 +1074,7 @@ class RenderStatusTests(unittest.TestCase):
             ):
                 render_dual_page(
                     text_lines=text_lines,
-                    text_start=5,
+                    text_start=6,
                     tree_entries=[],
                     tree_start=0,
                     tree_selected=0,
@@ -808,8 +1091,9 @@ class RenderStatusTests(unittest.TestCase):
                 )
 
         rendered = b"".join(writes).decode("utf-8", errors="replace")
-        self.assertIn("class Box", rendered)
-        self.assertIn("fn boot", rendered)
+        self.assertIn("function boot() {", rendered)
+        self.assertNotIn("fn boot", rendered)
+        self.assertNotIn("class Box", rendered)
         self.assertIn("return value;", rendered)
 
 

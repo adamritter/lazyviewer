@@ -251,7 +251,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     git_watch_signature: str | None = None
     git_watch_repo_root: Path | None = None
     git_watch_dir: Path | None = None
-    source_selection_anchor: tuple[int, int] | None = None
+    source_selection_drag_active = False
 
     def index_warmup_worker() -> None:
         nonlocal index_warmup_pending, index_warmup_running
@@ -583,6 +583,13 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         if reset_scroll:
             state.text_x = 0
 
+    def clear_source_selection() -> bool:
+        if state.source_selection_anchor is None and state.source_selection_focus is None:
+            return False
+        state.source_selection_anchor = None
+        state.source_selection_focus = None
+        return True
+
     def toggle_git_features() -> None:
         state.git_features_enabled = not state.git_features_enabled
         if state.git_features_enabled:
@@ -602,6 +609,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             return
         entry = state.tree_entries[state.selected_idx]
         selected_target = entry.path.resolve()
+        if clear_source_selection():
+            state.dirty = True
         if entry.kind == "search_hit":
             if force or selected_target != state.current_path.resolve():
                 state.current_path = selected_target
@@ -724,7 +733,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         return True
 
     def handle_tree_mouse_click(mouse_key: str) -> bool:
-        nonlocal tree_watch_signature, source_selection_anchor
+        nonlocal tree_watch_signature, source_selection_drag_active
         is_left_down = mouse_key.startswith("MOUSE_LEFT_DOWN:")
         is_left_up = mouse_key.startswith("MOUSE_LEFT_UP:")
         if not (is_left_down or is_left_up):
@@ -737,18 +746,36 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         selection_pos = source_selection_position(col, row)
         if selection_pos is not None:
             if is_left_down:
-                source_selection_anchor = selection_pos
+                if not source_selection_drag_active:
+                    state.source_selection_anchor = selection_pos
+                state.source_selection_focus = selection_pos
+                source_selection_drag_active = True
+                state.dirty = True
                 return True
-            if source_selection_anchor is None:
+            if state.source_selection_anchor is None:
                 return True
-            copy_selected_source_range(source_selection_anchor, selection_pos)
-            source_selection_anchor = None
+            copy_selected_source_range(state.source_selection_anchor, selection_pos)
+            state.source_selection_focus = selection_pos
+            source_selection_drag_active = False
             state.dirty = True
             return True
 
         if is_left_up:
-            source_selection_anchor = None
+            if source_selection_drag_active and state.source_selection_anchor is not None:
+                end_pos = state.source_selection_focus or state.source_selection_anchor
+                copy_selected_source_range(state.source_selection_anchor, end_pos)
+                state.source_selection_focus = end_pos
+                state.dirty = True
+            source_selection_drag_active = False
             return True
+
+        if source_selection_drag_active:
+            # Keep live selection while dragging, even if pointer briefly leaves source pane.
+            return True
+
+        if clear_source_selection():
+            state.dirty = True
+        source_selection_drag_active = False
 
         if not (
             state.browser_visible

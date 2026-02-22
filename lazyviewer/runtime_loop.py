@@ -66,7 +66,7 @@ def run_main_loop(
     with terminal.raw_mode():
         while True:
             term = shutil.get_terminal_size((80, 24))
-            terminal.set_mouse_reporting(state.mouse_capture_enabled)
+            terminal.set_mouse_reporting(True)
             state.usable = max(1, term.lines - 1)
             state.left_width = clamp_left_width(term.columns, state.left_width)
             state.right_width = max(1, term.columns - state.left_width - 2)
@@ -211,6 +211,8 @@ def run_main_loop(
                         else 0
                     ),
                     preview_is_git_diff=state.preview_is_git_diff,
+                    source_selection_anchor=state.source_selection_anchor,
+                    source_selection_focus=state.source_selection_focus,
                 )
                 render_dual_page_context(render_context)
                 desired_image_state: tuple[str, int, int, int, int] | None = None
@@ -277,12 +279,6 @@ def run_main_loop(
                         state.last_right_width = state.right_width
                         rebuild_screen_lines(columns=term.columns)
                     state.dirty = True
-                continue
-
-            if key == "CTRL_Y":
-                state.mouse_capture_enabled = not state.mouse_capture_enabled
-                terminal.set_mouse_reporting(state.mouse_capture_enabled)
-                state.dirty = True
                 continue
 
             if state.pending_mark_set:

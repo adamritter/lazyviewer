@@ -29,8 +29,8 @@ class TerminalBehaviorTests(unittest.TestCase):
             controller.disable_tui_mode()
 
         setraw_mock.assert_called_once_with(0, termios.TCSAFLUSH)
-        self.assertEqual(write_mock.call_args_list[0].args, (1, b"\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h"))
-        self.assertEqual(write_mock.call_args_list[1].args, (1, b"\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l"))
+        self.assertEqual(write_mock.call_args_list[0].args, (1, b"\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1002h\x1b[?1006h"))
+        self.assertEqual(write_mock.call_args_list[1].args, (1, b"\x1b[?1000l\x1b[?1002l\x1b[?1006l\x1b[?25h\x1b[?1049l"))
         setattr_mock.assert_called_once_with(0, termios.TCSAFLUSH, saved_state)
 
     def test_raw_mode_restores_terminal_after_exception(self) -> None:
@@ -73,8 +73,8 @@ class TerminalBehaviorTests(unittest.TestCase):
         self.assertEqual(
             write_mock.call_args_list,
             [
-                mock.call(1, b"\x1b[?1000h\x1b[?1006h"),
-                mock.call(1, b"\x1b[?1000l\x1b[?1006l"),
+                mock.call(1, b"\x1b[?1000h\x1b[?1002h\x1b[?1006h"),
+                mock.call(1, b"\x1b[?1000l\x1b[?1002l\x1b[?1006l"),
             ],
         )
 

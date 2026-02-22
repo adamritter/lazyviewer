@@ -24,12 +24,12 @@ class TerminalController:
     def enable_tui_mode(self) -> None:
         tty.setraw(self.stdin_fd, termios.TCSAFLUSH)
         # Enter alternate screen, enable mouse reporting, and hide cursor.
-        os.write(self.stdout_fd, b"\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h")
+        os.write(self.stdout_fd, b"\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1002h\x1b[?1006h")
         self._mouse_reporting_enabled = True
 
     def disable_tui_mode(self) -> None:
         # Disable mouse reporting, show cursor, and restore the main screen buffer.
-        os.write(self.stdout_fd, b"\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l")
+        os.write(self.stdout_fd, b"\x1b[?1000l\x1b[?1002l\x1b[?1006l\x1b[?25h\x1b[?1049l")
         self._mouse_reporting_enabled = False
         termios.tcsetattr(self.stdin_fd, termios.TCSAFLUSH, self._saved_tty_state)
 
@@ -38,9 +38,9 @@ class TerminalController:
         if desired == self._mouse_reporting_enabled:
             return
         if desired:
-            os.write(self.stdout_fd, b"\x1b[?1000h\x1b[?1006h")
+            os.write(self.stdout_fd, b"\x1b[?1000h\x1b[?1002h\x1b[?1006h")
         else:
-            os.write(self.stdout_fd, b"\x1b[?1000l\x1b[?1006l")
+            os.write(self.stdout_fd, b"\x1b[?1000l\x1b[?1002l\x1b[?1006l")
         self._mouse_reporting_enabled = desired
 
     def supports_kitty_graphics(self) -> bool:

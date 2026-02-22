@@ -101,17 +101,6 @@ class ReadKeyRegressionTests(unittest.TestCase):
 
         self.assertEqual(key, "CTRL_O")
 
-    def test_ctrl_y_is_recognized(self) -> None:
-        read_fd, write_fd = os.pipe()
-        try:
-            os.write(write_fd, b"\x19")
-            key = input_mod.read_key(read_fd, timeout_ms=20)
-        finally:
-            os.close(read_fd)
-            os.close(write_fd)
-
-        self.assertEqual(key, "CTRL_Y")
-
     def test_ctrl_question_is_recognized(self) -> None:
         read_fd, write_fd = os.pipe()
         try:
@@ -157,6 +146,17 @@ class ReadKeyRegressionTests(unittest.TestCase):
 
         self.assertEqual(first, "ALT_LEFT")
         self.assertEqual(second, "ALT_RIGHT")
+
+    def test_sgr_mouse_drag_event_maps_to_left_down(self) -> None:
+        read_fd, write_fd = os.pipe()
+        try:
+            os.write(write_fd, b"\x1b[<32;15;7M")
+            key = input_mod.read_key(read_fd, timeout_ms=20)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+        self.assertEqual(key, "MOUSE_LEFT_DOWN:15:7")
 
 
 if __name__ == "__main__":
