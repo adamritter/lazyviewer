@@ -623,6 +623,103 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertEqual(snapshots["anchor"], (0, 6))
             self.assertEqual(snapshots["focus"], (1, 4))
 
+    def test_single_click_identifier_in_preview_opens_content_search(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            file_path = root / "demo.py"
+            file_path.write_text("alpha_beta_name = other_value\n", encoding="utf-8")
+            search_calls: list[str] = []
+            snapshots: dict[str, object] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_search_content(_root, query, _show_hidden, **_kwargs):
+                search_calls.append(query)
+                if query == "alpha_beta_name":
+                    return (
+                        {
+                            file_path.resolve(): [
+                                ContentMatch(
+                                    path=file_path.resolve(),
+                                    line=1,
+                                    column=1,
+                                    preview="alpha_beta_name = other_value",
+                                )
+                            ]
+                        },
+                        False,
+                        None,
+                    )
+                return {}, False, None
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
+                right_start_col = state.left_width + 2
+                target_row: int | None = None
+                target_col: int | None = None
+
+                for idx, line in enumerate(state.lines):
+                    plain = app_runtime.ANSI_ESCAPE_RE.sub("", line).rstrip("\r\n")
+                    token_start = plain.find("alpha_beta_name")
+                    if token_start >= 0:
+                        target_row = idx + 1
+                        target_col = right_start_col + token_start + len("alpha")
+                        break
+
+                self.assertIsNotNone(target_row)
+                self.assertIsNotNone(target_col)
+                assert target_row is not None
+                assert target_col is not None
+
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{target_col}:{target_row}")
+                handle_tree_mouse_click(f"MOUSE_LEFT_UP:{target_col}:{target_row}")
+
+                snapshots["tree_filter_active"] = state.tree_filter_active
+                snapshots["tree_filter_mode"] = state.tree_filter_mode
+                snapshots["tree_filter_query"] = state.tree_filter_query
+                snapshots["tree_filter_editing"] = state.tree_filter_editing
+                snapshots["source_selection_anchor"] = state.source_selection_anchor
+                snapshots["source_selection_focus"] = state.source_selection_focus
+                entry = state.tree_entries[state.selected_idx]
+                snapshots["selected_kind"] = entry.kind
+                snapshots["selected_path"] = entry.path.resolve()
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch(
+                "lazyviewer.runtime_tree_filter.search_project_content_rg", side_effect=fake_search_content
+            ), mock.patch(
+                "lazyviewer.app_runtime.collect_project_file_labels", return_value=[]
+            ), mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", file_path, "monokai", True, False)
+
+            self.assertEqual(search_calls, ["alpha_beta_name"])
+            self.assertTrue(bool(snapshots["tree_filter_active"]))
+            self.assertEqual(snapshots["tree_filter_mode"], "content")
+            self.assertEqual(snapshots["tree_filter_query"], "alpha_beta_name")
+            self.assertFalse(bool(snapshots["tree_filter_editing"]))
+            self.assertIsNone(snapshots["source_selection_anchor"])
+            self.assertIsNone(snapshots["source_selection_focus"])
+            self.assertEqual(snapshots["selected_kind"], "search_hit")
+            self.assertEqual(snapshots["selected_path"], file_path.resolve())
+
     def test_clicking_directory_name_in_preview_selects_it_in_tree(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()

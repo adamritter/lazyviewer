@@ -61,6 +61,7 @@ CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT = 8.0
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR = 2
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR = 1
 _TRAILING_GIT_BADGES_RE = re.compile(r"^(.*?)(?:\s(?:\[(?:M|\?)\])+)$")
+_CLICK_SEARCH_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 
 
 def _skip_gitignored_for_hidden_mode(show_hidden: bool) -> bool:
@@ -751,6 +752,58 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         line_idx = max(0, min(state.start + row - 1, len(state.lines) - 1))
         return line_idx, text_col
 
+    def _display_col_to_text_index(text: str, display_col: int) -> int:
+        if display_col <= 0:
+            return 0
+        col = 0
+        for idx, ch in enumerate(text):
+            width = char_display_width(ch, col)
+            next_col = col + width
+            if display_col < next_col:
+                return idx
+            col = next_col
+        return len(text)
+
+    def clicked_preview_search_token(selection_pos: tuple[int, int]) -> str | None:
+        if not state.lines:
+            return None
+
+        line_idx, text_col = selection_pos
+        if line_idx < 0 or line_idx >= len(state.lines):
+            return None
+
+        plain_line = ANSI_ESCAPE_RE.sub("", state.lines[line_idx]).rstrip("\r\n")
+        if not plain_line:
+            return None
+
+        clicked_index = _display_col_to_text_index(plain_line, text_col)
+        candidate_indices = [clicked_index]
+        if clicked_index > 0:
+            candidate_indices.append(clicked_index - 1)
+
+        for candidate in candidate_indices:
+            if candidate < 0 or candidate >= len(plain_line):
+                continue
+            for match in _CLICK_SEARCH_TOKEN_RE.finditer(plain_line):
+                if match.start() <= candidate < match.end():
+                    token = match.group(0)
+                    return token if token else None
+        return None
+
+    def open_content_search_for_token(query: str) -> bool:
+        token = query.strip()
+        if not token:
+            return False
+        open_tree_filter("content")
+        apply_tree_filter_query(
+            token,
+            preview_selection=True,
+            select_first_file=True,
+        )
+        state.tree_filter_editing = False
+        state.dirty = True
+        return True
+
     def _line_has_newline_terminator(line: str) -> bool:
         return line.endswith("\n") or line.endswith("\r")
 
@@ -1030,6 +1083,12 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 jump_to_path_proxy(preview_target)
                 state.dirty = True
                 return True
+            if state.source_selection_anchor == selection_pos:
+                clicked_token = clicked_preview_search_token(selection_pos)
+                if clicked_token is not None:
+                    clear_source_selection()
+                    reset_source_selection_drag_state()
+                    return open_content_search_for_token(clicked_token)
             copy_selected_source_range(state.source_selection_anchor, selection_pos)
             reset_source_selection_drag_state()
             state.dirty = True
