@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from .navigation import JumpLocation
@@ -326,36 +327,66 @@ def handle_tree_filter_key(
     return False
 
 
+@dataclass(frozen=True)
+class NormalKeyOps:
+    current_jump_location: Callable[[], JumpLocation]
+    record_jump_if_changed: Callable[[JumpLocation], None]
+    open_symbol_picker: Callable[[], None]
+    reroot_to_parent: Callable[[], None]
+    reroot_to_selected_target: Callable[[], None]
+    toggle_hidden_files: Callable[[], None]
+    toggle_tree_pane: Callable[[], None]
+    toggle_wrap_mode: Callable[[], None]
+    toggle_help_panel: Callable[[], None]
+    toggle_git_features: Callable[[], None]
+    launch_lazygit: Callable[[], None]
+    handle_tree_mouse_wheel: Callable[[str], bool]
+    handle_tree_mouse_click: Callable[[str], bool]
+    move_tree_selection: Callable[[int], bool]
+    rebuild_tree_entries: Callable[..., None]
+    preview_selected_entry: Callable[..., None]
+    refresh_rendered_for_current_path: Callable[..., None]
+    refresh_git_status_overlay: Callable[..., None]
+    maybe_grow_directory_preview: Callable[[], bool]
+    visible_content_rows: Callable[[], int]
+    rebuild_screen_lines: Callable[..., None]
+    mark_tree_watch_dirty: Callable[[], None]
+    launch_editor_for_path: Callable[[Path], str | None]
+    jump_to_next_git_modified: Callable[[int], bool]
+
+
 def handle_normal_key(
     *,
     key: str,
     term_columns: int,
     state: AppState,
-    current_jump_location: Callable[[], JumpLocation],
-    record_jump_if_changed: Callable[[JumpLocation], None],
-    open_symbol_picker: Callable[[], None],
-    reroot_to_parent: Callable[[], None],
-    reroot_to_selected_target: Callable[[], None],
-    toggle_hidden_files: Callable[[], None],
-    toggle_tree_pane: Callable[[], None],
-    toggle_wrap_mode: Callable[[], None],
-    toggle_help_panel: Callable[[], None],
-    toggle_git_features: Callable[[], None],
-    launch_lazygit: Callable[[], None],
-    handle_tree_mouse_wheel: Callable[[str], bool],
-    handle_tree_mouse_click: Callable[[str], bool],
-    move_tree_selection: Callable[[int], bool],
-    rebuild_tree_entries: Callable[..., None],
-    preview_selected_entry: Callable[..., None],
-    refresh_rendered_for_current_path: Callable[..., None],
-    refresh_git_status_overlay: Callable[..., None],
-    maybe_grow_directory_preview: Callable[[], bool],
-    visible_content_rows: Callable[[], int],
-    rebuild_screen_lines: Callable[..., None],
-    mark_tree_watch_dirty: Callable[[], None],
-    launch_editor_for_path: Callable[[Path], str | None],
-    jump_to_next_git_modified: Callable[[int], bool],
+    ops: NormalKeyOps,
 ) -> bool:
+    current_jump_location = ops.current_jump_location
+    record_jump_if_changed = ops.record_jump_if_changed
+    open_symbol_picker = ops.open_symbol_picker
+    reroot_to_parent = ops.reroot_to_parent
+    reroot_to_selected_target = ops.reroot_to_selected_target
+    toggle_hidden_files = ops.toggle_hidden_files
+    toggle_tree_pane = ops.toggle_tree_pane
+    toggle_wrap_mode = ops.toggle_wrap_mode
+    toggle_help_panel = ops.toggle_help_panel
+    toggle_git_features = ops.toggle_git_features
+    launch_lazygit = ops.launch_lazygit
+    handle_tree_mouse_wheel = ops.handle_tree_mouse_wheel
+    handle_tree_mouse_click = ops.handle_tree_mouse_click
+    move_tree_selection = ops.move_tree_selection
+    rebuild_tree_entries = ops.rebuild_tree_entries
+    preview_selected_entry = ops.preview_selected_entry
+    refresh_rendered_for_current_path = ops.refresh_rendered_for_current_path
+    refresh_git_status_overlay = ops.refresh_git_status_overlay
+    maybe_grow_directory_preview = ops.maybe_grow_directory_preview
+    visible_content_rows = ops.visible_content_rows
+    rebuild_screen_lines = ops.rebuild_screen_lines
+    mark_tree_watch_dirty = ops.mark_tree_watch_dirty
+    launch_editor_for_path = ops.launch_editor_for_path
+    jump_to_next_git_modified = ops.jump_to_next_git_modified
+
     if key.lower() == "s" and not state.picker_active:
         state.count_buffer = ""
         open_symbol_picker()

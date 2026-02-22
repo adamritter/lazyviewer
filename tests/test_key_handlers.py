@@ -10,7 +10,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lazyviewer.key_handlers import handle_normal_key, handle_picker_key, handle_tree_filter_key
+from lazyviewer.key_handlers import (
+    NormalKeyOps,
+    handle_normal_key,
+    handle_picker_key,
+    handle_tree_filter_key,
+)
 from lazyviewer.navigation import JumpLocation
 from lazyviewer.state import AppState
 from lazyviewer.tree import TreeEntry
@@ -53,10 +58,7 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
     ) -> bool:
         if launch_editor_for_path is None:
             launch_editor_for_path = lambda _path: None
-        return handle_normal_key(
-            key=key,
-            term_columns=120,
-            state=state,
+        ops = NormalKeyOps(
             current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
             record_jump_if_changed=lambda _origin: None,
             open_symbol_picker=lambda: None,
@@ -81,6 +83,12 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
             mark_tree_watch_dirty=lambda: None,
             launch_editor_for_path=launch_editor_for_path,
             jump_to_next_git_modified=jump_to_next_git_modified,
+        )
+        return handle_normal_key(
+            key=key,
+            term_columns=120,
+            state=state,
+            ops=ops,
         )
 
     def test_ctrl_g_launches_lazygit(self) -> None:
@@ -395,11 +403,7 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         state.browser_visible = False
         state.current_path = Path("/tmp").resolve()
         refresh_calls: list[dict[str, object]] = []
-
-        should_quit = handle_normal_key(
-            key="e",
-            term_columns=120,
-            state=state,
+        ops = NormalKeyOps(
             current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
             record_jump_if_changed=lambda _origin: None,
             open_symbol_picker=lambda: None,
@@ -424,6 +428,13 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
             mark_tree_watch_dirty=lambda: None,
             launch_editor_for_path=lambda _path: None,
             jump_to_next_git_modified=lambda _direction: False,
+        )
+
+        should_quit = handle_normal_key(
+            key="e",
+            term_columns=120,
+            state=state,
+            ops=ops,
         )
 
         self.assertFalse(should_quit)

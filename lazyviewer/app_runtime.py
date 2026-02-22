@@ -13,8 +13,6 @@ import shutil
 import sys
 import threading
 import time
-from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 from .ansi import ANSI_ESCAPE_RE, build_screen_lines, char_display_width
@@ -29,8 +27,7 @@ from .config import (
 from .editor import launch_editor
 from .git_status import clear_diff_preview_cache, collect_git_status_overlay
 from .highlight import colorize_source
-from .key_handlers import handle_normal_key as handle_normal_key_event
-from .navigation import JumpLocation
+from .key_handlers import NormalKeyOps, handle_normal_key as handle_normal_key_event
 from .preview import (
     DIR_PREVIEW_GROWTH_STEP,
     DIR_PREVIEW_HARD_MAX_ENTRIES,
@@ -64,72 +61,6 @@ CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT = 8.0
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR = 2
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR = 1
 _TRAILING_GIT_BADGES_RE = re.compile(r"^(.*?)(?:\s(?:\[(?:M|\?)\])+)$")
-
-
-@dataclass(frozen=True)
-class NormalKeyCallbacks:
-    current_jump_location: Callable[[], JumpLocation]
-    record_jump_if_changed: Callable[[JumpLocation], None]
-    open_symbol_picker: Callable[[], None]
-    reroot_to_parent: Callable[[], None]
-    reroot_to_selected_target: Callable[[], None]
-    toggle_hidden_files: Callable[[], None]
-    toggle_tree_pane: Callable[[], None]
-    toggle_wrap_mode: Callable[[], None]
-    toggle_help_panel: Callable[[], None]
-    toggle_git_features: Callable[[], None]
-    launch_lazygit: Callable[[], None]
-    handle_tree_mouse_wheel: Callable[[str], bool]
-    handle_tree_mouse_click: Callable[[str], bool]
-    move_tree_selection: Callable[[int], bool]
-    rebuild_tree_entries: Callable[..., None]
-    preview_selected_entry: Callable[..., None]
-    refresh_rendered_for_current_path: Callable[..., None]
-    refresh_git_status_overlay: Callable[..., None]
-    maybe_grow_directory_preview: Callable[[], bool]
-    visible_content_rows: Callable[[], int]
-    rebuild_screen_lines: Callable[..., None]
-    mark_tree_watch_dirty: Callable[[], None]
-    launch_editor_for_path: Callable[[Path], str | None]
-    jump_to_next_git_modified: Callable[[int], bool]
-
-
-def _handle_normal_key_with_callbacks(
-    *,
-    key: str,
-    term_columns: int,
-    state: AppState,
-    callbacks: NormalKeyCallbacks,
-) -> bool:
-    return handle_normal_key_event(
-        key=key,
-        term_columns=term_columns,
-        state=state,
-        current_jump_location=callbacks.current_jump_location,
-        record_jump_if_changed=callbacks.record_jump_if_changed,
-        open_symbol_picker=callbacks.open_symbol_picker,
-        reroot_to_parent=callbacks.reroot_to_parent,
-        reroot_to_selected_target=callbacks.reroot_to_selected_target,
-        toggle_hidden_files=callbacks.toggle_hidden_files,
-        toggle_tree_pane=callbacks.toggle_tree_pane,
-        toggle_wrap_mode=callbacks.toggle_wrap_mode,
-        toggle_help_panel=callbacks.toggle_help_panel,
-        toggle_git_features=callbacks.toggle_git_features,
-        launch_lazygit=callbacks.launch_lazygit,
-        handle_tree_mouse_wheel=callbacks.handle_tree_mouse_wheel,
-        handle_tree_mouse_click=callbacks.handle_tree_mouse_click,
-        move_tree_selection=callbacks.move_tree_selection,
-        rebuild_tree_entries=callbacks.rebuild_tree_entries,
-        preview_selected_entry=callbacks.preview_selected_entry,
-        refresh_rendered_for_current_path=callbacks.refresh_rendered_for_current_path,
-        refresh_git_status_overlay=callbacks.refresh_git_status_overlay,
-        maybe_grow_directory_preview=callbacks.maybe_grow_directory_preview,
-        visible_content_rows=callbacks.visible_content_rows,
-        rebuild_screen_lines=callbacks.rebuild_screen_lines,
-        mark_tree_watch_dirty=callbacks.mark_tree_watch_dirty,
-        launch_editor_for_path=callbacks.launch_editor_for_path,
-        jump_to_next_git_modified=callbacks.jump_to_next_git_modified,
-    )
 
 
 def _skip_gitignored_for_hidden_mode(show_hidden: bool) -> bool:
@@ -1447,7 +1378,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         refresh_git_status_overlay(force=True)
         state.dirty = True
 
-    normal_key_callbacks = NormalKeyCallbacks(
+    normal_key_ops = NormalKeyOps(
         current_jump_location=current_jump_location,
         record_jump_if_changed=record_jump_if_changed,
         open_symbol_picker=navigation_ops.open_symbol_picker,
@@ -1475,11 +1406,11 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     )
 
     def handle_normal_key(key: str, term_columns: int) -> bool:
-        return _handle_normal_key_with_callbacks(
+        return handle_normal_key_event(
             key=key,
             term_columns=term_columns,
             state=state,
-            callbacks=normal_key_callbacks,
+            ops=normal_key_ops,
         )
 
     loop_timing = RuntimeLoopTiming(
