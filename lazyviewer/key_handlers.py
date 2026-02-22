@@ -11,7 +11,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .navigation import JumpLocation
-from .render import sticky_symbol_headers_for_position
 from .state import AppState
 from .tree import (
     next_directory_entry_index,
@@ -20,36 +19,8 @@ from .tree import (
 )
 
 
-def _sticky_header_rows_for_start(
-    state: AppState,
-    *,
-    display_start: int,
-    visible_rows: int,
-) -> int:
-    try:
-        sticky_symbols = sticky_symbol_headers_for_position(
-            text_lines=state.lines,
-            text_start=display_start,
-            content_rows=visible_rows,
-            current_path=state.current_path,
-            wrap_text=state.wrap_text,
-            preview_is_git_diff=state.preview_is_git_diff,
-        )
-    except Exception:
-        return 0
-
-    return len(sticky_symbols)
-
-
 def _effective_max_start(state: AppState, visible_rows: int) -> int:
-    base_max_start = max(0, len(state.lines) - max(1, visible_rows))
-    sticky_rows = _sticky_header_rows_for_start(
-        state,
-        display_start=base_max_start,
-        visible_rows=visible_rows,
-    )
-    max_display_index = max(0, len(state.lines) - 1)
-    return min(max_display_index, base_max_start + sticky_rows)
+    return max(0, len(state.lines) - max(1, visible_rows))
 
 
 def handle_picker_key(

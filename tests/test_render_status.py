@@ -832,11 +832,11 @@ class RenderStatusTests(unittest.TestCase):
             with mock.patch("lazyviewer.render.os.write", side_effect=capture):
                 render_dual_page(
                     text_lines=text_lines,
-                    text_start=3,
+                    text_start=2,
                     tree_entries=[],
                     tree_start=0,
                     tree_selected=0,
-                    max_lines=5,
+                    max_lines=3,
                     current_path=path,
                     tree_root=path.parent,
                     expanded=set(),
@@ -853,7 +853,7 @@ class RenderStatusTests(unittest.TestCase):
         self.assertRegex(rendered, r"\x1b\[4m\s+def run\(self\):")
         self.assertNotIn("fn run", rendered)
         self.assertIn("─", rendered)
-        self.assertIn("y = 2", rendered)
+        self.assertIn("return x + y", rendered)
 
     def test_render_shows_full_nested_sticky_chain(self) -> None:
         writes: list[bytes] = []
@@ -900,14 +900,14 @@ class RenderStatusTests(unittest.TestCase):
         self.assertGreaterEqual(outer_idx, 0)
         self.assertGreater(inner_idx, outer_idx)
         self.assertGreater(run_idx, inner_idx)
-        self.assertIn("return value", rendered)
 
-    def test_render_one_line_scroll_shows_sticky_and_skips_first_body_line(self) -> None:
+    def test_render_scroll_by_one_keeps_lower_content_progressing_by_one_with_sticky(self) -> None:
         source = (
             "def run():\n"
             "    first = 1\n"
             "    second = 2\n"
             "    third = 3\n"
+            "    fourth = 4\n"
         )
         text_lines = source.splitlines()
 
@@ -916,14 +916,19 @@ class RenderStatusTests(unittest.TestCase):
             path.write_text(source, encoding="utf-8")
 
             writes_top: list[bytes] = []
-            writes_scrolled: list[bytes] = []
+            writes_scrolled_1: list[bytes] = []
+            writes_scrolled_2: list[bytes] = []
 
             def capture_top(_fd: int, data: bytes) -> int:
                 writes_top.append(data)
                 return len(data)
 
-            def capture_scrolled(_fd: int, data: bytes) -> int:
-                writes_scrolled.append(data)
+            def capture_scrolled_1(_fd: int, data: bytes) -> int:
+                writes_scrolled_1.append(data)
+                return len(data)
+
+            def capture_scrolled_2(_fd: int, data: bytes) -> int:
+                writes_scrolled_2.append(data)
                 return len(data)
 
             with mock.patch("lazyviewer.render.os.write", side_effect=capture_top):
@@ -945,7 +950,7 @@ class RenderStatusTests(unittest.TestCase):
                     show_hidden=False,
                 )
 
-            with mock.patch("lazyviewer.render.os.write", side_effect=capture_scrolled):
+            with mock.patch("lazyviewer.render.os.write", side_effect=capture_scrolled_1):
                 render_dual_page(
                     text_lines=text_lines,
                     text_start=1,
@@ -964,18 +969,42 @@ class RenderStatusTests(unittest.TestCase):
                     show_hidden=False,
                 )
 
+            with mock.patch("lazyviewer.render.os.write", side_effect=capture_scrolled_2):
+                render_dual_page(
+                    text_lines=text_lines,
+                    text_start=2,
+                    tree_entries=[],
+                    tree_start=0,
+                    tree_selected=0,
+                    max_lines=3,
+                    current_path=path,
+                    tree_root=path.parent,
+                    expanded=set(),
+                    width=100,
+                    left_width=30,
+                    text_x=0,
+                    wrap_text=False,
+                    browser_visible=False,
+                    show_hidden=False,
+                )
+
         top_rendered = b"".join(writes_top).decode("utf-8", errors="replace")
-        scrolled_rendered = b"".join(writes_scrolled).decode("utf-8", errors="replace")
+        scrolled_1_rendered = b"".join(writes_scrolled_1).decode("utf-8", errors="replace")
+        scrolled_2_rendered = b"".join(writes_scrolled_2).decode("utf-8", errors="replace")
 
         self.assertIn("def run():", top_rendered)
         self.assertIn("first = 1", top_rendered)
         self.assertIn("second = 2", top_rendered)
 
-        self.assertRegex(scrolled_rendered, r"\x1b\[4mdef run\(\):")
-        self.assertIn("─", scrolled_rendered)
-        self.assertIn("second = 2", scrolled_rendered)
-        self.assertIn("third = 3", scrolled_rendered)
-        self.assertNotIn("first = 1", scrolled_rendered)
+        self.assertRegex(scrolled_1_rendered, r"\x1b\[4mdef run\(\):")
+        self.assertIn("second = 2", scrolled_1_rendered)
+        self.assertIn("third = 3", scrolled_1_rendered)
+        self.assertNotIn("first = 1", scrolled_1_rendered)
+
+        self.assertRegex(scrolled_2_rendered, r"\x1b\[4mdef run\(\):")
+        self.assertIn("third = 3", scrolled_2_rendered)
+        self.assertIn("fourth = 4", scrolled_2_rendered)
+        self.assertNotIn("second = 2", scrolled_2_rendered)
 
     def test_render_keeps_sticky_header_on_blank_line_inside_function(self) -> None:
         writes: list[bytes] = []
@@ -1210,7 +1239,7 @@ class RenderStatusTests(unittest.TestCase):
             ):
                 render_dual_page(
                     text_lines=text_lines,
-                    text_start=6,
+                    text_start=5,
                     tree_entries=[],
                     tree_start=0,
                     tree_selected=0,

@@ -916,6 +916,75 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertLess(int(snapshots["start_after_drag"]), int(snapshots["start_before"]))
             self.assertLess(int(snapshots["start_after_wait"]), int(snapshots["start_after_drag"]))
 
+    def test_source_mouse_drag_autoscrolls_horizontally_when_pointer_holds_at_right_edge(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            file_path = root / "wide.py"
+            file_path.write_text(
+                "".join(f"line_{idx:03d} = {'x' * 260}\n" for idx in range(1, 12)),
+                encoding="utf-8",
+            )
+            snapshots: dict[str, object] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_tree_mouse_click = kwargs["handle_tree_mouse_click"]
+                tick_source_selection_drag = kwargs["tick_source_selection_drag"]
+                right_start_col = state.left_width + 2
+                right_edge_col = right_start_col + state.right_width - 1
+                row = 2
+
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 2}:{row}")
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_edge_col}:{row}")
+                snapshots["text_x_after_drag"] = state.text_x
+                snapshots["focus_after_drag"] = state.source_selection_focus
+                for _ in range(6):
+                    tick_source_selection_drag()
+                snapshots["text_x_after_wait"] = state.text_x
+                snapshots["focus_after_wait"] = state.source_selection_focus
+                handle_tree_mouse_click(f"MOUSE_LEFT_UP:{right_edge_col}:{row}")
+
+            def fake_which(cmd: str) -> str | None:
+                if cmd == "pbcopy":
+                    return "/usr/bin/pbcopy"
+                return None
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.app_runtime.shutil.which", side_effect=fake_which
+            ), mock.patch("lazyviewer.app_runtime.subprocess.run"), mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", file_path, "monokai", True, False)
+
+            self.assertIn("text_x_after_drag", snapshots)
+            self.assertIn("text_x_after_wait", snapshots)
+            self.assertGreater(int(snapshots["text_x_after_wait"]), int(snapshots["text_x_after_drag"]))
+            self.assertIsNotNone(snapshots["focus_after_drag"])
+            self.assertIsNotNone(snapshots["focus_after_wait"])
+            focus_after_drag = snapshots["focus_after_drag"]
+            focus_after_wait = snapshots["focus_after_wait"]
+            assert isinstance(focus_after_drag, tuple)
+            assert isinstance(focus_after_wait, tuple)
+            self.assertGreater(focus_after_wait[1], focus_after_drag[1])
+
     def test_mouse_wheel_horizontal_scrolls_preview_and_clamps_to_content(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()

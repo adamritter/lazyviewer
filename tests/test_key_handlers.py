@@ -358,7 +358,7 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
             )
 
         self.assertFalse(should_quit)
-        self.assertEqual(state.start, 3)
+        self.assertEqual(state.start, 2)
 
     def test_space_reaches_end_when_sticky_header_reduces_text_rows(self) -> None:
         state = _make_state()
@@ -388,7 +388,7 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
             )
 
         self.assertFalse(should_quit)
-        self.assertEqual(state.start, 3)
+        self.assertEqual(state.start, 2)
 
     def test_e_forces_preview_rebuild_after_successful_edit(self) -> None:
         state = _make_state()

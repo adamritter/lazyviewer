@@ -384,19 +384,6 @@ def sticky_symbol_headers_for_position(
     return visible_symbols
 
 
-def _sticky_content_offset_for_start(
-    sticky_symbols: list[SymbolEntry],
-    start_source: int,
-) -> int:
-    if not sticky_symbols:
-        return 0
-    nearest_symbol = sticky_symbols[-1]
-    symbol_source_line = nearest_symbol.line + 1
-    if start_source == symbol_source_line + 1:
-        return 1
-    return 0
-
-
 def _extract_source_line_text(
     text_lines: list[str],
     source_line: int,
@@ -799,8 +786,6 @@ def render_dual_page(
         wrap_text=wrap_text,
         preview_is_git_diff=preview_is_git_diff,
     )
-    sticky_start_source, _, _ = _status_line_range(text_lines, text_start, 1, wrap_text)
-    sticky_content_offset = _sticky_content_offset_for_start(sticky_symbols, sticky_start_source)
 
     if not browser_visible:
         line_width = max(1, width - 1)
@@ -826,7 +811,7 @@ def render_dual_page(
                 out.append("\r\n")
                 continue
 
-            text_idx = text_start + row - sticky_header_rows + sticky_content_offset
+            text_idx = text_start + row
             if text_idx < len(text_lines):
                 full_line = text_lines[text_idx].rstrip("\r\n")
                 line_plain_length = len(ANSI_ESCAPE_RE.sub("", full_line))
@@ -984,7 +969,7 @@ def render_dual_page(
             if "\033" in sticky_text:
                 out.append("\033[0m")
         else:
-            text_idx = text_start + row - sticky_header_rows + sticky_content_offset
+            text_idx = text_start + row
             if text_idx < len(text_lines):
                 full_line = text_lines[text_idx].rstrip("\r\n")
                 line_plain_length = len(ANSI_ESCAPE_RE.sub("", full_line))
