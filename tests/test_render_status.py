@@ -283,6 +283,64 @@ class RenderStatusTests(unittest.TestCase):
         rendered = b"".join(writes).decode("utf-8", errors="replace")
         self.assertIn("/ searching", rendered)
 
+    def test_status_percent_uses_scroll_range_top_and_bottom(self) -> None:
+        top_writes: list[bytes] = []
+        bottom_writes: list[bytes] = []
+        text_lines = [f"line {idx}" for idx in range(1, 21)]
+
+        def capture_top(_fd: int, data: bytes) -> int:
+            top_writes.append(data)
+            return len(data)
+
+        def capture_bottom(_fd: int, data: bytes) -> int:
+            bottom_writes.append(data)
+            return len(data)
+
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture_top):
+            render_dual_page(
+                text_lines=text_lines,
+                text_start=0,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=6,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=120,
+                left_width=40,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=False,
+                show_hidden=False,
+            )
+
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture_bottom):
+            render_dual_page(
+                text_lines=text_lines,
+                text_start=14,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=6,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=120,
+                left_width=40,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=False,
+                show_hidden=False,
+            )
+
+        top_rendered = b"".join(top_writes).decode("utf-8", errors="replace")
+        bottom_rendered = b"".join(bottom_writes).decode("utf-8", errors="replace")
+        top_status = re.findall(r"\x1b\[7m([^\x1b]*)\x1b\[0m", top_rendered)[-1]
+        bottom_status = re.findall(r"\x1b\[7m([^\x1b]*)\x1b\[0m", bottom_rendered)[-1]
+        self.assertIn("  0.0%)", top_status)
+        self.assertIn("100.0%)", bottom_status)
+
     def test_command_picker_query_row_uses_command_prefix(self) -> None:
         writes: list[bytes] = []
 

@@ -66,6 +66,16 @@ def build_status_line(left_text: str, width: int, right_text: str = "│ ? Help"
     return f"{left}{gap}{right_text}"
 
 
+def _scroll_percent(text_start: int, total_lines: int, visible_rows: int) -> float:
+    if total_lines <= 0:
+        return 0.0
+    max_start = max(0, total_lines - max(1, visible_rows))
+    if max_start <= 0:
+        return 0.0
+    clamped_start = max(0, min(text_start, max_start))
+    return (clamped_start / max_start) * 100.0
+
+
 def _highlight_ansi_substrings(
     text: str,
     query: str,
@@ -240,7 +250,7 @@ def render_dual_page(
     if not browser_visible:
         line_width = max(1, width - 1)
         text_end = min(len(text_lines), text_start + content_rows)
-        text_percent = 0.0 if len(text_lines) == 0 else (text_start / max(1, len(text_lines) - 1)) * 100.0
+        text_percent = _scroll_percent(text_start, len(text_lines), content_rows)
         for row in range(content_rows):
             text_idx = text_start + row
             if text_idx < len(text_lines):
@@ -279,7 +289,7 @@ def render_dual_page(
     right_width = max(1, width - left_width - divider_width - 1)
 
     text_end = min(len(text_lines), text_start + content_rows)
-    text_percent = 0.0 if len(text_lines) == 0 else (text_start / max(1, len(text_lines) - 1)) * 100.0
+    text_percent = _scroll_percent(text_start, len(text_lines), content_rows)
     picker_overlay_active = picker_active and picker_mode in {"symbols", "commands"}
     tree_filter_row_visible = tree_filter_active and not picker_overlay_active
     tree_row_offset = 1 if tree_filter_row_visible else 0
