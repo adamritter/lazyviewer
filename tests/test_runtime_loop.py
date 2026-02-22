@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
+import time
 import unittest
 from unittest import mock
 
@@ -298,6 +299,141 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
             )
 
         self.assertGreaterEqual(read_calls["count"], 2)
+
+    def test_dirty_frame_renders_before_idle_refresh_callbacks(self) -> None:
+        state = _make_state()
+        terminal = _FakeTerminal()
+        keys = iter(["", "q"])
+        marks: dict[str, float] = {}
+
+        def slow_tree_refresh() -> None:
+            marks.setdefault("tree_refresh_start", time.perf_counter())
+            time.sleep(0.06)
+
+        def slow_git_refresh() -> None:
+            marks.setdefault("git_refresh_start", time.perf_counter())
+            time.sleep(0.06)
+
+        def slow_overlay_refresh(**_kwargs) -> None:
+            marks.setdefault("overlay_refresh_start", time.perf_counter())
+            time.sleep(0.06)
+
+        def fake_render(_context) -> None:
+            marks.setdefault("render_start", time.perf_counter())
+
+        start = time.perf_counter()
+        with mock.patch(
+            "lazyviewer.runtime_loop.shutil.get_terminal_size",
+            return_value=mock.Mock(columns=120, lines=40),
+        ), mock.patch(
+            "lazyviewer.runtime_loop.read_key",
+            side_effect=lambda *_args, **_kwargs: next(keys),
+        ), mock.patch(
+            "lazyviewer.runtime_loop.render_dual_page_context",
+            side_effect=fake_render,
+        ):
+            run_main_loop(
+                state=state,
+                terminal=terminal,  # type: ignore[arg-type]
+                stdin_fd=0,
+                double_click_seconds=0.35,
+                filter_cursor_blink_seconds=0.5,
+                tree_filter_spinner_frame_seconds=0.12,
+                get_tree_filter_loading_until=lambda: 0.0,
+                tree_view_rows=lambda: 20,
+                tree_filter_prompt_prefix=lambda: "p>",
+                tree_filter_placeholder=lambda: "type",
+                visible_content_rows=lambda: 20,
+                rebuild_screen_lines=lambda **_kwargs: None,
+                maybe_refresh_tree_watch=slow_tree_refresh,
+                maybe_refresh_git_watch=slow_git_refresh,
+                refresh_git_status_overlay=slow_overlay_refresh,
+                current_preview_image_path=lambda: None,
+                current_preview_image_geometry=lambda _columns: (1, 1, 1, 1),
+                open_tree_filter=lambda _mode: None,
+                open_command_picker=lambda: None,
+                close_picker=lambda **_kwargs: None,
+                refresh_command_picker_matches=lambda **_kwargs: None,
+                activate_picker_selection=lambda: False,
+                refresh_active_picker_matches=lambda **_kwargs: None,
+                handle_tree_mouse_wheel=lambda _key: False,
+                handle_tree_mouse_click=lambda _key: False,
+                toggle_help_panel=lambda: None,
+                close_tree_filter=lambda **_kwargs: None,
+                activate_tree_filter_selection=lambda: None,
+                move_tree_selection=lambda _direction: False,
+                apply_tree_filter_query=lambda *_args, **_kwargs: None,
+                jump_to_next_content_hit=lambda _direction: False,
+                set_named_mark=lambda _key: False,
+                jump_to_named_mark=lambda _key: False,
+                jump_back_in_history=lambda: False,
+                jump_forward_in_history=lambda: False,
+                handle_normal_key=lambda key, _columns: key == "q",
+                save_left_pane_width=lambda _total, _left: None,
+            )
+
+        self.assertIn("render_start", marks)
+        self.assertIn("tree_refresh_start", marks)
+        self.assertLess(marks["render_start"] - start, 0.05)
+        self.assertGreater(marks["tree_refresh_start"], marks["render_start"])
+
+    def test_immediate_keypress_skips_idle_refresh_callbacks(self) -> None:
+        state = _make_state()
+        terminal = _FakeTerminal()
+        keys = iter(["q"])
+        calls = {"tree": 0, "git": 0, "overlay": 0}
+
+        with mock.patch(
+            "lazyviewer.runtime_loop.shutil.get_terminal_size",
+            return_value=mock.Mock(columns=120, lines=40),
+        ), mock.patch(
+            "lazyviewer.runtime_loop.read_key",
+            side_effect=lambda *_args, **_kwargs: next(keys),
+        ), mock.patch(
+            "lazyviewer.runtime_loop.render_dual_page_context",
+            return_value=None,
+        ):
+            run_main_loop(
+                state=state,
+                terminal=terminal,  # type: ignore[arg-type]
+                stdin_fd=0,
+                double_click_seconds=0.35,
+                filter_cursor_blink_seconds=0.5,
+                tree_filter_spinner_frame_seconds=0.12,
+                get_tree_filter_loading_until=lambda: 0.0,
+                tree_view_rows=lambda: 20,
+                tree_filter_prompt_prefix=lambda: "p>",
+                tree_filter_placeholder=lambda: "type",
+                visible_content_rows=lambda: 20,
+                rebuild_screen_lines=lambda **_kwargs: None,
+                maybe_refresh_tree_watch=lambda: calls.__setitem__("tree", calls["tree"] + 1),
+                maybe_refresh_git_watch=lambda: calls.__setitem__("git", calls["git"] + 1),
+                refresh_git_status_overlay=lambda **_kwargs: calls.__setitem__("overlay", calls["overlay"] + 1),
+                current_preview_image_path=lambda: None,
+                current_preview_image_geometry=lambda _columns: (1, 1, 1, 1),
+                open_tree_filter=lambda _mode: None,
+                open_command_picker=lambda: None,
+                close_picker=lambda **_kwargs: None,
+                refresh_command_picker_matches=lambda **_kwargs: None,
+                activate_picker_selection=lambda: False,
+                refresh_active_picker_matches=lambda **_kwargs: None,
+                handle_tree_mouse_wheel=lambda _key: False,
+                handle_tree_mouse_click=lambda _key: False,
+                toggle_help_panel=lambda: None,
+                close_tree_filter=lambda **_kwargs: None,
+                activate_tree_filter_selection=lambda: None,
+                move_tree_selection=lambda _direction: False,
+                apply_tree_filter_query=lambda *_args, **_kwargs: None,
+                jump_to_next_content_hit=lambda _direction: False,
+                set_named_mark=lambda _key: False,
+                jump_to_named_mark=lambda _key: False,
+                jump_back_in_history=lambda: False,
+                jump_forward_in_history=lambda: False,
+                handle_normal_key=lambda key, _columns: key == "q",
+                save_left_pane_width=lambda _total, _left: None,
+            )
+
+        self.assertEqual(calls, {"tree": 0, "git": 0, "overlay": 0})
 
 
 if __name__ == "__main__":
