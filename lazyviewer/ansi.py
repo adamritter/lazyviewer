@@ -151,9 +151,14 @@ def wrap_ansi_line(text: str, width: int) -> list[str]:
     return wrapped
 
 
-def build_screen_lines(rendered: str, width: int) -> list[str]:
-    del width
+def build_screen_lines(rendered: str, width: int, wrap: bool = False) -> list[str]:
     lines = rendered.splitlines(keepends=True)
     if not lines:
         return [""]
-    return lines
+    if not wrap:
+        return lines
+
+    wrapped: list[str] = []
+    for line in lines:
+        wrapped.extend(wrap_ansi_line(line.rstrip("\r\n"), width))
+    return wrapped or [""]

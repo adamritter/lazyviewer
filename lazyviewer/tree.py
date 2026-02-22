@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -54,6 +55,44 @@ def build_tree_entries(root: Path, expanded: set[Path], show_hidden: bool) -> li
     if root in expanded:
         walk(root, 1)
     return entries
+
+
+def filter_tree_entries_for_files(
+    root: Path,
+    expanded: set[Path],
+    show_hidden: bool,
+    matched_files: Iterable[Path],
+) -> tuple[list[TreeEntry], set[Path]]:
+    root = root.resolve()
+    visible_paths: set[Path] = {root}
+    forced_expanded: set[Path] = {root}
+
+    for raw_path in matched_files:
+        file_path = raw_path.resolve()
+        try:
+            file_path.relative_to(root)
+        except ValueError:
+            continue
+
+        visible_paths.add(file_path)
+        parent = file_path.parent.resolve()
+        while True:
+            try:
+                parent.relative_to(root)
+            except ValueError:
+                break
+            visible_paths.add(parent)
+            forced_expanded.add(parent)
+            if parent == root or parent.parent == parent:
+                break
+            parent = parent.parent.resolve()
+
+    render_expanded = set(expanded) | forced_expanded
+    source_entries = build_tree_entries(root, render_expanded, show_hidden)
+    filtered_entries = [entry for entry in source_entries if entry.path.resolve() in visible_paths]
+    if not filtered_entries:
+        filtered_entries = [TreeEntry(root, 0, True)]
+    return filtered_entries, render_expanded
 
 
 def format_tree_entry(entry: TreeEntry, root: Path, expanded: set[Path]) -> str:

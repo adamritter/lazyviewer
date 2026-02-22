@@ -7,6 +7,12 @@ from pathlib import Path
 from .ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line, slice_ansi_line
 from .tree import TreeEntry, clamp_left_width, format_tree_entry
 
+HELP_PANEL_LINES: tuple[str, ...] = (
+    "\033[2;38;5;250mKeys:\033[0m ? hide help  q quit  Ctrl+P filter  s symbols  t tree  w wrap  . hidden",
+    "\033[2;38;5;250mTree:\033[0m h/j/k/l nav  Enter toggle/open  Shift+Left/Right resize",
+    "\033[2;38;5;250mText:\033[0m Up/Down line  d/u half-page  f/B page  g/G 10G  Left/Right scroll  e edit",
+)
+
 
 def selected_with_ansi(text: str) -> str:
     """Apply selection styling without discarding existing ANSI colors."""
@@ -15,6 +21,14 @@ def selected_with_ansi(text: str) -> str:
 
     # Keep reverse video active even when the text contains internal resets.
     return "\033[7m" + text.replace("\033[0m", "\033[0;7m") + "\033[0m"
+
+
+def help_panel_row_count(max_lines: int, show_help: bool) -> int:
+    if not show_help:
+        return 0
+    if max_lines <= 1:
+        return 0
+    return min(len(HELP_PANEL_LINES), max_lines - 1)
 
 
 def build_status_line(left_text: str, width: int, right_text: str = "│ ? Help") -> str:
@@ -43,6 +57,7 @@ def render_dual_page(
     wrap_text: bool,
     browser_visible: bool,
     show_hidden: bool,
+    show_help: bool = False,
     tree_filter_active: bool = False,
     tree_filter_query: str = "",
     tree_filter_editing: bool = False,
@@ -58,12 +73,14 @@ def render_dual_page(
 ) -> None:
     out: list[str] = []
     out.append("\033[H\033[J")
+    help_rows = help_panel_row_count(max_lines, show_help)
+    content_rows = max(1, max_lines - help_rows)
 
     if not browser_visible:
         line_width = max(1, width - 1)
-        text_end = min(len(text_lines), text_start + max_lines)
+        text_end = min(len(text_lines), text_start + content_rows)
         text_percent = 0.0 if len(text_lines) == 0 else (text_start / max(1, len(text_lines) - 1)) * 100.0
-        for row in range(max_lines):
+        for row in range(content_rows):
             text_idx = text_start + row
             if text_idx < len(text_lines):
                 text_raw = text_lines[text_idx].rstrip("\r\n")
@@ -74,6 +91,12 @@ def render_dual_page(
                 out.append(text_raw)
                 if "\033" in text_raw:
                     out.append("\033[0m")
+            out.append("\r\n")
+        for row in range(help_rows):
+            help_text = clip_ansi_line(HELP_PANEL_LINES[row], line_width)
+            out.append(help_text)
+            if "\033" in help_text:
+                out.append("\033[0m")
             out.append("\r\n")
         left_status = f"{current_path} ({text_start + 1}-{text_end}/{len(text_lines)} {text_percent:5.1f}%)"
         status = build_status_line(left_status, width)
@@ -87,7 +110,7 @@ def render_dual_page(
     divider_width = 1
     right_width = max(1, width - left_width - divider_width - 1)
 
-    text_end = min(len(text_lines), text_start + max_lines)
+    text_end = min(len(text_lines), text_start + content_rows)
     text_percent = 0.0 if len(text_lines) == 0 else (text_start / max(1, len(text_lines) - 1)) * 100.0
     symbol_picker_active = picker_active and picker_mode == "symbols"
     tree_filter_row_visible = tree_filter_active and not symbol_picker_active
@@ -97,11 +120,11 @@ def render_dual_page(
         picker_selected = max(0, min(picker_selected, len(items) - 1))
     else:
         picker_selected = 0
-    picker_rows = max(1, max_lines - 1)
+    picker_rows = max(1, content_rows - 1)
     max_picker_start = max(0, len(items) - picker_rows)
     picker_list_start = max(0, min(picker_list_start, max_picker_start))
 
-    for row in range(max_lines):
+    for row in range(content_rows):
         if symbol_picker_active:
             query_prefix = "s> "
             placeholder = "type to filter symbols"
@@ -165,6 +188,13 @@ def render_dual_page(
                 out.append("\033[0m")
         else:
             out.append("")
+        out.append("\r\n")
+
+    for row in range(help_rows):
+        help_text = clip_ansi_line(HELP_PANEL_LINES[row], max(1, width - 1))
+        out.append(help_text)
+        if "\033" in help_text:
+            out.append("\033[0m")
         out.append("\r\n")
 
     left_status = f"{current_path} ({text_start + 1}-{text_end}/{len(text_lines)} {text_percent:5.1f}%)"

@@ -6,4 +6,3 @@
   5. Bookmarks (m{key} to mark, '{key} to jump).
   6. Async indexing + cache to keep UI always instant.
   7. Read-only git context overlay (changed/untracked badges only, no actions).
-  8. Open externally (o) but never edit in-app.
