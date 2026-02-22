@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -120,6 +121,53 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     stdout_fd = sys.stdout.fileno()
     terminal = TerminalController(stdin_fd, stdout_fd)
     tree_filter_cursor_visible = True
+    index_warmup_lock = threading.Lock()
+    index_warmup_pending: tuple[Path, bool] | None = None
+    index_warmup_running = False
+
+    def index_warmup_worker() -> None:
+        nonlocal index_warmup_pending, index_warmup_running
+        while True:
+            with index_warmup_lock:
+                pending = index_warmup_pending
+                index_warmup_pending = None
+                if pending is None:
+                    index_warmup_running = False
+                    return
+
+            root, show_hidden_value = pending
+            try:
+                collect_project_file_labels(
+                    root,
+                    show_hidden_value,
+                    skip_gitignored=show_hidden_value,
+                )
+            except Exception:
+                # Warming is best-effort; foreground path still loads synchronously if needed.
+                pass
+
+    def schedule_tree_filter_index_warmup(
+        root: Path | None = None,
+        show_hidden_value: bool | None = None,
+    ) -> None:
+        nonlocal index_warmup_pending, index_warmup_running
+        if root is None:
+            root = state.tree_root
+        if show_hidden_value is None:
+            show_hidden_value = state.show_hidden
+
+        with index_warmup_lock:
+            index_warmup_pending = (root.resolve(), show_hidden_value)
+            if index_warmup_running:
+                return
+            index_warmup_running = True
+
+        worker = threading.Thread(
+            target=index_warmup_worker,
+            name="lazyviewer-file-index",
+            daemon=True,
+        )
+        worker.start()
 
     def effective_text_width(columns: int | None = None) -> int:
         if columns is None:
@@ -506,6 +554,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state.start = max(0, min(centered, state.max_start))
         state.text_x = 0
 
+    schedule_tree_filter_index_warmup()
+
     with terminal.raw_mode():
         while True:
             term = shutil.get_terminal_size((80, 24))
@@ -840,6 +890,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     state.expanded = {state.tree_root, old_root}
                     rebuild_tree_entries(preferred_path=old_root, center_selection=True)
                     preview_selected_entry(force=True)
+                    schedule_tree_filter_index_warmup()
                     state.dirty = True
                 continue
             if key == ".":
@@ -850,6 +901,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 )
                 rebuild_tree_entries(preferred_path=selected_path)
                 preview_selected_entry(force=True)
+                schedule_tree_filter_index_warmup()
                 state.dirty = True
                 continue
             if key.lower() == "t":
