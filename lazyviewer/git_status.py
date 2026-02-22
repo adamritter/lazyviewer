@@ -18,6 +18,8 @@ _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _SGR_RE = re.compile(r"\x1b\[([0-9;]*)m")
 _ADDED_BG_SGR = "48;2;36;74;52"
 _REMOVED_BG_SGR = "48;2;92;43;49"
+_DIFF_CONTRAST_8BIT = "246"
+_DIFF_CONTRAST_TRUECOLOR = ("170", "170", "170")
 
 
 @dataclass
@@ -195,9 +197,66 @@ def _format_marked_line(marker: str, code_line: str, colorize: bool) -> str:
     return code_line
 
 
+def _boost_foreground_contrast_for_diff(params: str) -> str:
+    parts = [part for part in params.split(";") if part]
+    if not parts:
+        return params
+
+    boosted: list[str] = []
+    index = 0
+    while index < len(parts):
+        token = parts[index]
+
+        # Faint text is hard to read on diff backgrounds.
+        if token == "2":
+            index += 1
+            continue
+
+        # Dark/bright-black foreground becomes unreadable on green/red backgrounds.
+        if token in {"30", "90"}:
+            boosted.extend(["38", "5", _DIFF_CONTRAST_8BIT])
+            index += 1
+            continue
+
+        if token == "38" and index + 1 < len(parts):
+            mode = parts[index + 1]
+            if mode == "5" and index + 2 < len(parts):
+                try:
+                    color_index = int(parts[index + 2])
+                except ValueError:
+                    color_index = -1
+                if 232 <= color_index <= 248:
+                    boosted.extend(["38", "5", _DIFF_CONTRAST_8BIT])
+                    index += 3
+                    continue
+            if mode == "2" and index + 4 < len(parts):
+                try:
+                    red = int(parts[index + 2])
+                    green = int(parts[index + 3])
+                    blue = int(parts[index + 4])
+                except ValueError:
+                    red = green = blue = -1
+                if (
+                    red >= 0
+                    and green >= 0
+                    and blue >= 0
+                    and abs(red - green) <= 8
+                    and abs(green - blue) <= 8
+                    and max(red, green, blue) < 190
+                ):
+                    boosted.extend(["38", "2", *_DIFF_CONTRAST_TRUECOLOR])
+                    index += 5
+                    continue
+
+        boosted.append(token)
+        index += 1
+
+    return ";".join(boosted)
+
+
 def _apply_line_background(code_line: str, bg_sgr: str) -> str:
     def _inject_bg(match: re.Match[str]) -> str:
-        params = match.group(1)
+        params = _boost_foreground_contrast_for_diff(match.group(1))
         if params:
             return f"\033[{params};{bg_sgr}m"
         return f"\033[{bg_sgr}m"

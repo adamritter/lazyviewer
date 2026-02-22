@@ -8,11 +8,29 @@ from pathlib import Path
 
 from lazyviewer.ansi import ANSI_ESCAPE_RE
 from lazyviewer.git_status import (
+    _ADDED_BG_SGR,
+    _apply_line_background,
+    _boost_foreground_contrast_for_diff,
     GIT_STATUS_CHANGED,
     GIT_STATUS_UNTRACKED,
     collect_git_status_overlay,
 )
 from lazyviewer.tree import TreeEntry, format_tree_entry
+
+
+class GitDiffPreviewColorContrastTests(unittest.TestCase):
+    def test_boost_foreground_contrast_promotes_dark_or_muted_foregrounds(self) -> None:
+        self.assertEqual(_boost_foreground_contrast_for_diff("90"), "38;5;246")
+        self.assertEqual(_boost_foreground_contrast_for_diff("30"), "38;5;246")
+        self.assertEqual(_boost_foreground_contrast_for_diff("38;5;245"), "38;5;246")
+        self.assertEqual(_boost_foreground_contrast_for_diff("38;2;90;92;91"), "38;2;170;170;170")
+        self.assertEqual(_boost_foreground_contrast_for_diff("2;38;5;245"), "38;5;246")
+
+    def test_apply_line_background_recolors_low_contrast_decorator_tokens(self) -> None:
+        line = "\033[90m@unittest\033[39;49;00m.skipIf"
+        rendered = _apply_line_background(line, _ADDED_BG_SGR)
+        self.assertIn("\033[38;5;246;48;2;36;74;52m@unittest", rendered)
+        self.assertNotIn("\033[90;48;2;36;74;52m", rendered)
 
 
 @unittest.skipIf(shutil.which("git") is None, "git is required for git overlay tests")
