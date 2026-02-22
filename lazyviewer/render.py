@@ -10,7 +10,7 @@ from .tree import TreeEntry, clamp_left_width, format_tree_entry
 HELP_PANEL_TREE_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mTREE\033[0m",
     "\033[2;38;5;250mnav:\033[0m \033[38;5;229mh/j/k/l\033[0m move  \033[38;5;229mEnter\033[0m toggle/open",
-    "\033[2;38;5;250mfilter:\033[0m \033[38;5;229mCtrl+P\033[0m files  \033[38;5;229m/\033[0m content  \033[38;5;229mEnter\033[0m open+exit  \033[38;5;229mTab\033[0m edit",
+    "\033[2;38;5;250mfilter:\033[0m \033[38;5;229mCtrl+P\033[0m files  \033[38;5;229m/\033[0m content  \033[38;5;229mEnter\033[0m keep  \033[38;5;229mTab\033[0m edit  \033[38;5;229mn/N\033[0m hits",
     "\033[2;38;5;250mroot/nav:\033[0m \033[38;5;229mr\033[0m set root  \033[38;5;229mR\033[0m parent root  \033[38;5;229mCtrl+U/D\033[0m smart dir jump (max 10)",
 )
 
@@ -25,7 +25,7 @@ HELP_PANEL_TEXT_ONLY_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mKEYS\033[0m",
     "\033[2;38;5;250mscroll:\033[0m \033[38;5;229mUp/Down\033[0m  \033[38;5;229md/u\033[0m  \033[38;5;229mf/B\033[0m  \033[38;5;229mg/G/10G\033[0m  \033[38;5;229mLeft/Right\033[0m",
     "\033[2;38;5;250medit:\033[0m \033[38;5;229mw\033[0m wrap  \033[38;5;229me\033[0m edit  \033[38;5;229ms\033[0m symbols  \033[38;5;229mt\033[0m tree  \033[38;5;229mr/R\033[0m root  \033[38;5;229m.\033[0m hidden",
-    "\033[2;38;5;250mmeta:\033[0m \033[38;5;229mCtrl+P\033[0m file filter  \033[38;5;229m/\033[0m content filter  \033[38;5;229mCtrl+U/D\033[0m smart jump  \033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
+    "\033[2;38;5;250mmeta:\033[0m \033[38;5;229mCtrl+P\033[0m file filter  \033[38;5;229m/\033[0m content filter  \033[38;5;229mn/N\033[0m next/prev hit  \033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
 )
 
 
@@ -61,7 +61,12 @@ def build_status_line(left_text: str, width: int, right_text: str = "│ ? Help"
     return f"{left}{gap}{right_text}"
 
 
-def _highlight_ansi_substrings(text: str, query: str) -> str:
+def _highlight_ansi_substrings(
+    text: str,
+    query: str,
+    current_column: int | None = None,
+    has_current_target: bool = False,
+) -> str:
     if not text or not query:
         return text
 
@@ -104,19 +109,49 @@ def _highlight_ansi_substrings(text: str, query: str) -> str:
     if not spans:
         return text
 
-    start_code = "\033[7;1m"
-    end_code = "\033[27;22m"
+    current_idx: int | None = None
+    if has_current_target and current_column is not None and spans:
+        target = max(0, current_column - 1)
+        for idx, (start_vis, end_vis) in enumerate(spans):
+            if start_vis <= target < end_vis:
+                current_idx = idx
+                break
+        if current_idx is None:
+            for idx, (start_vis, _end_vis) in enumerate(spans):
+                if start_vis >= target:
+                    current_idx = idx
+                    break
+        if current_idx is None:
+            current_idx = len(spans) - 1
+
+    primary_start = "\033[7;1m"
+    primary_end = "\033[27;22m"
+    secondary_start = "\033[1m"
+    secondary_end = "\033[22m"
+
     out: list[str] = []
     raw_cursor = 0
-    for start_vis, end_vis in spans:
+    for span_idx, (start_vis, end_vis) in enumerate(spans):
         if start_vis >= len(visible_start) or end_vis <= 0:
             continue
         start_raw = visible_start[start_vis]
         end_raw = visible_end[min(len(visible_end) - 1, end_vis - 1)]
         out.append(text[raw_cursor:start_raw])
-        out.append(start_code)
+        if has_current_target:
+            if current_idx is not None and span_idx == current_idx:
+                out.append(primary_start)
+            else:
+                out.append(secondary_start)
+        else:
+            out.append(primary_start)
         out.append(text[start_raw:end_raw])
-        out.append(end_code)
+        if has_current_target:
+            if current_idx is not None and span_idx == current_idx:
+                out.append(primary_end)
+            else:
+                out.append(secondary_end)
+        else:
+            out.append(primary_end)
         raw_cursor = end_raw
     out.append(text[raw_cursor:])
     return "".join(out)
@@ -157,11 +192,14 @@ def render_dual_page(
     git_status_overlay: dict[Path, int] | None = None,
     tree_search_query: str = "",
     text_search_query: str = "",
+    text_search_current_line: int = 0,
+    text_search_current_column: int = 0,
 ) -> None:
     out: list[str] = []
     out.append("\033[H\033[J")
     help_rows = help_panel_row_count(max_lines, show_help)
     content_rows = max(1, max_lines - help_rows)
+    has_current_text_hit = text_search_current_line > 0 and text_search_current_column > 0
 
     if not browser_visible:
         line_width = max(1, width - 1)
@@ -175,7 +213,13 @@ def render_dual_page(
                     text_raw = clip_ansi_line(text_raw, line_width)
                 else:
                     text_raw = slice_ansi_line(text_raw, text_x, line_width)
-                text_raw = _highlight_ansi_substrings(text_raw, text_search_query)
+                current_col = text_search_current_column if text_idx + 1 == text_search_current_line else None
+                text_raw = _highlight_ansi_substrings(
+                    text_raw,
+                    text_search_query,
+                    current_column=current_col,
+                    has_current_target=has_current_text_hit,
+                )
                 out.append(text_raw)
                 if "\033" in text_raw:
                     out.append("\033[0m")
@@ -281,7 +325,13 @@ def render_dual_page(
                 text_raw = clip_ansi_line(text_raw, right_width)
             else:
                 text_raw = slice_ansi_line(text_raw, text_x, right_width)
-            text_raw = _highlight_ansi_substrings(text_raw, text_search_query)
+            current_col = text_search_current_column if text_idx + 1 == text_search_current_line else None
+            text_raw = _highlight_ansi_substrings(
+                text_raw,
+                text_search_query,
+                current_column=current_col,
+                has_current_target=has_current_text_hit,
+            )
             out.append(text_raw)
             if "\033" in text_raw:
                 out.append("\033[0m")
@@ -331,7 +381,8 @@ def render_help_page(width: int, height: int) -> None:
         "  \033[38;5;229m?\033[0m toggle help   \033[38;5;229mq\033[0m/\033[38;5;229mEsc\033[0m close help",
         "  \033[38;5;229mCtrl+P\033[0m file filter mode, \033[38;5;229m/\033[0m content filter mode",
         "  \033[38;5;229mType/Backspace\033[0m edit query   \033[38;5;229mUp/Down\033[0m or \033[38;5;229mCtrl+J/K\033[0m move matches",
-        "  \033[38;5;229mEnter\033[0m use tree keys   \033[38;5;229mTab\033[0m edit query",
+        "  \033[38;5;229mEnter\033[0m keeps content search active   \033[38;5;229mTab\033[0m edit query",
+        "  \033[38;5;229mn/N\033[0m next/previous content hit",
         "  \033[38;5;229ms\033[0m symbol outline (functions/classes/imports) for current file",
         "  \033[38;5;229mt\033[0m show/hide tree pane",
         "  \033[38;5;229m.\033[0m show/hide hidden files and directories",
