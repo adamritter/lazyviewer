@@ -76,6 +76,18 @@ def run_main_loop(
     tree_filter_cursor_visible = True
     tree_filter_spinner_frame = 0
 
+    def adjust_left_pane_width(term_columns: int, delta: int) -> None:
+        prev_left = state.left_width
+        state.left_width = clamp_left_width(term_columns, state.left_width + delta)
+        if state.left_width == prev_left:
+            return
+        ops.save_left_pane_width(term_columns, state.left_width)
+        state.right_width = max(1, term_columns - state.left_width - 2)
+        if state.right_width != state.last_right_width:
+            state.last_right_width = state.right_width
+            ops.rebuild_screen_lines(columns=term_columns)
+        state.dirty = True
+
     with terminal.raw_mode():
         while True:
             term = shutil.get_terminal_size((80, 24))
@@ -279,26 +291,10 @@ def run_main_loop(
                 state.skip_next_lf = False
 
             if key == "SHIFT_LEFT":
-                prev_left = state.left_width
-                state.left_width = clamp_left_width(term.columns, state.left_width - 2)
-                if state.left_width != prev_left:
-                    ops.save_left_pane_width(term.columns, state.left_width)
-                    state.right_width = max(1, term.columns - state.left_width - 2)
-                    if state.right_width != state.last_right_width:
-                        state.last_right_width = state.right_width
-                        ops.rebuild_screen_lines(columns=term.columns)
-                    state.dirty = True
+                adjust_left_pane_width(term.columns, -2)
                 continue
             if key == "SHIFT_RIGHT":
-                prev_left = state.left_width
-                state.left_width = clamp_left_width(term.columns, state.left_width + 2)
-                if state.left_width != prev_left:
-                    ops.save_left_pane_width(term.columns, state.left_width)
-                    state.right_width = max(1, term.columns - state.left_width - 2)
-                    if state.right_width != state.last_right_width:
-                        state.last_right_width = state.right_width
-                        ops.rebuild_screen_lines(columns=term.columns)
-                    state.dirty = True
+                adjust_left_pane_width(term.columns, 2)
                 continue
 
             if state.pending_mark_set:
