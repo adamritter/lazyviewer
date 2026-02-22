@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from .search import fuzzy as _fuzzy
-from .search.fuzzy import (
+from . import content as _content
+from . import fuzzy as _fuzzy
+from .content import ContentMatch, search_project_content_rg
+from .fuzzy import (
     STRICT_SUBSTRING_ONLY_MIN_FILES,
     clear_project_files_cache,
     collect_project_file_labels,
@@ -14,11 +16,12 @@ from .search.fuzzy import (
     to_project_relative,
 )
 
-# Compatibility for tests/code patching `lazyviewer.fuzzy.shutil` and `subprocess`.
-shutil = _fuzzy.shutil
-subprocess = _fuzzy.subprocess
+# Compatibility for tests/code patching `lazyviewer.search.shutil` and `subprocess`.
+shutil = _content.shutil
+subprocess = _content.subprocess
 
 __all__ = [
+    "ContentMatch",
     "STRICT_SUBSTRING_ONLY_MIN_FILES",
     "clear_project_files_cache",
     "collect_project_file_labels",
@@ -28,5 +31,6 @@ __all__ = [
     "fuzzy_match_labels",
     "fuzzy_match_paths",
     "fuzzy_score",
+    "search_project_content_rg",
     "to_project_relative",
 ]
