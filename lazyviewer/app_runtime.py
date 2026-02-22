@@ -13,6 +13,8 @@ import shutil
 import sys
 import threading
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from .ansi import ANSI_ESCAPE_RE, build_screen_lines, char_display_width
@@ -28,6 +30,7 @@ from .editor import launch_editor
 from .git_status import clear_diff_preview_cache, collect_git_status_overlay
 from .highlight import colorize_source
 from .key_handlers import handle_normal_key as handle_normal_key_event
+from .navigation import JumpLocation
 from .preview import (
     DIR_PREVIEW_GROWTH_STEP,
     DIR_PREVIEW_HARD_MAX_ENTRIES,
@@ -61,6 +64,165 @@ CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT = 8.0
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR = 2
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR = 1
 _TRAILING_GIT_BADGES_RE = re.compile(r"^(.*?)(?:\s(?:\[(?:M|\?)\])+)$")
+
+
+@dataclass(frozen=True)
+class RuntimeLoopTiming:
+    double_click_seconds: float
+    filter_cursor_blink_seconds: float
+    tree_filter_spinner_frame_seconds: float
+
+
+@dataclass(frozen=True)
+class RuntimeLoopCallbacks:
+    get_tree_filter_loading_until: Callable[[], float]
+    tree_view_rows: Callable[[], int]
+    tree_filter_prompt_prefix: Callable[[], str]
+    tree_filter_placeholder: Callable[[], str]
+    visible_content_rows: Callable[[], int]
+    rebuild_screen_lines: Callable[..., None]
+    maybe_refresh_tree_watch: Callable[[], None]
+    maybe_refresh_git_watch: Callable[[], None]
+    refresh_git_status_overlay: Callable[..., None]
+    current_preview_image_path: Callable[[], Path | None]
+    current_preview_image_geometry: Callable[[int], tuple[int, int, int, int]]
+    open_tree_filter: Callable[[str], None]
+    open_command_picker: Callable[[], None]
+    close_picker: Callable[..., None]
+    refresh_command_picker_matches: Callable[..., None]
+    activate_picker_selection: Callable[[], bool]
+    refresh_active_picker_matches: Callable[..., None]
+    handle_tree_mouse_wheel: Callable[[str], bool]
+    handle_tree_mouse_click: Callable[[str], bool]
+    toggle_help_panel: Callable[[], None]
+    close_tree_filter: Callable[..., None]
+    activate_tree_filter_selection: Callable[[], None]
+    move_tree_selection: Callable[[int], bool]
+    apply_tree_filter_query: Callable[..., None]
+    jump_to_next_content_hit: Callable[[int], bool]
+    set_named_mark: Callable[[str], bool]
+    jump_to_named_mark: Callable[[str], bool]
+    jump_back_in_history: Callable[[], bool]
+    jump_forward_in_history: Callable[[], bool]
+    handle_normal_key: Callable[[str, int], bool]
+    save_left_pane_width: Callable[[int, int], None]
+    tick_source_selection_drag: Callable[[], None] | None = None
+
+
+@dataclass(frozen=True)
+class NormalKeyCallbacks:
+    current_jump_location: Callable[[], JumpLocation]
+    record_jump_if_changed: Callable[[JumpLocation], None]
+    open_symbol_picker: Callable[[], None]
+    reroot_to_parent: Callable[[], None]
+    reroot_to_selected_target: Callable[[], None]
+    toggle_hidden_files: Callable[[], None]
+    toggle_tree_pane: Callable[[], None]
+    toggle_wrap_mode: Callable[[], None]
+    toggle_help_panel: Callable[[], None]
+    toggle_git_features: Callable[[], None]
+    launch_lazygit: Callable[[], None]
+    handle_tree_mouse_wheel: Callable[[str], bool]
+    handle_tree_mouse_click: Callable[[str], bool]
+    move_tree_selection: Callable[[int], bool]
+    rebuild_tree_entries: Callable[..., None]
+    preview_selected_entry: Callable[..., None]
+    refresh_rendered_for_current_path: Callable[..., None]
+    refresh_git_status_overlay: Callable[..., None]
+    maybe_grow_directory_preview: Callable[[], bool]
+    visible_content_rows: Callable[[], int]
+    rebuild_screen_lines: Callable[..., None]
+    mark_tree_watch_dirty: Callable[[], None]
+    launch_editor_for_path: Callable[[Path], str | None]
+    jump_to_next_git_modified: Callable[[int], bool]
+
+
+def _run_main_loop_with_config(
+    *,
+    state: AppState,
+    terminal: TerminalController,
+    stdin_fd: int,
+    timing: RuntimeLoopTiming,
+    callbacks: RuntimeLoopCallbacks,
+) -> None:
+    run_main_loop(
+        state=state,
+        terminal=terminal,
+        stdin_fd=stdin_fd,
+        double_click_seconds=timing.double_click_seconds,
+        filter_cursor_blink_seconds=timing.filter_cursor_blink_seconds,
+        tree_filter_spinner_frame_seconds=timing.tree_filter_spinner_frame_seconds,
+        get_tree_filter_loading_until=callbacks.get_tree_filter_loading_until,
+        tree_view_rows=callbacks.tree_view_rows,
+        tree_filter_prompt_prefix=callbacks.tree_filter_prompt_prefix,
+        tree_filter_placeholder=callbacks.tree_filter_placeholder,
+        visible_content_rows=callbacks.visible_content_rows,
+        rebuild_screen_lines=callbacks.rebuild_screen_lines,
+        maybe_refresh_tree_watch=callbacks.maybe_refresh_tree_watch,
+        maybe_refresh_git_watch=callbacks.maybe_refresh_git_watch,
+        refresh_git_status_overlay=callbacks.refresh_git_status_overlay,
+        current_preview_image_path=callbacks.current_preview_image_path,
+        current_preview_image_geometry=callbacks.current_preview_image_geometry,
+        open_tree_filter=callbacks.open_tree_filter,
+        open_command_picker=callbacks.open_command_picker,
+        close_picker=callbacks.close_picker,
+        refresh_command_picker_matches=callbacks.refresh_command_picker_matches,
+        activate_picker_selection=callbacks.activate_picker_selection,
+        refresh_active_picker_matches=callbacks.refresh_active_picker_matches,
+        handle_tree_mouse_wheel=callbacks.handle_tree_mouse_wheel,
+        handle_tree_mouse_click=callbacks.handle_tree_mouse_click,
+        toggle_help_panel=callbacks.toggle_help_panel,
+        close_tree_filter=callbacks.close_tree_filter,
+        activate_tree_filter_selection=callbacks.activate_tree_filter_selection,
+        move_tree_selection=callbacks.move_tree_selection,
+        apply_tree_filter_query=callbacks.apply_tree_filter_query,
+        jump_to_next_content_hit=callbacks.jump_to_next_content_hit,
+        set_named_mark=callbacks.set_named_mark,
+        jump_to_named_mark=callbacks.jump_to_named_mark,
+        jump_back_in_history=callbacks.jump_back_in_history,
+        jump_forward_in_history=callbacks.jump_forward_in_history,
+        handle_normal_key=callbacks.handle_normal_key,
+        save_left_pane_width=callbacks.save_left_pane_width,
+        tick_source_selection_drag=callbacks.tick_source_selection_drag,
+    )
+
+
+def _handle_normal_key_with_callbacks(
+    *,
+    key: str,
+    term_columns: int,
+    state: AppState,
+    callbacks: NormalKeyCallbacks,
+) -> bool:
+    return handle_normal_key_event(
+        key=key,
+        term_columns=term_columns,
+        state=state,
+        current_jump_location=callbacks.current_jump_location,
+        record_jump_if_changed=callbacks.record_jump_if_changed,
+        open_symbol_picker=callbacks.open_symbol_picker,
+        reroot_to_parent=callbacks.reroot_to_parent,
+        reroot_to_selected_target=callbacks.reroot_to_selected_target,
+        toggle_hidden_files=callbacks.toggle_hidden_files,
+        toggle_tree_pane=callbacks.toggle_tree_pane,
+        toggle_wrap_mode=callbacks.toggle_wrap_mode,
+        toggle_help_panel=callbacks.toggle_help_panel,
+        toggle_git_features=callbacks.toggle_git_features,
+        launch_lazygit=callbacks.launch_lazygit,
+        handle_tree_mouse_wheel=callbacks.handle_tree_mouse_wheel,
+        handle_tree_mouse_click=callbacks.handle_tree_mouse_click,
+        move_tree_selection=callbacks.move_tree_selection,
+        rebuild_tree_entries=callbacks.rebuild_tree_entries,
+        preview_selected_entry=callbacks.preview_selected_entry,
+        refresh_rendered_for_current_path=callbacks.refresh_rendered_for_current_path,
+        refresh_git_status_overlay=callbacks.refresh_git_status_overlay,
+        maybe_grow_directory_preview=callbacks.maybe_grow_directory_preview,
+        visible_content_rows=callbacks.visible_content_rows,
+        rebuild_screen_lines=callbacks.rebuild_screen_lines,
+        mark_tree_watch_dirty=callbacks.mark_tree_watch_dirty,
+        launch_editor_for_path=callbacks.launch_editor_for_path,
+        jump_to_next_git_modified=callbacks.jump_to_next_git_modified,
+    )
 
 
 def _skip_gitignored_for_hidden_mode(show_hidden: bool) -> bool:
@@ -1324,44 +1486,47 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         refresh_git_status_overlay(force=True)
         state.dirty = True
 
+    normal_key_callbacks = NormalKeyCallbacks(
+        current_jump_location=current_jump_location,
+        record_jump_if_changed=record_jump_if_changed,
+        open_symbol_picker=navigation_ops.open_symbol_picker,
+        reroot_to_parent=navigation_ops.reroot_to_parent,
+        reroot_to_selected_target=navigation_ops.reroot_to_selected_target,
+        toggle_hidden_files=navigation_ops.toggle_hidden_files,
+        toggle_tree_pane=navigation_ops.toggle_tree_pane,
+        toggle_wrap_mode=navigation_ops.toggle_wrap_mode,
+        toggle_help_panel=navigation_ops.toggle_help_panel,
+        toggle_git_features=toggle_git_features,
+        launch_lazygit=launch_lazygit,
+        handle_tree_mouse_wheel=handle_tree_mouse_wheel,
+        handle_tree_mouse_click=handle_tree_mouse_click,
+        move_tree_selection=move_tree_selection,
+        rebuild_tree_entries=rebuild_tree_entries,
+        preview_selected_entry=preview_selected_entry,
+        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+        refresh_git_status_overlay=refresh_git_status_overlay,
+        maybe_grow_directory_preview=maybe_grow_directory_preview,
+        visible_content_rows=visible_content_rows,
+        rebuild_screen_lines=rebuild_screen_lines,
+        mark_tree_watch_dirty=mark_tree_watch_dirty,
+        launch_editor_for_path=launch_editor_for_path,
+        jump_to_next_git_modified=jump_to_next_git_modified,
+    )
+
     def handle_normal_key(key: str, term_columns: int) -> bool:
-        return handle_normal_key_event(
+        return _handle_normal_key_with_callbacks(
             key=key,
             term_columns=term_columns,
             state=state,
-            current_jump_location=current_jump_location,
-            record_jump_if_changed=record_jump_if_changed,
-            open_symbol_picker=navigation_ops.open_symbol_picker,
-            reroot_to_parent=navigation_ops.reroot_to_parent,
-            reroot_to_selected_target=navigation_ops.reroot_to_selected_target,
-            toggle_hidden_files=navigation_ops.toggle_hidden_files,
-            toggle_tree_pane=navigation_ops.toggle_tree_pane,
-            toggle_wrap_mode=navigation_ops.toggle_wrap_mode,
-            toggle_help_panel=navigation_ops.toggle_help_panel,
-            toggle_git_features=toggle_git_features,
-            launch_lazygit=launch_lazygit,
-            handle_tree_mouse_wheel=handle_tree_mouse_wheel,
-            handle_tree_mouse_click=handle_tree_mouse_click,
-            move_tree_selection=move_tree_selection,
-            rebuild_tree_entries=rebuild_tree_entries,
-            preview_selected_entry=preview_selected_entry,
-            refresh_rendered_for_current_path=refresh_rendered_for_current_path,
-            refresh_git_status_overlay=refresh_git_status_overlay,
-            maybe_grow_directory_preview=maybe_grow_directory_preview,
-            visible_content_rows=visible_content_rows,
-            rebuild_screen_lines=rebuild_screen_lines,
-            mark_tree_watch_dirty=mark_tree_watch_dirty,
-            launch_editor_for_path=launch_editor_for_path,
-            jump_to_next_git_modified=jump_to_next_git_modified,
+            callbacks=normal_key_callbacks,
         )
 
-    run_main_loop(
-        state=state,
-        terminal=terminal,
-        stdin_fd=stdin_fd,
+    loop_timing = RuntimeLoopTiming(
         double_click_seconds=DOUBLE_CLICK_SECONDS,
         filter_cursor_blink_seconds=FILTER_CURSOR_BLINK_SECONDS,
         tree_filter_spinner_frame_seconds=TREE_FILTER_SPINNER_FRAME_SECONDS,
+    )
+    loop_callbacks = RuntimeLoopCallbacks(
         get_tree_filter_loading_until=tree_filter_ops.get_loading_until,
         tree_view_rows=tree_filter_ops.tree_view_rows,
         tree_filter_prompt_prefix=tree_filter_ops.tree_filter_prompt_prefix,
@@ -1394,4 +1559,12 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         handle_normal_key=handle_normal_key,
         save_left_pane_width=save_left_pane_width_for_mode,
         tick_source_selection_drag=tick_source_selection_drag,
+    )
+
+    _run_main_loop_with_config(
+        state=state,
+        terminal=terminal,
+        stdin_fd=stdin_fd,
+        timing=loop_timing,
+        callbacks=loop_callbacks,
     )
