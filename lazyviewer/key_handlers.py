@@ -235,6 +235,7 @@ def handle_tree_filter_key(
     state: AppState,
     handle_tree_mouse_wheel: Callable[[str], bool],
     handle_tree_mouse_click: Callable[[str], bool],
+    toggle_help_panel: Callable[[], None],
     close_tree_filter: Callable[..., None],
     activate_tree_filter_selection: Callable[[], None],
     move_tree_selection: Callable[[int], bool],
@@ -279,6 +280,9 @@ def handle_tree_filter_key(
                     preview_selection=True,
                     select_first_file=True,
                 )
+            return True
+        if key == "CTRL_QUESTION":
+            toggle_help_panel()
             return True
         if len(key) == 1 and key.isprintable():
             apply_tree_filter_query(
@@ -364,7 +368,7 @@ def handle_normal_key(
 
     count = int(state.count_buffer) if state.count_buffer else None
     state.count_buffer = ""
-    if key == "?":
+    if key in {"?", "CTRL_QUESTION"}:
         toggle_help_panel()
         return False
     if key == "CTRL_G":

@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from lazyviewer.key_handlers import handle_normal_key
+from lazyviewer.key_handlers import handle_normal_key, handle_tree_filter_key
 from lazyviewer.navigation import JumpLocation
 from lazyviewer.state import AppState
 from lazyviewer.tree import TreeEntry
@@ -113,6 +113,54 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
 
         self.assertFalse(should_quit)
         self.assertEqual(called["count"], 1)
+
+    def test_question_character_is_appended_while_tree_filter_editing(self) -> None:
+        state = _make_state()
+        state.tree_filter_active = True
+        state.tree_filter_editing = True
+        state.tree_filter_query = "abc"
+        called = {"query": "", "toggle_help": 0}
+
+        handled = handle_tree_filter_key(
+            key="?",
+            state=state,
+            handle_tree_mouse_wheel=lambda _key: False,
+            handle_tree_mouse_click=lambda _key: False,
+            toggle_help_panel=lambda: called.__setitem__("toggle_help", called["toggle_help"] + 1),
+            close_tree_filter=lambda **_kwargs: None,
+            activate_tree_filter_selection=lambda: None,
+            move_tree_selection=lambda _direction: False,
+            apply_tree_filter_query=lambda query, **_kwargs: called.__setitem__("query", query),
+            jump_to_next_content_hit=lambda _direction: False,
+        )
+
+        self.assertTrue(handled)
+        self.assertEqual(called["query"], "abc?")
+        self.assertEqual(called["toggle_help"], 0)
+
+    def test_ctrl_question_toggles_help_while_tree_filter_editing(self) -> None:
+        state = _make_state()
+        state.tree_filter_active = True
+        state.tree_filter_editing = True
+        state.tree_filter_query = "abc"
+        called = {"apply": 0, "toggle_help": 0}
+
+        handled = handle_tree_filter_key(
+            key="CTRL_QUESTION",
+            state=state,
+            handle_tree_mouse_wheel=lambda _key: False,
+            handle_tree_mouse_click=lambda _key: False,
+            toggle_help_panel=lambda: called.__setitem__("toggle_help", called["toggle_help"] + 1),
+            close_tree_filter=lambda **_kwargs: None,
+            activate_tree_filter_selection=lambda: None,
+            move_tree_selection=lambda _direction: False,
+            apply_tree_filter_query=lambda _query, **_kwargs: called.__setitem__("apply", called["apply"] + 1),
+            jump_to_next_content_hit=lambda _direction: False,
+        )
+
+        self.assertTrue(handled)
+        self.assertEqual(called["apply"], 0)
+        self.assertEqual(called["toggle_help"], 1)
 
 
 if __name__ == "__main__":

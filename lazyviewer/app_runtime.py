@@ -489,7 +489,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 state.current_path = selected_target
                 refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
             if entry.line is not None:
-                jump_to_line(max(0, entry.line - 1))
+                jump_to_line_proxy(max(0, entry.line - 1))
             return
         if not force and selected_target == state.current_path.resolve():
             return
@@ -793,6 +793,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         refresh_active_picker_matches=navigation_ops.refresh_active_picker_matches,
         handle_tree_mouse_wheel=handle_tree_mouse_wheel,
         handle_tree_mouse_click=handle_tree_mouse_click,
+        toggle_help_panel=navigation_ops.toggle_help_panel,
         close_tree_filter=close_tree_filter,
         activate_tree_filter_selection=activate_tree_filter_selection,
         move_tree_selection=move_tree_selection,
