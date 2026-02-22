@@ -503,7 +503,10 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 key = "ENTER"
                 state.skip_next_lf = True
             elif key == "ENTER_LF":
-                key = "ENTER"
+                if state.tree_filter_active and state.tree_filter_editing:
+                    key = "CTRL_J"
+                else:
+                    key = "ENTER"
                 state.skip_next_lf = False
             else:
                 state.skip_next_lf = False
@@ -631,6 +634,22 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 if key == "TAB" or key == "ENTER":
                     state.tree_filter_editing = False
                     state.dirty = True
+                    continue
+                if key == "UP" or key == "CTRL_K":
+                    if state.tree_entries:
+                        prev_selected = state.selected_idx
+                        state.selected_idx = max(0, state.selected_idx - 1)
+                        preview_selected_entry()
+                        if state.selected_idx != prev_selected:
+                            state.dirty = True
+                    continue
+                if key == "DOWN" or key == "CTRL_J":
+                    if state.tree_entries:
+                        prev_selected = state.selected_idx
+                        state.selected_idx = min(len(state.tree_entries) - 1, state.selected_idx + 1)
+                        preview_selected_entry()
+                        if state.selected_idx != prev_selected:
+                            state.dirty = True
                     continue
                 if key == "BACKSPACE":
                     if state.tree_filter_query:

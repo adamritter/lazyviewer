@@ -7,10 +7,25 @@ from pathlib import Path
 from .ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line, slice_ansi_line
 from .tree import TreeEntry, clamp_left_width, format_tree_entry
 
-HELP_PANEL_LINES: tuple[str, ...] = (
-    "\033[2;38;5;250mKeys:\033[0m ? hide help  q quit  Ctrl+P filter  s symbols  t tree  w wrap  . hidden",
-    "\033[2;38;5;250mTree:\033[0m h/j/k/l nav  Enter toggle/open  Shift+Left/Right resize",
-    "\033[2;38;5;250mText:\033[0m Up/Down line  d/u half-page  f/B page  g/G 10G  Left/Right scroll  e edit",
+HELP_PANEL_TREE_LINES: tuple[str, ...] = (
+    "\033[1;38;5;81mTREE\033[0m",
+    "\033[2;38;5;250mnav:\033[0m \033[38;5;229mh/j/k/l\033[0m move  \033[38;5;229mEnter\033[0m toggle/open",
+    "\033[2;38;5;250mfilter:\033[0m \033[38;5;229mCtrl+P\033[0m open  \033[38;5;229mTab\033[0m edit  \033[38;5;229mEsc\033[0m clear",
+    "\033[2;38;5;250mlayout:\033[0m \033[38;5;229mShift+Left/Right\033[0m resize",
+)
+
+HELP_PANEL_TEXT_LINES: tuple[str, ...] = (
+    "\033[1;38;5;81mTEXT + EXTRAS\033[0m",
+    "\033[2;38;5;250mscroll:\033[0m \033[38;5;229mUp/Down\033[0m line  \033[38;5;229md/u\033[0m half  \033[38;5;229mf/B\033[0m page  \033[38;5;229mg/G/10G\033[0m",
+    "\033[2;38;5;250medit:\033[0m \033[38;5;229mLeft/Right\033[0m x-scroll  \033[38;5;229mw\033[0m wrap  \033[38;5;229me\033[0m edit",
+    "\033[2;38;5;250mextra:\033[0m \033[38;5;229ms\033[0m symbols  \033[38;5;229mt\033[0m tree  \033[38;5;229m.\033[0m hidden  \033[38;5;229m?\033[0m hide help  \033[38;5;229mq\033[0m quit",
+)
+
+HELP_PANEL_TEXT_ONLY_LINES: tuple[str, ...] = (
+    "\033[1;38;5;81mKEYS\033[0m",
+    "\033[2;38;5;250mscroll:\033[0m \033[38;5;229mUp/Down\033[0m  \033[38;5;229md/u\033[0m  \033[38;5;229mf/B\033[0m  \033[38;5;229mg/G/10G\033[0m  \033[38;5;229mLeft/Right\033[0m",
+    "\033[2;38;5;250medit:\033[0m \033[38;5;229mw\033[0m wrap  \033[38;5;229me\033[0m edit  \033[38;5;229ms\033[0m symbols  \033[38;5;229mt\033[0m tree  \033[38;5;229m.\033[0m hidden",
+    "\033[2;38;5;250mmeta:\033[0m \033[38;5;229mCtrl+P\033[0m filter  \033[38;5;229m?\033[0m hide help  \033[38;5;229mq\033[0m quit",
 )
 
 
@@ -28,7 +43,12 @@ def help_panel_row_count(max_lines: int, show_help: bool) -> int:
         return 0
     if max_lines <= 1:
         return 0
-    return min(len(HELP_PANEL_LINES), max_lines - 1)
+    required_rows = max(
+        len(HELP_PANEL_TREE_LINES),
+        len(HELP_PANEL_TEXT_LINES),
+        len(HELP_PANEL_TEXT_ONLY_LINES),
+    )
+    return min(required_rows, max_lines - 1)
 
 
 def build_status_line(left_text: str, width: int, right_text: str = "│ ? Help") -> str:
@@ -93,7 +113,7 @@ def render_dual_page(
                     out.append("\033[0m")
             out.append("\r\n")
         for row in range(help_rows):
-            help_text = clip_ansi_line(HELP_PANEL_LINES[row], line_width)
+            help_text = clip_ansi_line(HELP_PANEL_TEXT_ONLY_LINES[row], line_width)
             out.append(help_text)
             if "\033" in help_text:
                 out.append("\033[0m")
@@ -191,9 +211,17 @@ def render_dual_page(
         out.append("\r\n")
 
     for row in range(help_rows):
-        help_text = clip_ansi_line(HELP_PANEL_LINES[row], max(1, width - 1))
-        out.append(help_text)
-        if "\033" in help_text:
+        left_help = clip_ansi_line(HELP_PANEL_TREE_LINES[row], left_width)
+        out.append(left_help)
+        left_plain = ANSI_ESCAPE_RE.sub("", left_help)
+        left_len = sum(char_display_width(ch, 0) for ch in left_plain)
+        if left_len < left_width:
+            out.append(" " * (left_width - left_len))
+        out.append("\033[2m│\033[0m")
+
+        right_help = clip_ansi_line(HELP_PANEL_TEXT_LINES[row], right_width)
+        out.append(right_help)
+        if "\033" in right_help:
             out.append("\033[0m")
         out.append("\r\n")
 
@@ -223,7 +251,8 @@ def render_help_page(width: int, height: int) -> None:
         "\033[1;38;5;81mGeneral\033[0m",
         "  \033[38;5;229m?\033[0m toggle help   \033[38;5;229mq\033[0m/\033[38;5;229mEsc\033[0m close help",
         "  \033[38;5;229mCtrl+P\033[0m toggle fuzzy filter mode on the tree",
-        "  \033[38;5;229mType/Backspace\033[0m edit filter query   \033[38;5;229mEnter\033[0m use tree keys   \033[38;5;229mTab\033[0m edit query",
+        "  \033[38;5;229mType/Backspace\033[0m edit filter query   \033[38;5;229mUp/Down\033[0m or \033[38;5;229mCtrl+J/K\033[0m move matches",
+        "  \033[38;5;229mEnter\033[0m use tree keys   \033[38;5;229mTab\033[0m edit query",
         "  \033[38;5;229ms\033[0m symbol outline (functions/classes/imports) for current file",
         "  \033[38;5;229mt\033[0m show/hide tree pane",
         "  \033[38;5;229m.\033[0m show/hide hidden files and directories",

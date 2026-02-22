@@ -38,6 +38,8 @@ def read_key(fd: int, timeout_ms: int | None = None) -> str:
         return "BACKSPACE"
     if ch == b"\x15":
         return "CTRL_U"
+    if ch == b"\x0b":
+        return "CTRL_K"
     if ch == b"\r":
         return "ENTER_CR"
     if ch == b"\n":
