@@ -464,7 +464,11 @@ def handle_normal_key(
         error = launch_editor_for_path(edit_target)
         state.current_path = edit_target
         if error is None:
-            refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
+            refresh_rendered_for_current_path(
+                reset_scroll=True,
+                reset_dir_budget=True,
+                force_rebuild=True,
+            )
             refresh_git_status_overlay(force=True)
         else:
             state.rendered = f"\033[31m{error}\033[0m"

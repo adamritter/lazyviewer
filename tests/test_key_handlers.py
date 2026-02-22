@@ -202,6 +202,48 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         self.assertEqual(launched, [Path("/tmp").resolve()])
         self.assertEqual(state.current_path, Path("/tmp").resolve())
 
+    def test_e_forces_preview_rebuild_after_successful_edit(self) -> None:
+        state = _make_state()
+        state.browser_visible = False
+        state.current_path = Path("/tmp").resolve()
+        refresh_calls: list[dict[str, object]] = []
+
+        should_quit = handle_normal_key(
+            key="e",
+            term_columns=120,
+            state=state,
+            current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+            record_jump_if_changed=lambda _origin: None,
+            open_symbol_picker=lambda: None,
+            reroot_to_parent=lambda: None,
+            reroot_to_selected_target=lambda: None,
+            toggle_hidden_files=lambda: None,
+            toggle_tree_pane=lambda: None,
+            toggle_wrap_mode=lambda: None,
+            toggle_help_panel=lambda: None,
+            toggle_git_features=lambda: None,
+            handle_tree_mouse_wheel=lambda _key: False,
+            handle_tree_mouse_click=lambda _key: False,
+            move_tree_selection=lambda _delta: False,
+            rebuild_tree_entries=lambda **_kwargs: None,
+            preview_selected_entry=lambda **_kwargs: None,
+            refresh_rendered_for_current_path=lambda **kwargs: refresh_calls.append(kwargs),
+            refresh_git_status_overlay=lambda **_kwargs: None,
+            maybe_grow_directory_preview=lambda: False,
+            visible_content_rows=lambda: 20,
+            rebuild_screen_lines=lambda **_kwargs: None,
+            mark_tree_watch_dirty=lambda: None,
+            launch_editor_for_path=lambda _path: None,
+            jump_to_next_git_modified=lambda _direction: False,
+        )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(len(refresh_calls), 1)
+        self.assertEqual(
+            refresh_calls[0],
+            {"reset_scroll": True, "reset_dir_budget": True, "force_rebuild": True},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

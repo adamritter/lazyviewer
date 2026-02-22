@@ -65,6 +65,10 @@ def _cache_put(key: tuple[str, bool, int, int, bool, int] | None, preview: str, 
         _DIR_PREVIEW_CACHE.popitem(last=False)
 
 
+def clear_directory_preview_cache() -> None:
+    _DIR_PREVIEW_CACHE.clear()
+
+
 def build_directory_preview(
     root_dir: Path,
     show_hidden: bool,

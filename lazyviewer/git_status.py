@@ -50,6 +50,10 @@ def _cache_put(key: tuple[str, int, int, str, bool, str], value: str | None) -> 
         _DIFF_PREVIEW_CACHE.popitem(last=False)
 
 
+def clear_diff_preview_cache() -> None:
+    _DIFF_PREVIEW_CACHE.clear()
+
+
 def _resolve_repo_and_git_dir(path: Path, timeout_seconds: float) -> tuple[Path | None, Path | None]:
     try:
         proc = subprocess.run(

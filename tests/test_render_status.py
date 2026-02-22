@@ -84,6 +84,69 @@ class RenderStatusTests(unittest.TestCase):
         self.assertIn("Ctrl+P", rendered)
         self.assertIn("\033[38;5;229mCtrl+P\033[0m", rendered)
 
+    def test_bottom_help_panel_handles_mismatched_line_counts(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        tree_help = ("TREE", "tree-2", "tree-3")
+        text_help = ("TEXT",)
+        text_only_help = ("TEXT-ONLY",)
+
+        with (
+            mock.patch("lazyviewer.render.HELP_PANEL_TREE_LINES", tree_help),
+            mock.patch("lazyviewer.render.HELP_PANEL_TEXT_LINES", text_help),
+            mock.patch("lazyviewer.render.HELP_PANEL_TEXT_ONLY_LINES", text_only_help),
+            mock.patch("lazyviewer.render.help.HELP_PANEL_TREE_LINES", tree_help),
+            mock.patch("lazyviewer.render.help.HELP_PANEL_TEXT_LINES", text_help),
+            mock.patch("lazyviewer.render.help.HELP_PANEL_TEXT_ONLY_LINES", text_only_help),
+            mock.patch("lazyviewer.render.os.write", side_effect=capture),
+        ):
+            render_dual_page(
+                text_lines=["line 1", "line 2", "line 3"],
+                text_start=0,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=5,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=100,
+                left_width=30,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=False,
+                show_hidden=False,
+                show_help=True,
+            )
+
+            render_dual_page(
+                text_lines=["line 1", "line 2", "line 3"],
+                text_start=0,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=5,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=100,
+                left_width=30,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=True,
+                show_hidden=False,
+                show_help=True,
+            )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertIn("TEXT-ONLY", rendered)
+        self.assertIn("TREE", rendered)
+        self.assertIn("TEXT", rendered)
+
     def test_tree_filter_renders_query_row_in_left_pane(self) -> None:
         writes: list[bytes] = []
 

@@ -14,7 +14,7 @@ from .config import (
 )
 from .editor import launch_editor
 from .fuzzy import collect_project_file_labels
-from .git_status import collect_git_status_overlay
+from .git_status import clear_diff_preview_cache, collect_git_status_overlay
 from .highlight import colorize_source
 from .key_handlers import handle_normal_key as handle_normal_key_event
 from .preview import (
@@ -22,6 +22,7 @@ from .preview import (
     DIR_PREVIEW_HARD_MAX_ENTRIES,
     DIR_PREVIEW_INITIAL_MAX_ENTRIES,
     build_rendered_for_path,
+    clear_directory_preview_cache,
 )
 from .render import help_panel_row_count
 from .runtime_loop import run_main_loop
@@ -424,7 +425,11 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     def refresh_rendered_for_current_path(
         reset_scroll: bool = True,
         reset_dir_budget: bool = False,
+        force_rebuild: bool = False,
     ) -> None:
+        if force_rebuild:
+            clear_directory_preview_cache()
+            clear_diff_preview_cache()
         resolved_target = state.current_path.resolve()
         is_dir_target = resolved_target.is_dir()
         if is_dir_target:

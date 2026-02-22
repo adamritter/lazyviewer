@@ -114,6 +114,12 @@ def selected_with_ansi(text: str) -> str:
     return "\033[7m" + text.replace("\033[0m", "\033[0;7m") + "\033[0m"
 
 
+def _help_line(lines: tuple[str, ...], row: int) -> str:
+    if 0 <= row < len(lines):
+        return lines[row]
+    return ""
+
+
 def build_status_line(left_text: str, width: int, right_text: str = "│ ? Help") -> str:
     usable = max(1, width - 1)
     if usable <= len(right_text):
@@ -372,7 +378,7 @@ def render_dual_page(
                     out.append("\033[0m")
             out.append("\r\n")
         for row in range(help_rows):
-            help_text = clip_ansi_line(HELP_PANEL_TEXT_ONLY_LINES[row], line_width)
+            help_text = clip_ansi_line(_help_line(HELP_PANEL_TEXT_ONLY_LINES, row), line_width)
             out.append(help_text)
             if "\033" in help_text:
                 out.append("\033[0m")
@@ -503,7 +509,7 @@ def render_dual_page(
         out.append("\r\n")
 
     for row in range(help_rows):
-        left_help = clip_ansi_line(HELP_PANEL_TREE_LINES[row], left_width)
+        left_help = clip_ansi_line(_help_line(HELP_PANEL_TREE_LINES, row), left_width)
         out.append(left_help)
         left_plain = ANSI_ESCAPE_RE.sub("", left_help)
         left_len = sum(char_display_width(ch, 0) for ch in left_plain)
@@ -511,7 +517,7 @@ def render_dual_page(
             out.append(" " * (left_width - left_len))
         out.append("\033[2m│\033[0m")
 
-        right_help = clip_ansi_line(HELP_PANEL_TEXT_LINES[row], right_width)
+        right_help = clip_ansi_line(_help_line(HELP_PANEL_TEXT_LINES, row), right_width)
         out.append(right_help)
         if "\033" in right_help:
             out.append("\033[0m")

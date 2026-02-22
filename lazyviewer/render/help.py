@@ -9,11 +9,12 @@ HELP_PANEL_TREE_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mTREE\033[0m",
     "\033[38;5;229mh/j/k/l\033[0m move  \033[38;5;229mEnter\033[0m toggle dir",
     "\033[38;5;229mCtrl+U/D\033[0m jump dirs",
-    "\033[38;5;229mr\033[0m root selected  \033[38;5;229mR\033[0m set root to parent",
+    "\033[38;5;229mr\033[0m set root to root selected",
+    "\033[38;5;229mR\033[0m set root to parent",
     "\033[38;5;229mCtrl+P\033[0m jump to file",
     "\033[38;5;229m/\033[0m find in all files",
     "\033[38;5;229mShift+Left/Right\033[0m resize tree",
-    "\033[38;5;229mn/N\033[0m git mods  \033[38;5;229mCtrl+G\033[0m git on/off",
+    "\033[38;5;229mCtrl+G\033[0m git on/off",
     "\033[38;5;229mm{key}/'{key}\033[0m marks  \033[38;5;229mAlt+Left/Right\033[0m history",
 )
 
@@ -24,7 +25,7 @@ HELP_PANEL_TEXT_LINES: tuple[str, ...] = (
     "\033[38;5;229mLeft/Right\033[0m x-scroll",
     "\033[38;5;229mw\033[0m wrap  \033[38;5;229me\033[0m edit",
     "\033[38;5;229m:\033[0m commands  \033[38;5;229ms\033[0m symbols",
-    "\033[38;5;229mn/N\033[0m git mods  \033[38;5;229mCtrl+G\033[0m git on/off",
+    "\033[38;5;229mn/N\033[0m next/prev modification",
     "\033[38;5;229m.\033[0m hidden+ignored  \033[38;5;229mAlt+Left/Right\033[0m history",
     "\033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
 )
