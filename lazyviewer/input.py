@@ -3,17 +3,39 @@ from __future__ import annotations
 import os
 import select
 
+ESC_SEQUENCE_TIMEOUT_MS = 25
+_PENDING_BYTES: list[bytes] = []
 
-def read_key(fd: int, timeout_ms: int | None = None) -> str:
-    if timeout_ms is not None:
-        ready, _, _ = select.select([fd], [], [], max(0.0, timeout_ms / 1000.0))
-        if not ready:
-            return ""
 
+def _read_ready_byte(fd: int, timeout_ms: int) -> bytes | None:
+    ready, _, _ = select.select([fd], [], [], max(0.0, timeout_ms / 1000.0))
+    if not ready:
+        return None
     ch = os.read(fd, 1)
     if not ch:
-        return ""
+        return None
+    return ch
 
+
+def read_key(fd: int, timeout_ms: int | None = None) -> str:
+    if _PENDING_BYTES:
+        ch = _PENDING_BYTES.pop(0)
+    else:
+        if timeout_ms is not None:
+            ready, _, _ = select.select([fd], [], [], max(0.0, timeout_ms / 1000.0))
+            if not ready:
+                return ""
+
+        ch = os.read(fd, 1)
+        if not ch:
+            return ""
+
+    if ch == b"\x10":
+        return "CTRL_P"
+    if ch == b"\t":
+        return "TAB"
+    if ch in {b"\x08", b"\x7f"}:
+        return "BACKSPACE"
     if ch == b"\x15":
         return "CTRL_U"
     if ch == b"\r":
@@ -25,13 +47,14 @@ def read_key(fd: int, timeout_ms: int | None = None) -> str:
         return ch.decode("utf-8", errors="replace")
 
     # Escape / arrow key sequences.
-    seq = os.read(fd, 1)
-    if not seq:
+    seq = _read_ready_byte(fd, ESC_SEQUENCE_TIMEOUT_MS)
+    if seq is None:
         return "ESC"
     if seq != b"[":
+        _PENDING_BYTES.append(seq)
         return "ESC"
-    seq = os.read(fd, 1)
-    if not seq:
+    seq = _read_ready_byte(fd, ESC_SEQUENCE_TIMEOUT_MS)
+    if seq is None:
         return "ESC"
     if seq == b"A":
         return "UP"
@@ -45,8 +68,8 @@ def read_key(fd: int, timeout_ms: int | None = None) -> str:
         # SGR mouse: ESC [ < btn ; col ; row (M/m)
         payload = []
         while True:
-            part = os.read(fd, 1)
-            if not part:
+            part = _read_ready_byte(fd, ESC_SEQUENCE_TIMEOUT_MS)
+            if part is None:
                 return "ESC"
             if part in {b"M", b"m"}:
                 break
@@ -70,15 +93,15 @@ def read_key(fd: int, timeout_ms: int | None = None) -> str:
             return f"MOUSE_LEFT_{suffix}:{col}:{row}"
         return "MOUSE"
     if seq == b"1":
-        seq2 = os.read(fd, 1)
-        if not seq2:
+        seq2 = _read_ready_byte(fd, ESC_SEQUENCE_TIMEOUT_MS)
+        if seq2 is None:
             return "ESC"
         if seq2 == b";":
-            seq3 = os.read(fd, 1)
-            if not seq3:
+            seq3 = _read_ready_byte(fd, ESC_SEQUENCE_TIMEOUT_MS)
+            if seq3 is None:
                 return "ESC"
-            seq4 = os.read(fd, 1)
-            if not seq4:
+            seq4 = _read_ready_byte(fd, ESC_SEQUENCE_TIMEOUT_MS)
+            if seq4 is None:
                 return "ESC"
             if seq3 == b"2" and seq4 == b"C":
                 return "SHIFT_RIGHT"
