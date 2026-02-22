@@ -24,6 +24,84 @@ def _effective_max_start(state: AppState, visible_rows: int) -> int:
     return max(0, len(state.lines) - max(1, visible_rows))
 
 
+def _parse_mouse_col_row(mouse_key: str) -> tuple[int | None, int | None]:
+    parts = mouse_key.split(":")
+    if len(parts) < 3:
+        return None, None
+    try:
+        return int(parts[1]), int(parts[2])
+    except Exception:
+        return None, None
+
+
+def _move_picker_selection(state: AppState, direction: int) -> None:
+    if not state.picker_match_labels:
+        return
+    prev_selected = state.picker_selected
+    state.picker_selected = max(
+        0,
+        min(len(state.picker_match_labels) - 1, state.picker_selected + direction),
+    )
+    if state.picker_selected != prev_selected:
+        state.dirty = True
+
+
+def _handle_picker_mouse_wheel(state: AppState, key: str) -> None:
+    direction = -1 if key.startswith("MOUSE_WHEEL_UP:") else 1
+    col, _row = _parse_mouse_col_row(key)
+    if state.browser_visible and col is not None and col <= state.left_width:
+        _move_picker_selection(state, direction)
+        return
+    prev_start = state.start
+    state.start += direction * 3
+    state.start = max(0, min(state.start, state.max_start))
+    if state.start != prev_start:
+        state.dirty = True
+
+
+def _is_picker_tree_click(
+    state: AppState,
+    *,
+    col: int | None,
+    row: int | None,
+    visible_rows: int,
+) -> bool:
+    return (
+        state.browser_visible
+        and col is not None
+        and row is not None
+        and 1 <= row <= visible_rows
+        and col <= state.left_width
+    )
+
+
+def _handle_picker_list_click(
+    state: AppState,
+    *,
+    row: int,
+    double_click_seconds: float,
+    activate_picker_selection: Callable[[], bool],
+) -> bool:
+    clicked_idx = state.picker_list_start + (row - 2)
+    if not (0 <= clicked_idx < len(state.picker_match_labels)):
+        return False
+    prev_selected = state.picker_selected
+    state.picker_selected = clicked_idx
+    if state.picker_selected != prev_selected:
+        state.dirty = True
+    now = time.monotonic()
+    is_double = clicked_idx == state.last_click_idx and (now - state.last_click_time) <= double_click_seconds
+    state.last_click_idx = clicked_idx
+    state.last_click_time = now
+    if not is_double:
+        return False
+    should_quit = activate_picker_selection()
+    if should_quit:
+        return True
+    state.dirty = True
+    return False
+
+
 def handle_picker_key(
     *,
     key: str,
@@ -35,6 +113,8 @@ def handle_picker_key(
     visible_content_rows: Callable[[], int],
     refresh_active_picker_matches: Callable[..., None],
 ) -> tuple[bool, bool]:
+    key_lower = key.lower()
+
     if not state.picker_active:
         return False, False
 
@@ -43,15 +123,11 @@ def handle_picker_key(
         return True, False
 
     if state.picker_mode == "commands":
-        if key == "UP" or key.lower() == "k":
-            if state.picker_match_labels:
-                state.picker_selected = max(0, state.picker_selected - 1)
-                state.dirty = True
+        if key == "UP" or key_lower == "k":
+            _move_picker_selection(state, -1)
             return True, False
-        if key == "DOWN" or key.lower() == "j":
-            if state.picker_match_labels:
-                state.picker_selected = min(len(state.picker_match_labels) - 1, state.picker_selected + 1)
-                state.dirty = True
+        if key == "DOWN" or key_lower == "j":
+            _move_picker_selection(state, 1)
             return True, False
         if key == "BACKSPACE":
             if state.picker_query:
@@ -64,7 +140,7 @@ def handle_picker_key(
             refresh_command_picker_matches(reset_selection=True)
             state.dirty = True
             return True, False
-        if key == "ENTER" or key.lower() == "l":
+        if key == "ENTER" or key_lower == "l":
             should_quit = activate_picker_selection()
             if should_quit:
                 return True, True
@@ -73,65 +149,21 @@ def handle_picker_key(
         if key == "TAB":
             return True, False
         if key.startswith("MOUSE_WHEEL_UP:") or key.startswith("MOUSE_WHEEL_DOWN:"):
-            direction = -1 if key.startswith("MOUSE_WHEEL_UP:") else 1
-            parts = key.split(":")
-            col: int | None = None
-            if len(parts) >= 3:
-                try:
-                    col = int(parts[1])
-                except Exception:
-                    col = None
-            if state.browser_visible and col is not None and col <= state.left_width:
-                if state.picker_match_labels:
-                    prev_selected = state.picker_selected
-                    state.picker_selected = max(
-                        0,
-                        min(len(state.picker_match_labels) - 1, state.picker_selected + direction),
-                    )
-                    if state.picker_selected != prev_selected:
-                        state.dirty = True
-            else:
-                prev_start = state.start
-                state.start += direction * 3
-                state.start = max(0, min(state.start, state.max_start))
-                if state.start != prev_start:
-                    state.dirty = True
+            _handle_picker_mouse_wheel(state, key)
             return True, False
         if key.startswith("MOUSE_LEFT_DOWN:"):
-            parts = key.split(":")
-            if len(parts) >= 3:
-                try:
-                    col = int(parts[1])
-                    row = int(parts[2])
-                except Exception:
-                    col = None
-                    row = None
-                if (
-                    state.browser_visible
-                    and col is not None
-                    and row is not None
-                    and 1 <= row <= visible_content_rows()
-                    and col <= state.left_width
-                ):
-                    if row > 1:
-                        clicked_idx = state.picker_list_start + (row - 2)
-                        if 0 <= clicked_idx < len(state.picker_match_labels):
-                            prev_selected = state.picker_selected
-                            state.picker_selected = clicked_idx
-                            if state.picker_selected != prev_selected:
-                                state.dirty = True
-                            now = time.monotonic()
-                            is_double = (
-                                clicked_idx == state.last_click_idx
-                                and (now - state.last_click_time) <= double_click_seconds
-                            )
-                            state.last_click_idx = clicked_idx
-                            state.last_click_time = now
-                            if is_double:
-                                should_quit = activate_picker_selection()
-                                if should_quit:
-                                    return True, True
-                                state.dirty = True
+            col, row = _parse_mouse_col_row(key)
+            if not _is_picker_tree_click(state, col=col, row=row, visible_rows=visible_content_rows()):
+                return True, False
+            if row is not None and row > 1:
+                should_quit = _handle_picker_list_click(
+                    state,
+                    row=row,
+                    double_click_seconds=double_click_seconds,
+                    activate_picker_selection=activate_picker_selection,
+                )
+                if should_quit:
+                    return True, True
             return True, False
         return True, False
 
@@ -157,85 +189,38 @@ def handle_picker_key(
             state.dirty = True
         return True, False
 
-    if key == "ENTER" or key.lower() == "l":
+    if key == "ENTER" or key_lower == "l":
         should_quit = activate_picker_selection()
         if should_quit:
             return True, True
         state.dirty = True
         return True, False
-    if key == "UP" or key.lower() == "k":
-        if state.picker_match_labels:
-            state.picker_selected = max(0, state.picker_selected - 1)
-            state.dirty = True
+    if key == "UP" or key_lower == "k":
+        _move_picker_selection(state, -1)
         return True, False
-    if key == "DOWN" or key.lower() == "j":
-        if state.picker_match_labels:
-            state.picker_selected = min(len(state.picker_match_labels) - 1, state.picker_selected + 1)
-            state.dirty = True
+    if key == "DOWN" or key_lower == "j":
+        _move_picker_selection(state, 1)
         return True, False
     if key.startswith("MOUSE_WHEEL_UP:") or key.startswith("MOUSE_WHEEL_DOWN:"):
-        direction = -1 if key.startswith("MOUSE_WHEEL_UP:") else 1
-        parts = key.split(":")
-        col: int | None = None
-        if len(parts) >= 3:
-            try:
-                col = int(parts[1])
-            except Exception:
-                col = None
-        if state.browser_visible and col is not None and col <= state.left_width:
-            if state.picker_match_labels:
-                prev_selected = state.picker_selected
-                state.picker_selected = max(
-                    0,
-                    min(len(state.picker_match_labels) - 1, state.picker_selected + direction),
-                )
-                if state.picker_selected != prev_selected:
-                    state.dirty = True
-        else:
-            prev_start = state.start
-            state.start += direction * 3
-            state.start = max(0, min(state.start, state.max_start))
-            if state.start != prev_start:
-                state.dirty = True
+        _handle_picker_mouse_wheel(state, key)
         return True, False
     if key.startswith("MOUSE_LEFT_DOWN:"):
-        parts = key.split(":")
-        if len(parts) >= 3:
-            try:
-                col = int(parts[1])
-                row = int(parts[2])
-            except Exception:
-                col = None
-                row = None
-            if (
-                state.browser_visible
-                and col is not None
-                and row is not None
-                and 1 <= row <= visible_content_rows()
-                and col <= state.left_width
-            ):
-                if row == 1:
-                    state.picker_focus = "query"
-                    state.dirty = True
-                else:
-                    clicked_idx = state.picker_list_start + (row - 2)
-                    if 0 <= clicked_idx < len(state.picker_match_labels):
-                        prev_selected = state.picker_selected
-                        state.picker_selected = clicked_idx
-                        if state.picker_selected != prev_selected:
-                            state.dirty = True
-                        now = time.monotonic()
-                        is_double = (
-                            clicked_idx == state.last_click_idx
-                            and (now - state.last_click_time) <= double_click_seconds
-                        )
-                        state.last_click_idx = clicked_idx
-                        state.last_click_time = now
-                        if is_double:
-                            should_quit = activate_picker_selection()
-                            if should_quit:
-                                return True, True
-                            state.dirty = True
+        col, row = _parse_mouse_col_row(key)
+        if not _is_picker_tree_click(state, col=col, row=row, visible_rows=visible_content_rows()):
+            return True, False
+        if row == 1:
+            state.picker_focus = "query"
+            state.dirty = True
+            return True, False
+        if row is not None:
+            should_quit = _handle_picker_list_click(
+                state,
+                row=row,
+                double_click_seconds=double_click_seconds,
+                activate_picker_selection=activate_picker_selection,
+            )
+            if should_quit:
+                return True, True
         return True, False
     return True, False
 
