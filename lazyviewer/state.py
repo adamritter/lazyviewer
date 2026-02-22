@@ -74,3 +74,4 @@ class AppState:
     named_marks: dict[str, JumpLocation] = field(default_factory=dict)
     pending_mark_set: bool = False
     pending_mark_jump: bool = False
+    git_features_enabled: bool = True

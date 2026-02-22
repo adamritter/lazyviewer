@@ -326,6 +326,7 @@ def handle_normal_key(
     toggle_tree_pane: Callable[[], None],
     toggle_wrap_mode: Callable[[], None],
     toggle_help_panel: Callable[[], None],
+    toggle_git_features: Callable[[], None],
     handle_tree_mouse_wheel: Callable[[str], bool],
     handle_tree_mouse_click: Callable[[str], bool],
     move_tree_selection: Callable[[int], bool],
@@ -365,6 +366,9 @@ def handle_normal_key(
     state.count_buffer = ""
     if key == "?":
         toggle_help_panel()
+        return False
+    if key == "CTRL_G":
+        toggle_git_features()
         return False
     if key == "CTRL_U" or key == "CTRL_D":
         if state.browser_visible and state.tree_entries:
@@ -477,11 +481,11 @@ def handle_normal_key(
         return False
     if key.lower() == "q" or key == "\x03":
         return True
-    if not state.tree_filter_active and key == "n":
+    if not state.tree_filter_active and state.git_features_enabled and key == "n":
         if jump_to_next_git_modified(1):
             state.dirty = True
         return False
-    if not state.tree_filter_active and key == "N":
+    if not state.tree_filter_active and state.git_features_enabled and key == "N":
         if jump_to_next_git_modified(-1):
             state.dirty = True
         return False

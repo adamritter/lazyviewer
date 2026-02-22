@@ -42,6 +42,7 @@ TREE_FILTER_SPINNER_FRAME_SECONDS = 0.12
 GIT_STATUS_REFRESH_SECONDS = 2.0
 TREE_WATCH_POLL_SECONDS = 0.5
 GIT_WATCH_POLL_SECONDS = 0.5
+GIT_FEATURES_DEFAULT_ENABLED = True
 
 COMMAND_PALETTE_ITEMS: tuple[tuple[str, str], ...] = (
     ("filter_files", "Filter files (Ctrl+P)"),
@@ -117,6 +118,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         no_color,
         dir_max_entries=DIR_PREVIEW_INITIAL_MAX_ENTRIES,
         dir_skip_gitignored=show_hidden,
+        prefer_git_diff=GIT_FEATURES_DEFAULT_ENABLED,
     )
     rendered = initial_render.text
     lines = build_screen_lines(rendered, right_width, wrap=False)
@@ -151,6 +153,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         dir_preview_path=current_path if initial_render.is_directory else None,
         preview_image_path=initial_render.image_path,
         preview_image_format=initial_render.image_format,
+        git_features_enabled=GIT_FEATURES_DEFAULT_ENABLED,
     )
 
     stdin_fd = sys.stdin.fileno()
@@ -265,6 +268,13 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         return image_col, 1, image_width, image_rows
 
     def refresh_git_status_overlay(force: bool = False) -> None:
+        if not state.git_features_enabled:
+            if state.git_status_overlay:
+                state.git_status_overlay = {}
+                state.dirty = True
+            state.git_status_last_refresh = time.monotonic()
+            return
+
         now = time.monotonic()
         if not force and (now - state.git_status_last_refresh) < GIT_STATUS_REFRESH_SECONDS:
             return
@@ -323,6 +333,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
     def maybe_refresh_git_watch() -> None:
         nonlocal git_watch_last_poll, git_watch_signature
+        if not state.git_features_enabled:
+            return
         now = time.monotonic()
         if (now - git_watch_last_poll) < GIT_WATCH_POLL_SECONDS:
             return
@@ -351,6 +363,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             state.dirty = True
 
     def sorted_git_modified_file_paths() -> list[Path]:
+        if not state.git_features_enabled:
+            return []
         if not state.git_status_overlay:
             return []
 
@@ -391,7 +405,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         else:
             dir_limit = DIR_PREVIEW_INITIAL_MAX_ENTRIES
 
-        prefer_git_diff = not (
+        prefer_git_diff = state.git_features_enabled and not (
             state.tree_filter_active
             and state.tree_filter_mode == "content"
             and bool(state.tree_filter_query)
@@ -421,6 +435,20 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state.preview_image_format = rendered_for_path.image_format
         if reset_scroll:
             state.text_x = 0
+
+    def toggle_git_features() -> None:
+        state.git_features_enabled = not state.git_features_enabled
+        if state.git_features_enabled:
+            refresh_git_status_overlay(force=True)
+        else:
+            if state.git_status_overlay:
+                state.git_status_overlay = {}
+            state.git_status_last_refresh = time.monotonic()
+        refresh_rendered_for_current_path(
+            reset_scroll=state.git_features_enabled,
+            reset_dir_budget=False,
+        )
+        state.dirty = True
 
     def preview_selected_entry(force: bool = False) -> None:
         if not state.tree_entries:
@@ -691,6 +719,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             toggle_tree_pane=navigation_ops.toggle_tree_pane,
             toggle_wrap_mode=navigation_ops.toggle_wrap_mode,
             toggle_help_panel=navigation_ops.toggle_help_panel,
+            toggle_git_features=toggle_git_features,
             handle_tree_mouse_wheel=handle_tree_mouse_wheel,
             handle_tree_mouse_click=handle_tree_mouse_click,
             move_tree_selection=move_tree_selection,

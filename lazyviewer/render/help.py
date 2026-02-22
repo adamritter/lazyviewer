@@ -17,7 +17,7 @@ HELP_PANEL_TEXT_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mTEXT + EXTRAS\033[0m",
     "\033[2;38;5;250mscroll:\033[0m \033[38;5;229mUp/Down\033[0m line  \033[38;5;229md/u\033[0m half  \033[38;5;229mf/B\033[0m page  \033[38;5;229mg/G/10G\033[0m",
     "\033[2;38;5;250medit:\033[0m \033[38;5;229mLeft/Right\033[0m x-scroll  \033[38;5;229mw\033[0m wrap  \033[38;5;229me\033[0m edit",
-    "\033[2;38;5;250mextra:\033[0m \033[38;5;229m:\033[0m commands  \033[38;5;229ms\033[0m symbols  \033[38;5;229mn/N\033[0m git mods  \033[38;5;229mt\033[0m tree",
+    "\033[2;38;5;250mextra:\033[0m \033[38;5;229m:\033[0m commands  \033[38;5;229ms\033[0m symbols  \033[38;5;229mn/N\033[0m git mods  \033[38;5;229mCtrl+G\033[0m git on/off",
     "\033[2;38;5;250mmeta:\033[0m \033[38;5;229m.\033[0m hidden  \033[38;5;229mAlt+Left/Right\033[0m history  \033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
 )
 
@@ -25,7 +25,7 @@ HELP_PANEL_TEXT_ONLY_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mKEYS\033[0m",
     "\033[2;38;5;250mscroll:\033[0m \033[38;5;229mUp/Down\033[0m  \033[38;5;229md/u\033[0m  \033[38;5;229mf/B\033[0m  \033[38;5;229mg/G/10G\033[0m  \033[38;5;229mLeft/Right\033[0m",
     "\033[2;38;5;250medit:\033[0m \033[38;5;229mw\033[0m wrap  \033[38;5;229me\033[0m edit  \033[38;5;229ms\033[0m symbols  \033[38;5;229mt\033[0m tree  \033[38;5;229mr/R\033[0m root  \033[38;5;229m.\033[0m hidden",
-    "\033[2;38;5;250mmeta:\033[0m \033[38;5;229m:\033[0m commands  \033[38;5;229mCtrl+P\033[0m files  \033[38;5;229m/\033[0m content  \033[38;5;229mn/N\033[0m hits/mods",
+    "\033[2;38;5;250mmeta:\033[0m \033[38;5;229m:\033[0m commands  \033[38;5;229mCtrl+P\033[0m files  \033[38;5;229m/\033[0m content  \033[38;5;229mCtrl+G\033[0m git",
     "\033[2;38;5;250mnav:\033[0m \033[38;5;229mm{key}/'{key}\033[0m marks  \033[38;5;229mAlt+Left/Right\033[0m history  \033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
 )
 
@@ -63,7 +63,8 @@ def render_help_page(width: int, height: int) -> None:
         "  \033[38;5;229mCtrl+P\033[0m file filter mode, \033[38;5;229m/\033[0m content filter mode",
         "  \033[38;5;229mType/Backspace\033[0m edit query   \033[38;5;229mUp/Down\033[0m or \033[38;5;229mCtrl+J/K\033[0m move matches",
         "  \033[38;5;229mEnter\033[0m keeps content search active   \033[38;5;229mTab\033[0m edit query",
-        "  \033[38;5;229mn/N\033[0m content hit (search) or git-mod file (normal mode)",
+        "  \033[38;5;229mn/N\033[0m content hit (search) or git-mod file (normal mode, when git is on)",
+        "  \033[38;5;229mCtrl+G\033[0m toggle git overlays, git-mod nav, and git diff preview",
         "  \033[38;5;229mAlt+Left/Right\033[0m jump back/forward in history",
         "  \033[38;5;229mm{key}\033[0m set named mark   \033[38;5;229m'{key}\033[0m jump to named mark",
         "  \033[38;5;229ms\033[0m symbol outline (functions/classes/imports) for current file",
