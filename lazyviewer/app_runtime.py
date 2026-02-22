@@ -502,21 +502,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries)
             else state.current_path.resolve()
         )
-        previous_current_path = state.current_path.resolve()
-        rebuild_tree_entries(preferred_path=preferred_path)
-        if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
-            selected_target = state.tree_entries[state.selected_idx].path.resolve()
-        else:
-            selected_target = state.tree_root.resolve()
-
-        if selected_target == previous_current_path:
-            refresh_rendered_for_current_path(reset_scroll=False, reset_dir_budget=False)
-        else:
-            state.current_path = selected_target
-            refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
-        schedule_tree_filter_index_warmup()
-        refresh_git_status_overlay(force=True)
-        state.dirty = True
+        sync_selected_target_after_tree_refresh(preferred_path=preferred_path)
 
     def maybe_refresh_git_watch() -> None:
         nonlocal git_watch_last_poll, git_watch_signature
@@ -1150,6 +1136,35 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         nonlocal tree_watch_signature
         tree_watch_signature = None
 
+    def sync_selected_target_after_tree_refresh(
+        *,
+        preferred_path: Path,
+        force_rebuild: bool = False,
+    ) -> None:
+        previous_current_path = state.current_path.resolve()
+        rebuild_tree_entries(preferred_path=preferred_path)
+        if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
+            selected_target = state.tree_entries[state.selected_idx].path.resolve()
+        else:
+            selected_target = state.tree_root.resolve()
+
+        if selected_target == previous_current_path:
+            refresh_rendered_for_current_path(
+                reset_scroll=False,
+                reset_dir_budget=False,
+                force_rebuild=force_rebuild,
+            )
+        else:
+            state.current_path = selected_target
+            refresh_rendered_for_current_path(
+                reset_scroll=True,
+                reset_dir_budget=True,
+                force_rebuild=force_rebuild,
+            )
+        schedule_tree_filter_index_warmup()
+        refresh_git_status_overlay(force=True)
+        state.dirty = True
+
     navigation_ops: NavigationPickerOps | None = None
 
     def current_jump_location_proxy():
@@ -1354,30 +1369,9 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             show_inline_error(launch_error)
             return
 
-        previous_current_path = state.current_path.resolve()
-        rebuild_tree_entries(preferred_path=previous_current_path)
+        preferred_path = state.current_path.resolve()
+        sync_selected_target_after_tree_refresh(preferred_path=preferred_path, force_rebuild=True)
         mark_tree_watch_dirty()
-        if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
-            selected_target = state.tree_entries[state.selected_idx].path.resolve()
-        else:
-            selected_target = state.tree_root.resolve()
-
-        if selected_target == previous_current_path:
-            refresh_rendered_for_current_path(
-                reset_scroll=False,
-                reset_dir_budget=False,
-                force_rebuild=True,
-            )
-        else:
-            state.current_path = selected_target
-            refresh_rendered_for_current_path(
-                reset_scroll=True,
-                reset_dir_budget=True,
-                force_rebuild=True,
-            )
-        schedule_tree_filter_index_warmup()
-        refresh_git_status_overlay(force=True)
-        state.dirty = True
 
     normal_key_ops = NormalKeyOps(
         current_jump_location=current_jump_location,
