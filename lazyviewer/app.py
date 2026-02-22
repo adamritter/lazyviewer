@@ -14,7 +14,7 @@ from .config import (
     save_show_hidden,
 )
 from .editor import launch_editor
-from .highlight import fallback_highlight, pygments_highlight
+from .highlight import colorize_source
 from .input import read_key
 from .preview import build_rendered_for_path
 from .render import render_dual_page, render_help_page
@@ -29,7 +29,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     if nopager or not os.isatty(sys.stdin.fileno()):
         rendered = content
         if not no_color and os.isatty(sys.stdout.fileno()):
-            rendered = pygments_highlight(content, path, style) or fallback_highlight(content)
+            rendered = colorize_source(content, path, style)
         sys.stdout.write(content if no_color else rendered)
         return
 

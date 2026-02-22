@@ -11,6 +11,13 @@ class TreeEntry:
     is_dir: bool
 
 
+def file_color_for(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix in {".py", ".pyi", ".pyw"}:
+        return "\033[38;5;110m"
+    return "\033[38;5;252m"
+
+
 def compute_left_width(total_width: int) -> int:
     if total_width <= 60:
         return max(16, total_width // 2)
@@ -56,7 +63,7 @@ def format_tree_entry(entry: TreeEntry, root: Path, expanded: set[Path]) -> str:
     else:
         name = entry.path.name + ("/" if entry.is_dir else "")
     dir_color = "\033[1;34m"
-    file_color = "\033[38;5;252m"
+    file_color = file_color_for(entry.path)
     marker_color = "\033[38;5;44m"
     reset = "\033[0m"
     if entry.is_dir:

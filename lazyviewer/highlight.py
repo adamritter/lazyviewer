@@ -77,3 +77,15 @@ def pygments_highlight(source: str, path: Path, style: str = "monokai") -> str |
         return highlight(source, lexer, formatter)
     except Exception:
         return None
+
+
+def colorize_source(source: str, path: Path, style: str = "monokai") -> str:
+    rendered = pygments_highlight(source, path, style)
+    if rendered and "\x1b[" in rendered:
+        return rendered
+
+    fallback = fallback_highlight(source)
+    if "\x1b[" in fallback:
+        return fallback
+
+    return rendered or source

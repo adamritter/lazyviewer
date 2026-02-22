@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-from .highlight import fallback_highlight, pygments_highlight, read_text
+from .highlight import colorize_source, read_text
 
 
 def build_directory_preview(root_dir: Path, show_hidden: bool, max_depth: int = 4, max_entries: int = 1200) -> str:
@@ -58,5 +58,5 @@ def build_rendered_for_path(target: Path, show_hidden: bool, style: str, no_colo
     if no_color:
         return source
     if os.isatty(sys.stdout.fileno()):
-        return pygments_highlight(source, target, style) or fallback_highlight(source)
+        return colorize_source(source, target, style)
     return source

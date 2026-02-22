@@ -8,6 +8,15 @@ from .ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line, slice_ansi
 from .tree import TreeEntry, clamp_left_width, format_tree_entry
 
 
+def selected_with_ansi(text: str) -> str:
+    """Apply selection styling without discarding existing ANSI colors."""
+    if not text:
+        return text
+
+    # Keep reverse video active even when the text contains internal resets.
+    return "\033[7m" + text.replace("\033[0m", "\033[0;7m") + "\033[0m"
+
+
 def render_dual_page(
     text_lines: list[str],
     text_start: int,
@@ -66,8 +75,7 @@ def render_dual_page(
             tree_text = format_tree_entry(tree_entries[tree_idx], tree_root, expanded)
             tree_text = clip_ansi_line(tree_text, left_width)
             if tree_idx == tree_selected:
-                tree_plain_selected = ANSI_ESCAPE_RE.sub("", tree_text)
-                tree_text = f"\033[7m{tree_plain_selected}\033[0m"
+                tree_text = selected_with_ansi(tree_text)
         else:
             tree_text = ""
         out.append(tree_text)
