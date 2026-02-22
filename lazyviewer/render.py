@@ -17,6 +17,16 @@ def selected_with_ansi(text: str) -> str:
     return "\033[7m" + text.replace("\033[0m", "\033[0;7m") + "\033[0m"
 
 
+def build_status_line(left_text: str, width: int, right_text: str = "│ ? Help") -> str:
+    usable = max(1, width - 1)
+    if usable <= len(right_text):
+        return right_text[-usable:]
+    left_limit = max(0, usable - len(right_text) - 1)
+    left = left_text[:left_limit]
+    gap = " " * (usable - len(left) - len(right_text))
+    return f"{left}{gap}{right_text}"
+
+
 def render_dual_page(
     text_lines: list[str],
     text_start: int,
@@ -30,8 +40,21 @@ def render_dual_page(
     width: int,
     left_width: int,
     text_x: int,
+    wrap_text: bool,
     browser_visible: bool,
     show_hidden: bool,
+    tree_filter_active: bool = False,
+    tree_filter_query: str = "",
+    tree_filter_editing: bool = False,
+    tree_filter_match_count: int = 0,
+    picker_active: bool = False,
+    picker_mode: str = "symbols",
+    picker_query: str = "",
+    picker_items: list[str] | None = None,
+    picker_selected: int = 0,
+    picker_focus: str = "query",
+    picker_list_start: int = 0,
+    picker_message: str = "",
 ) -> None:
     out: list[str] = []
     out.append("\033[H\033[J")
@@ -44,18 +67,16 @@ def render_dual_page(
             text_idx = text_start + row
             if text_idx < len(text_lines):
                 text_raw = text_lines[text_idx].rstrip("\r\n")
-                text_raw = slice_ansi_line(text_raw, text_x, line_width)
+                if wrap_text:
+                    text_raw = clip_ansi_line(text_raw, line_width)
+                else:
+                    text_raw = slice_ansi_line(text_raw, text_x, line_width)
                 out.append(text_raw)
                 if "\033" in text_raw:
                     out.append("\033[0m")
             out.append("\r\n")
-        status = (
-            f" {current_path} ({text_start + 1}-{text_end}/{len(text_lines)} {text_percent:5.1f}%) "
-            f"[t tree] [. hidden:{'on' if show_hidden else 'off'}] "
-            f"[Text: ENTER/↑/↓ or j/k, ←/→ or h/l x:{text_x}, d/u, f/Space down, B page up, g/G, 10G, e edit] [? help] [q/esc quit] "
-        )
-        status = (status[: width - 1] if width > 1 else "") or " "
-        status = status.ljust(max(1, width - 1))
+        left_status = f"{current_path} ({text_start + 1}-{text_end}/{len(text_lines)} {text_percent:5.1f}%)"
+        status = build_status_line(left_status, width)
         out.append("\033[7m")
         out.append(status)
         out.append("\033[0m")
@@ -68,16 +89,62 @@ def render_dual_page(
 
     text_end = min(len(text_lines), text_start + max_lines)
     text_percent = 0.0 if len(text_lines) == 0 else (text_start / max(1, len(text_lines) - 1)) * 100.0
+    symbol_picker_active = picker_active and picker_mode == "symbols"
+    tree_filter_row_visible = tree_filter_active and not symbol_picker_active
+    tree_row_offset = 1 if tree_filter_row_visible else 0
+    items = picker_items if symbol_picker_active else []
+    if items:
+        picker_selected = max(0, min(picker_selected, len(items) - 1))
+    else:
+        picker_selected = 0
+    picker_rows = max(1, max_lines - 1)
+    max_picker_start = max(0, len(items) - picker_rows)
+    picker_list_start = max(0, min(picker_list_start, max_picker_start))
 
     for row in range(max_lines):
-        tree_idx = tree_start + row
-        if tree_idx < len(tree_entries):
-            tree_text = format_tree_entry(tree_entries[tree_idx], tree_root, expanded)
-            tree_text = clip_ansi_line(tree_text, left_width)
-            if tree_idx == tree_selected:
+        if symbol_picker_active:
+            query_prefix = "s> "
+            placeholder = "type to filter symbols"
+            if row == 0:
+                if picker_query:
+                    query_text = f"\033[1;38;5;81m{query_prefix}{picker_query}\033[0m"
+                else:
+                    query_text = f"\033[2;38;5;250m{query_prefix}{placeholder}\033[0m"
+                tree_text = clip_ansi_line(query_text, left_width)
+                if picker_focus == "query":
+                    tree_text = selected_with_ansi(tree_text)
+            else:
+                picker_idx = picker_list_start + row - 1
+                if picker_idx < len(items):
+                    tree_text = clip_ansi_line(f" {items[picker_idx]}", left_width)
+                    if picker_idx == picker_selected:
+                        if picker_focus == "tree":
+                            tree_text = selected_with_ansi(tree_text)
+                        else:
+                            tree_text = f"\033[38;5;81m{tree_text}\033[0m"
+                elif row == 1 and picker_message:
+                    tree_text = clip_ansi_line(f"\033[2;38;5;250m{picker_message}\033[0m", left_width)
+                else:
+                    tree_text = ""
+        elif tree_filter_row_visible and row == 0:
+            if tree_filter_query:
+                query_text = f"\033[1;38;5;81mp> {tree_filter_query}\033[0m"
+            else:
+                query_text = "\033[2;38;5;250mp> type to filter files\033[0m"
+            tree_text = clip_ansi_line(query_text, left_width)
+            if tree_filter_editing:
                 tree_text = selected_with_ansi(tree_text)
+            else:
+                tree_text = f"\033[38;5;81m{tree_text}\033[0m"
         else:
-            tree_text = ""
+            tree_idx = tree_start + row - tree_row_offset
+            if tree_idx < len(tree_entries):
+                tree_text = format_tree_entry(tree_entries[tree_idx], tree_root, expanded)
+                tree_text = clip_ansi_line(tree_text, left_width)
+                if tree_idx == tree_selected:
+                    tree_text = selected_with_ansi(tree_text)
+            else:
+                tree_text = ""
         out.append(tree_text)
         tree_plain = ANSI_ESCAPE_RE.sub("", tree_text)
         tree_len = sum(char_display_width(ch, 0) for ch in tree_plain)
@@ -89,7 +156,10 @@ def render_dual_page(
         text_idx = text_start + row
         if text_idx < len(text_lines):
             text_raw = text_lines[text_idx].rstrip("\r\n")
-            text_raw = slice_ansi_line(text_raw, text_x, right_width)
+            if wrap_text:
+                text_raw = clip_ansi_line(text_raw, right_width)
+            else:
+                text_raw = slice_ansi_line(text_raw, text_x, right_width)
             out.append(text_raw)
             if "\033" in text_raw:
                 out.append("\033[0m")
@@ -97,15 +167,8 @@ def render_dual_page(
             out.append("")
         out.append("\r\n")
 
-    status = (
-        f" {current_path} ({text_start + 1}-{text_end}/{len(text_lines)} {text_percent:5.1f}%) "
-        f"[t tree] [Tree: h/j/k/l, ENTER toggle] "
-        f"[. hidden:{'on' if show_hidden else 'off'}] "
-        f"[Resize: Shift+left/right] "
-        f"[Text: ENTER/↑/↓, ←/→ x:{text_x}, d/u, f/Space down, B page up, g/G, 10G, e edit] [? help] [q/esc quit] "
-    )
-    status = (status[: width - 1] if width > 1 else "") or " "
-    status = status.ljust(max(1, width - 1))
+    left_status = f"{current_path} ({text_start + 1}-{text_end}/{len(text_lines)} {text_percent:5.1f}%)"
+    status = build_status_line(left_status, width)
     out.append("\033[7m")
     out.append(status)
     out.append("\033[0m")
@@ -129,6 +192,9 @@ def render_help_page(width: int, height: int) -> None:
         "",
         "\033[1;38;5;81mGeneral\033[0m",
         "  \033[38;5;229m?\033[0m toggle help   \033[38;5;229mq\033[0m/\033[38;5;229mEsc\033[0m close help",
+        "  \033[38;5;229mCtrl+P\033[0m toggle fuzzy filter mode on the tree",
+        "  \033[38;5;229mType/Backspace\033[0m edit filter query   \033[38;5;229mEnter\033[0m use tree keys   \033[38;5;229mTab\033[0m edit query",
+        "  \033[38;5;229ms\033[0m symbol outline (functions/classes/imports) for current file",
         "  \033[38;5;229mt\033[0m show/hide tree pane",
         "  \033[38;5;229m.\033[0m show/hide hidden files and directories",
         "  \033[38;5;229mCtrl+U\033[0m tree root -> parent directory",
@@ -141,7 +207,7 @@ def render_help_page(width: int, height: int) -> None:
         "",
         "\033[1;38;5;81mSource pane\033[0m",
         "  \033[38;5;229mUp/Down\033[0m line   \033[38;5;229md/u\033[0m half-page   \033[38;5;229mf/B\033[0m page   \033[38;5;229mg/G\033[0m top/bottom   \033[38;5;229m10G\033[0m goto",
-        "  \033[38;5;229mLeft/Right\033[0m horizontal scroll   \033[38;5;229me\033[0m edit in $EDITOR",
+        "  \033[38;5;229mw\033[0m toggle wrap   \033[38;5;229mLeft/Right\033[0m horizontal scroll (wrap off)   \033[38;5;229me\033[0m edit in $EDITOR",
         "  mouse wheel scrolls source",
         "",
         "\033[1;38;5;81mLayout\033[0m",
