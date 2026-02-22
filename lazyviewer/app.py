@@ -7,7 +7,7 @@ import threading
 import time
 from pathlib import Path
 
-from .ansi import build_screen_lines_with_map
+from .ansi import build_screen_lines
 from .config import (
     load_left_pane_percent,
     load_show_hidden,
@@ -21,7 +21,7 @@ from .fuzzy import (
     fuzzy_match_label_index,
     fuzzy_match_labels,
 )
-from .git_status import collect_git_line_context, collect_git_status_overlay
+from .git_status import collect_git_status_overlay
 from .highlight import colorize_source
 from .input import read_key
 from .navigation import JumpLocation, is_named_mark_key
@@ -43,6 +43,7 @@ from .tree import (
     compute_left_width,
     filter_tree_entries_for_content_matches,
     filter_tree_entries_for_files,
+    find_content_hit_index,
     next_directory_entry_index,
     next_index_after_directory_subtree,
     next_file_entry_index,
@@ -52,6 +53,7 @@ from .tree import (
 DOUBLE_CLICK_SECONDS = 0.35
 PICKER_RESULT_LIMIT = 200
 FILTER_CURSOR_BLINK_SECONDS = 0.5
+TREE_FILTER_SPINNER_FRAME_SECONDS = 0.12
 TREE_FILTER_MATCH_LIMIT_1CHAR = 300
 TREE_FILTER_MATCH_LIMIT_2CHAR = 1_000
 TREE_FILTER_MATCH_LIMIT_3CHAR = 3_000
@@ -121,7 +123,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         dir_skip_gitignored=show_hidden,
     )
     rendered = initial_render.text
-    lines, line_map = build_screen_lines_with_map(rendered, right_width, wrap=False)
+    lines = build_screen_lines(rendered, right_width, wrap=False)
     max_start = max(0, len(lines) - usable)
 
     state = AppState(
@@ -134,7 +136,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         selected_idx=selected_idx,
         rendered=rendered,
         lines=lines,
-        line_map=line_map,
         start=0,
         tree_start=0,
         text_x=0,
@@ -157,6 +158,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     kitty_graphics_supported = terminal.supports_kitty_graphics()
     kitty_image_state: tuple[str, int, int, int, int] | None = None
     tree_filter_cursor_visible = True
+    tree_filter_spinner_frame = 0
+    tree_filter_loading_until = 0.0
     index_warmup_lock = threading.Lock()
     index_warmup_pending: tuple[Path, bool] | None = None
     index_warmup_running = False
@@ -166,10 +169,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     git_watch_signature: str | None = None
     git_watch_repo_root: Path | None = None
     git_watch_dir: Path | None = None
-    git_inline_context = ""
-    git_inline_context_path: Path | None = None
-    git_inline_context_line = 0
-    git_inline_context_force_refresh = True
 
     def index_warmup_worker() -> None:
         nonlocal index_warmup_pending, index_warmup_running
@@ -230,7 +229,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         columns: int | None = None,
         preserve_scroll: bool = True,
     ) -> None:
-        state.lines, state.line_map = build_screen_lines_with_map(
+        state.lines = build_screen_lines(
             state.rendered,
             effective_text_width(columns),
             wrap=state.wrap_text,
@@ -268,56 +267,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             image_width = max(1, columns - 1)
         return image_col, 1, image_width, image_rows
 
-    def current_preview_source_line() -> int:
-        if (
-            state.tree_filter_active
-            and state.tree_filter_mode == "content"
-            and state.tree_filter_query
-            and 0 <= state.selected_idx < len(state.tree_entries)
-        ):
-            selected_entry = state.tree_entries[state.selected_idx]
-            if (
-                selected_entry.kind == "search_hit"
-                and selected_entry.line is not None
-                and selected_entry.path.resolve() == state.current_path.resolve()
-            ):
-                return max(1, selected_entry.line)
-
-        if not state.line_map:
-            return 1
-        idx = max(0, min(state.start, len(state.line_map) - 1))
-        return max(1, state.line_map[idx])
-
-    def refresh_git_inline_context(force: bool = False) -> None:
-        nonlocal git_inline_context, git_inline_context_path, git_inline_context_line
-        target_path = state.current_path.resolve()
-        if not target_path.is_file():
-            if git_inline_context:
-                state.dirty = True
-            git_inline_context = ""
-            git_inline_context_path = None
-            git_inline_context_line = 0
-            return
-
-        source_line = current_preview_source_line()
-        if not force and git_inline_context_path == target_path and git_inline_context_line == source_line:
-            return
-
-        context = collect_git_line_context(
-            state.tree_root,
-            target_path,
-            source_line,
-            force_refresh=force,
-        )
-        next_inline_context = f"\033[2;38;5;250m{context}\033[0m" if context else ""
-        if next_inline_context != git_inline_context:
-            state.dirty = True
-        git_inline_context = next_inline_context
-        git_inline_context_path = target_path
-        git_inline_context_line = source_line
-
     def refresh_git_status_overlay(force: bool = False) -> None:
-        nonlocal git_inline_context_force_refresh
         now = time.monotonic()
         if not force and (now - state.git_status_last_refresh) < GIT_STATUS_REFRESH_SECONDS:
             return
@@ -325,8 +275,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         previous = state.git_status_overlay
         state.git_status_overlay = collect_git_status_overlay(state.tree_root)
         state.git_status_last_refresh = time.monotonic()
-        if force or state.git_status_overlay != previous:
-            git_inline_context_force_refresh = True
         if state.git_status_overlay != previous:
             state.dirty = True
 
@@ -691,6 +639,16 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         center_selection: bool = False,
         force_first_file: bool = False,
     ) -> None:
+        previous_selected_hit_path: Path | None = None
+        previous_selected_hit_line: int | None = None
+        previous_selected_hit_column: int | None = None
+        if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
+            previous_entry = state.tree_entries[state.selected_idx]
+            if previous_entry.kind == "search_hit":
+                previous_selected_hit_path = previous_entry.path.resolve()
+                previous_selected_hit_line = previous_entry.line
+                previous_selected_hit_column = previous_entry.column
+
         if preferred_path is None:
             if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
                 preferred_path = state.tree_entries[state.selected_idx].path.resolve()
@@ -723,16 +681,17 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     if len(state.picker_file_labels_folded) != len(state.picker_file_labels):
                         state.picker_file_labels_folded = [label.casefold() for label in state.picker_file_labels]
                     labels_folded = state.picker_file_labels_folded
-                matched = fuzzy_match_label_index(
+                raw_matched = fuzzy_match_label_index(
                     state.tree_filter_query,
                     state.picker_file_labels,
                     labels_folded=labels_folded,
-                    limit=max(1, match_limit),
+                    limit=max(1, match_limit + 1),
                 )
+                state.tree_filter_truncated = len(raw_matched) > match_limit
+                matched = raw_matched[:match_limit] if match_limit > 0 else []
                 root = state.tree_root.resolve()
                 matched_paths = [root / label for _, label, _ in matched]
                 state.tree_filter_match_count = len(matched_paths)
-                state.tree_filter_truncated = False
                 state.tree_entries, state.tree_render_expanded = filter_tree_entries_for_files(
                     state.tree_root,
                     state.expanded,
@@ -757,18 +716,46 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         else:
             preferred_target = preferred_path.resolve()
             state.selected_idx = 0
-            for idx, entry in enumerate(state.tree_entries):
-                if entry.kind == "search_hit":
-                    continue
-                if entry.path.resolve() == preferred_target:
-                    state.selected_idx = idx
-                    break
-            else:
+            matched_preferred = False
+            if (
+                state.tree_filter_active
+                and state.tree_filter_query
+                and state.tree_filter_mode == "content"
+                and previous_selected_hit_path is not None
+            ):
+                preserved_hit_idx = find_content_hit_index(
+                    state.tree_entries,
+                    previous_selected_hit_path,
+                    preferred_line=previous_selected_hit_line,
+                    preferred_column=previous_selected_hit_column,
+                )
+                if preserved_hit_idx is not None:
+                    state.selected_idx = preserved_hit_idx
+                    matched_preferred = True
+
+            if not matched_preferred:
+                for idx, entry in enumerate(state.tree_entries):
+                    if entry.kind == "search_hit":
+                        continue
+                    if entry.path.resolve() == preferred_target:
+                        state.selected_idx = idx
+                        matched_preferred = True
+                        break
+
+            if not matched_preferred:
                 if state.tree_filter_active and state.tree_filter_query:
                     first_idx = first_tree_filter_result_index()
                     state.selected_idx = first_idx if first_idx is not None else 0
                 else:
                     state.selected_idx = default_selected_index(prefer_files=bool(state.tree_filter_query))
+
+            if (
+                state.tree_filter_active
+                and state.tree_filter_query
+                and state.tree_filter_mode == "content"
+            ):
+                coerced_idx = coerce_tree_filter_result_index(state.selected_idx)
+                state.selected_idx = coerced_idx if coerced_idx is not None else 0
 
         if center_selection:
             rows = tree_view_rows()
@@ -779,7 +766,12 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         preview_selection: bool = False,
         select_first_file: bool = False,
     ) -> None:
+        nonlocal tree_filter_loading_until
         state.tree_filter_query = query
+        if query:
+            tree_filter_loading_until = time.monotonic() + 0.35
+        else:
+            tree_filter_loading_until = 0.0
         force_first_file = select_first_file and bool(query)
         preferred_path = None if force_first_file else state.current_path.resolve()
         rebuild_tree_entries(
@@ -805,6 +797,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state.tree_filter_query = ""
         state.tree_filter_match_count = 0
         state.tree_filter_truncated = False
+        state.tree_filter_loading = False
         if was_active and previous_mode != mode:
             rebuild_tree_entries(preferred_path=state.current_path.resolve())
         state.dirty = True
@@ -817,6 +810,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         if clear_query:
             state.tree_filter_query = ""
             state.tree_filter_truncated = False
+        state.tree_filter_loading = False
         state.tree_filter_prev_browser_visible = None
         if previous_browser_visible is not None:
             browser_visibility_changed = state.browser_visible != previous_browser_visible
@@ -1308,11 +1302,24 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 tree_filter_cursor_visible = True
                 state.dirty = True
 
+            loading_active = bool(
+                state.tree_filter_active
+                and state.tree_filter_query
+                and not state.picker_active
+                and time.monotonic() < tree_filter_loading_until
+            )
+            if loading_active != state.tree_filter_loading:
+                state.tree_filter_loading = loading_active
+                state.dirty = True
+            if state.tree_filter_loading:
+                next_spinner_frame = int(time.monotonic() / TREE_FILTER_SPINNER_FRAME_SECONDS)
+                if next_spinner_frame != tree_filter_spinner_frame:
+                    tree_filter_spinner_frame = next_spinner_frame
+                    state.dirty = True
+
             maybe_refresh_tree_watch()
             maybe_refresh_git_watch()
             refresh_git_status_overlay()
-            refresh_git_inline_context(force=git_inline_context_force_refresh)
-            git_inline_context_force_refresh = False
 
             if state.dirty:
                 preview_image_path = current_preview_image_path()
@@ -1342,6 +1349,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     tree_filter_match_count=state.tree_filter_match_count,
                     tree_filter_truncated=state.tree_filter_truncated,
                     tree_filter_loading=state.tree_filter_loading,
+                    tree_filter_spinner_frame=tree_filter_spinner_frame,
                     tree_filter_prefix=tree_filter_prompt_prefix(),
                     tree_filter_placeholder=tree_filter_placeholder(),
                     picker_active=state.picker_active,
@@ -1387,7 +1395,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                         )
                         else 0
                     ),
-                    preview_inline_header="" if preview_image_path is not None else git_inline_context,
                 )
                 desired_image_state: tuple[str, int, int, int, int] | None = None
                 if preview_image_path is not None:
@@ -1530,6 +1537,16 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     continue
 
                 if state.picker_mode == "commands":
+                    if key == "UP" or key.lower() == "k":
+                        if state.picker_match_labels:
+                            state.picker_selected = max(0, state.picker_selected - 1)
+                            state.dirty = True
+                        continue
+                    if key == "DOWN" or key.lower() == "j":
+                        if state.picker_match_labels:
+                            state.picker_selected = min(len(state.picker_match_labels) - 1, state.picker_selected + 1)
+                            state.dirty = True
+                        continue
                     if key == "BACKSPACE":
                         if state.picker_query:
                             state.picker_query = state.picker_query[:-1]
@@ -1540,16 +1557,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                         state.picker_query += key
                         refresh_command_picker_matches(reset_selection=True)
                         state.dirty = True
-                        continue
-                    if key == "UP" or key.lower() == "k":
-                        if state.picker_match_labels:
-                            state.picker_selected = max(0, state.picker_selected - 1)
-                            state.dirty = True
-                        continue
-                    if key == "DOWN" or key.lower() == "j":
-                        if state.picker_match_labels:
-                            state.picker_selected = min(len(state.picker_match_labels) - 1, state.picker_selected + 1)
-                            state.dirty = True
                         continue
                     if key == "ENTER" or key.lower() == "l":
                         should_quit = activate_picker_selection()

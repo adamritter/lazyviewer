@@ -10,6 +10,7 @@ from lazyviewer.tree import (
     TreeEntry,
     filter_tree_entries_for_content_matches,
     filter_tree_entries_for_files,
+    find_content_hit_index,
     format_tree_entry,
     next_index_after_directory_subtree,
     next_directory_entry_index,
@@ -295,6 +296,42 @@ class TreeFilterBehaviorTests(unittest.TestCase):
             )
             self.assertIn((root / "docs").resolve(), render_expanded)
             self.assertIn((root / "src").resolve(), render_expanded)
+
+    def test_find_content_hit_index_prefers_exact_line_and_column(self) -> None:
+        root = Path("/tmp/project").resolve()
+        file_path = root / "src" / "main.py"
+        entries = [
+            TreeEntry(path=root, depth=0, is_dir=True),
+            TreeEntry(path=root / "src", depth=1, is_dir=True),
+            TreeEntry(path=file_path, depth=2, is_dir=False),
+            TreeEntry(path=file_path, depth=3, is_dir=False, kind="search_hit", line=10, column=2, display="alpha"),
+            TreeEntry(path=file_path, depth=3, is_dir=False, kind="search_hit", line=20, column=4, display="beta"),
+            TreeEntry(path=root / "src" / "other.py", depth=2, is_dir=False),
+            TreeEntry(
+                path=root / "src" / "other.py",
+                depth=3,
+                is_dir=False,
+                kind="search_hit",
+                line=3,
+                column=1,
+                display="gamma",
+            ),
+        ]
+
+        self.assertEqual(find_content_hit_index(entries, file_path, preferred_line=20, preferred_column=4), 4)
+
+    def test_find_content_hit_index_falls_back_to_first_hit_for_file(self) -> None:
+        root = Path("/tmp/project").resolve()
+        file_path = root / "src" / "main.py"
+        entries = [
+            TreeEntry(path=root, depth=0, is_dir=True),
+            TreeEntry(path=file_path, depth=1, is_dir=False),
+            TreeEntry(path=file_path, depth=2, is_dir=False, kind="search_hit", line=2, column=1, display="alpha"),
+            TreeEntry(path=file_path, depth=2, is_dir=False, kind="search_hit", line=5, column=1, display="beta"),
+        ]
+
+        self.assertEqual(find_content_hit_index(entries, file_path, preferred_line=100, preferred_column=100), 2)
+        self.assertEqual(find_content_hit_index(entries, root / "missing.py"), None)
 
     def test_format_tree_entry_highlights_search_hit_substring(self) -> None:
         root = Path("/tmp/project").resolve()

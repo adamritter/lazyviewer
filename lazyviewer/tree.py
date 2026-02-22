@@ -227,6 +227,30 @@ def filter_tree_entries_for_content_matches(
     return filtered_entries, render_expanded
 
 
+def find_content_hit_index(
+    entries: list[TreeEntry],
+    preferred_path: Path,
+    preferred_line: int | None = None,
+    preferred_column: int | None = None,
+) -> int | None:
+    preferred_resolved = preferred_path.resolve()
+    first_hit_in_file: int | None = None
+    for idx, entry in enumerate(entries):
+        if entry.kind != "search_hit":
+            continue
+        if entry.path.resolve() != preferred_resolved:
+            continue
+        if first_hit_in_file is None:
+            first_hit_in_file = idx
+        if preferred_line is not None and entry.line != preferred_line:
+            continue
+        if preferred_column is not None and entry.column != preferred_column:
+            continue
+        if preferred_line is not None or preferred_column is not None:
+            return idx
+    return first_hit_in_file
+
+
 def next_file_entry_index(
     entries: list[TreeEntry],
     selected_idx: int,

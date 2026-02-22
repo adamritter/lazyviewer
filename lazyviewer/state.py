@@ -17,7 +17,6 @@ class AppState:
     selected_idx: int
     rendered: str
     lines: list[str]
-    line_map: list[int]
     start: int
     tree_start: int
     text_x: int

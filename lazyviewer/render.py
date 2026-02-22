@@ -230,7 +230,6 @@ def render_dual_page(
     text_search_query: str = "",
     text_search_current_line: int = 0,
     text_search_current_column: int = 0,
-    preview_inline_header: str = "",
 ) -> None:
     out: list[str] = []
     out.append("\033[H\033[J")
@@ -240,19 +239,10 @@ def render_dual_page(
 
     if not browser_visible:
         line_width = max(1, width - 1)
-        header_rows = 1 if preview_inline_header else 0
-        text_rows = max(0, content_rows - header_rows)
-        text_end = min(len(text_lines), text_start + text_rows)
+        text_end = min(len(text_lines), text_start + content_rows)
         text_percent = 0.0 if len(text_lines) == 0 else (text_start / max(1, len(text_lines) - 1)) * 100.0
         for row in range(content_rows):
-            if header_rows and row == 0:
-                header_text = clip_ansi_line(preview_inline_header, line_width)
-                out.append(header_text)
-                if "\033" in header_text:
-                    out.append("\033[0m")
-                out.append("\r\n")
-                continue
-            text_idx = text_start + row - header_rows
+            text_idx = text_start + row
             if text_idx < len(text_lines):
                 text_raw = text_lines[text_idx].rstrip("\r\n")
                 if wrap_text:
@@ -288,8 +278,7 @@ def render_dual_page(
     divider_width = 1
     right_width = max(1, width - left_width - divider_width - 1)
 
-    text_row_offset = 1 if preview_inline_header else 0
-    text_end = min(len(text_lines), text_start + max(0, content_rows - text_row_offset))
+    text_end = min(len(text_lines), text_start + content_rows)
     text_percent = 0.0 if len(text_lines) == 0 else (text_start / max(1, len(text_lines) - 1)) * 100.0
     picker_overlay_active = picker_active and picker_mode in {"symbols", "commands"}
     tree_filter_row_visible = tree_filter_active and not picker_overlay_active
@@ -376,31 +365,25 @@ def render_dual_page(
 
         out.append("\033[2m│\033[0m")
 
-        if text_row_offset and row == 0:
-            header_text = clip_ansi_line(preview_inline_header, right_width)
-            out.append(header_text)
-            if "\033" in header_text:
+        text_idx = text_start + row
+        if text_idx < len(text_lines):
+            text_raw = text_lines[text_idx].rstrip("\r\n")
+            if wrap_text:
+                text_raw = clip_ansi_line(text_raw, right_width)
+            else:
+                text_raw = slice_ansi_line(text_raw, text_x, right_width)
+            current_col = text_search_current_column if text_idx + 1 == text_search_current_line else None
+            text_raw = _highlight_ansi_substrings(
+                text_raw,
+                text_search_query,
+                current_column=current_col,
+                has_current_target=has_current_text_hit,
+            )
+            out.append(text_raw)
+            if "\033" in text_raw:
                 out.append("\033[0m")
         else:
-            text_idx = text_start + row - text_row_offset
-            if text_idx < len(text_lines):
-                text_raw = text_lines[text_idx].rstrip("\r\n")
-                if wrap_text:
-                    text_raw = clip_ansi_line(text_raw, right_width)
-                else:
-                    text_raw = slice_ansi_line(text_raw, text_x, right_width)
-                current_col = text_search_current_column if text_idx + 1 == text_search_current_line else None
-                text_raw = _highlight_ansi_substrings(
-                    text_raw,
-                    text_search_query,
-                    current_column=current_col,
-                    has_current_target=has_current_text_hit,
-                )
-                out.append(text_raw)
-                if "\033" in text_raw:
-                    out.append("\033[0m")
-            else:
-                out.append("")
+            out.append("")
         out.append("\r\n")
 
     for row in range(help_rows):
