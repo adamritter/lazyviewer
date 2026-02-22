@@ -36,13 +36,7 @@ def _highlight_substring(text: str, query: str) -> str:
     if idx < 0:
         return text
     end = idx + len(query)
-    return (
-        text[:idx]
-        + "\033[1;30;43m"
-        + text[idx:end]
-        + "\033[0m\033[38;5;250m"
-        + text[end:]
-    )
+    return text[:idx] + "\033[7;1m" + text[idx:end] + "\033[27;22m" + text[end:]
 
 
 def compute_left_width(total_width: int) -> int:

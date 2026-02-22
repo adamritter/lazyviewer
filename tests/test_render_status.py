@@ -184,6 +184,67 @@ class RenderStatusTests(unittest.TestCase):
         rendered = b"".join(writes).decode("utf-8", errors="replace")
         self.assertIn("/> hello_", rendered)
 
+    def test_right_preview_highlights_content_search_matches(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            render_dual_page(
+                text_lines=["alpha beta gamma"],
+                text_start=0,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=3,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=80,
+                left_width=30,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=True,
+                show_hidden=False,
+                text_search_query="beta",
+            )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertIn("\033[7;1mbeta\033[27;22m", rendered)
+
+    def test_right_preview_highlight_handles_ansi_colored_text(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            render_dual_page(
+                text_lines=["\033[38;5;81malpha beta\033[0m"],
+                text_start=0,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=3,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=80,
+                left_width=30,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=True,
+                show_hidden=False,
+                text_search_query="beta",
+            )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertIn("\033[7;1m", rendered)
+        self.assertIn("beta", rendered)
+
     def test_bottom_help_panel_splits_tree_and_text_sections_when_browser_visible(self) -> None:
         writes: list[bytes] = []
 

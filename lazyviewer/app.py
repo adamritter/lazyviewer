@@ -760,6 +760,11 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                         if state.tree_filter_active and state.tree_filter_mode == "content"
                         else ""
                     ),
+                    text_search_query=(
+                        state.tree_filter_query
+                        if state.tree_filter_active and state.tree_filter_mode == "content"
+                        else ""
+                    ),
                 )
                 state.dirty = False
 

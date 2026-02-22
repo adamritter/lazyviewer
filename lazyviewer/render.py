@@ -61,6 +61,67 @@ def build_status_line(left_text: str, width: int, right_text: str = "│ ? Help"
     return f"{left}{gap}{right_text}"
 
 
+def _highlight_ansi_substrings(text: str, query: str) -> str:
+    if not text or not query:
+        return text
+
+    visible_chars: list[str] = []
+    visible_start: list[int] = []
+    visible_end: list[int] = []
+
+    i = 0
+    n = len(text)
+    while i < n:
+        if text[i] == "\x1b":
+            match = ANSI_ESCAPE_RE.match(text, i)
+            if match:
+                i = match.end()
+                continue
+        visible_start.append(i)
+        visible_chars.append(text[i])
+        i += 1
+        visible_end.append(i)
+
+    if not visible_chars:
+        return text
+
+    visible_text = "".join(visible_chars)
+    folded_text = visible_text.casefold()
+    folded_query = query.casefold()
+    if not folded_query:
+        return text
+
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    while True:
+        idx = folded_text.find(folded_query, cursor)
+        if idx < 0:
+            break
+        end = idx + len(query)
+        spans.append((idx, end))
+        cursor = end
+
+    if not spans:
+        return text
+
+    start_code = "\033[7;1m"
+    end_code = "\033[27;22m"
+    out: list[str] = []
+    raw_cursor = 0
+    for start_vis, end_vis in spans:
+        if start_vis >= len(visible_start) or end_vis <= 0:
+            continue
+        start_raw = visible_start[start_vis]
+        end_raw = visible_end[min(len(visible_end) - 1, end_vis - 1)]
+        out.append(text[raw_cursor:start_raw])
+        out.append(start_code)
+        out.append(text[start_raw:end_raw])
+        out.append(end_code)
+        raw_cursor = end_raw
+    out.append(text[raw_cursor:])
+    return "".join(out)
+
+
 def render_dual_page(
     text_lines: list[str],
     text_start: int,
@@ -95,6 +156,7 @@ def render_dual_page(
     picker_message: str = "",
     git_status_overlay: dict[Path, int] | None = None,
     tree_search_query: str = "",
+    text_search_query: str = "",
 ) -> None:
     out: list[str] = []
     out.append("\033[H\033[J")
@@ -113,6 +175,7 @@ def render_dual_page(
                     text_raw = clip_ansi_line(text_raw, line_width)
                 else:
                     text_raw = slice_ansi_line(text_raw, text_x, line_width)
+                text_raw = _highlight_ansi_substrings(text_raw, text_search_query)
                 out.append(text_raw)
                 if "\033" in text_raw:
                     out.append("\033[0m")
@@ -218,6 +281,7 @@ def render_dual_page(
                 text_raw = clip_ansi_line(text_raw, right_width)
             else:
                 text_raw = slice_ansi_line(text_raw, text_x, right_width)
+            text_raw = _highlight_ansi_substrings(text_raw, text_search_query)
             out.append(text_raw)
             if "\033" in text_raw:
                 out.append("\033[0m")

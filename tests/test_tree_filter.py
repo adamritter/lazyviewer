@@ -317,7 +317,7 @@ class TreeFilterBehaviorTests(unittest.TestCase):
         )
 
         self.assertIn("L12:7", rendered)
-        self.assertIn("\033[1;30;43mhello\033[0m\033[38;5;250m", rendered)
+        self.assertIn("\033[7;1mhello\033[27;22m", rendered)
 
 
 if __name__ == "__main__":
