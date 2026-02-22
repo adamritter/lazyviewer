@@ -11,6 +11,7 @@ from .ansi import ANSI_ESCAPE_RE, build_screen_lines
 from .config import (
     load_content_search_left_pane_percent,
     load_left_pane_percent,
+    load_named_marks,
     save_content_search_left_pane_percent,
     save_left_pane_percent,
     load_show_hidden,
@@ -124,6 +125,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     tree_root = initial_path if initial_path.is_dir() else initial_path.parent
     expanded: set[Path] = {tree_root.resolve()}
     show_hidden = load_show_hidden()
+    named_marks = load_named_marks()
 
     tree_entries = build_tree_entries(
         tree_root,
@@ -190,6 +192,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         preview_image_path=initial_render.image_path,
         preview_image_format=initial_render.image_format,
         git_features_enabled=GIT_FEATURES_DEFAULT_ENABLED,
+        named_marks=named_marks,
     )
 
     stdin_fd = sys.stdin.fileno()

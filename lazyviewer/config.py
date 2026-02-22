@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .navigation import JumpLocation, is_named_mark_key
+
 CONFIG_PATH = Path.home() / ".config" / "lazyviewer.json"
 
 
@@ -65,4 +67,51 @@ def load_show_hidden() -> bool:
 def save_show_hidden(show_hidden: bool) -> None:
     config = load_config()
     config["show_hidden"] = bool(show_hidden)
+    save_config(config)
+
+
+def _coerce_nonnegative_int(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return max(0, value)
+
+
+def load_named_marks() -> dict[str, JumpLocation]:
+    value = load_config().get("named_marks")
+    if not isinstance(value, dict):
+        return {}
+
+    marks: dict[str, JumpLocation] = {}
+    for key, raw_location in value.items():
+        if not isinstance(key, str) or not is_named_mark_key(key):
+            continue
+        if not isinstance(raw_location, dict):
+            continue
+
+        raw_path = raw_location.get("path")
+        if not isinstance(raw_path, str) or not raw_path:
+            continue
+
+        marks[key] = JumpLocation(
+            path=Path(raw_path),
+            start=_coerce_nonnegative_int(raw_location.get("start", 0)),
+            text_x=_coerce_nonnegative_int(raw_location.get("text_x", 0)),
+        )
+    return marks
+
+
+def save_named_marks(named_marks: dict[str, JumpLocation]) -> None:
+    serialized: dict[str, dict[str, object]] = {}
+    for key, location in named_marks.items():
+        if not is_named_mark_key(key) or not isinstance(location, JumpLocation):
+            continue
+        normalized = location.normalized()
+        serialized[key] = {
+            "path": str(normalized.path),
+            "start": max(0, normalized.start),
+            "text_x": max(0, normalized.text_x),
+        }
+
+    config = load_config()
+    config["named_marks"] = serialized
     save_config(config)

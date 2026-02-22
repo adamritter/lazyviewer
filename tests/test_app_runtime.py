@@ -14,6 +14,7 @@ from lazyviewer.app_runtime import (
     _first_git_change_screen_line,
     _tree_order_key_for_relative_path,
 )
+from lazyviewer.navigation import JumpLocation
 from lazyviewer.render import help_panel_row_count
 from lazyviewer.search import ContentMatch
 
@@ -250,6 +251,51 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertIn(".git", snapshots["after"])
             self.assertIn(".gitignore", snapshots["after"])
             self.assertIn("__pycache__", snapshots["after"])
+
+    def test_named_marks_persist_between_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            file_path = root / "demo.py"
+            file_path.write_text("line 1\nline 2\n", encoding="utf-8")
+            config_path = root / "lazyviewer.json"
+            snapshots: dict[str, object] = {}
+            run_count = 0
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                nonlocal run_count
+                run_count += 1
+                state = kwargs["state"]
+                set_named_mark = kwargs["set_named_mark"]
+                if run_count == 1:
+                    state.start = 9
+                    state.text_x = 4
+                    self.assertTrue(set_named_mark("a"))
+                    return
+                snapshots["named_marks"] = dict(state.named_marks)
+
+            with mock.patch("lazyviewer.config.CONFIG_PATH", config_path), mock.patch(
+                "lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop
+            ), mock.patch("lazyviewer.app_runtime.TerminalController", _FakeTerminalController), mock.patch(
+                "lazyviewer.app_runtime.collect_project_file_labels", return_value=[]
+            ), mock.patch("lazyviewer.app_runtime.os.isatty", return_value=True), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ):
+                app_runtime.run_pager("", file_path, "monokai", True, False)
+                app_runtime.run_pager("", file_path, "monokai", True, False)
+
+            self.assertIn("named_marks", snapshots)
+            loaded_mark = snapshots["named_marks"]["a"]
+            self.assertEqual(loaded_mark, JumpLocation(path=file_path.resolve(), start=9, text_x=4))
 
     def test_content_search_preview_selection_jumps_to_hit_line(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

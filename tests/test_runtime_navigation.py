@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import unittest
+from unittest import mock
 
 from lazyviewer.ansi import build_screen_lines
 from lazyviewer.runtime_navigation import (
@@ -126,6 +127,36 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
 
         self.assertFalse(state.wrap_text)
         self.assertEqual(state.start, 1)  # source line 2 in unwrapped mode
+
+    def test_set_named_mark_persists_marks(self) -> None:
+        visible_rows = 8
+        width = 80
+        rendered = "first\nsecond\n"
+        state = _make_state(wrap_text=False, rendered=rendered, visible_rows=visible_rows, width=width)
+        state.start = 5
+        state.text_x = 2
+
+        ops = NavigationPickerOps(
+            state=state,
+            command_palette_items=(),
+            rebuild_screen_lines=lambda **_kwargs: None,
+            rebuild_tree_entries=lambda **_kwargs: None,
+            preview_selected_entry=lambda **_kwargs: None,
+            schedule_tree_filter_index_warmup=lambda: None,
+            mark_tree_watch_dirty=lambda: None,
+            reset_git_watch_context=lambda: None,
+            refresh_git_status_overlay=lambda **_kwargs: None,
+            visible_content_rows=lambda: visible_rows,
+            refresh_rendered_for_current_path=lambda **_kwargs: None,
+        )
+
+        with mock.patch("lazyviewer.runtime_navigation.save_named_marks") as save_named_marks:
+            self.assertTrue(ops.set_named_mark("a"))
+
+        self.assertIn("a", state.named_marks)
+        self.assertEqual(state.named_marks["a"].start, 5)
+        self.assertEqual(state.named_marks["a"].text_x, 2)
+        save_named_marks.assert_called_once_with(state.named_marks)
 
 
 if __name__ == "__main__":

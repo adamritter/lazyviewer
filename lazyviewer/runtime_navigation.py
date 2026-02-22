@@ -4,7 +4,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
-from .config import save_show_hidden
+from .config import save_named_marks, save_show_hidden
 from .fuzzy import fuzzy_match_labels
 from .navigation import JumpLocation, is_named_mark_key
 from .state import AppState
@@ -421,6 +421,7 @@ class NavigationPickerOps:
         if not is_named_mark_key(mark_key):
             return False
         self.state.named_marks[mark_key] = self.current_jump_location()
+        save_named_marks(self.state.named_marks)
         return True
 
     def jump_to_named_mark(self, mark_key: str) -> bool:
