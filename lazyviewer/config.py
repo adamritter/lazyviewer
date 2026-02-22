@@ -22,9 +22,9 @@ def save_config(data: dict[str, object]) -> None:
         pass
 
 
-def load_left_pane_percent() -> float | None:
+def _load_percent(key: str) -> float | None:
     data = load_config()
-    value = data.get("left_pane_percent")
+    value = data.get(key)
     if not isinstance(value, (int, float)):
         return None
     if value <= 0 or value >= 100:
@@ -32,13 +32,29 @@ def load_left_pane_percent() -> float | None:
     return float(value)
 
 
-def save_left_pane_percent(total_width: int, left_width: int) -> None:
+def _save_percent(key: str, total_width: int, left_width: int) -> None:
     if total_width <= 0:
         return
     percent = max(1.0, min(99.0, (left_width / total_width) * 100.0))
     config = load_config()
-    config["left_pane_percent"] = round(percent, 2)
+    config[key] = round(percent, 2)
     save_config(config)
+
+
+def load_left_pane_percent() -> float | None:
+    return _load_percent("left_pane_percent")
+
+
+def save_left_pane_percent(total_width: int, left_width: int) -> None:
+    _save_percent("left_pane_percent", total_width, left_width)
+
+
+def load_content_search_left_pane_percent() -> float | None:
+    return _load_percent("content_search_left_pane_percent")
+
+
+def save_content_search_left_pane_percent(total_width: int, left_width: int) -> None:
+    _save_percent("content_search_left_pane_percent", total_width, left_width)
 
 
 def load_show_hidden() -> bool:

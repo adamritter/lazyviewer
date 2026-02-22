@@ -5,7 +5,6 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from .config import save_left_pane_percent
 from .input import read_key
 from .key_handlers import handle_picker_key, handle_tree_filter_key
 from .render import RenderContext, render_dual_page_context
@@ -52,6 +51,7 @@ def run_main_loop(
     jump_back_in_history: Callable[[], bool],
     jump_forward_in_history: Callable[[], bool],
     handle_normal_key: Callable[[str, int], bool],
+    save_left_pane_width: Callable[[int, int], None],
 ) -> None:
     kitty_image_state: tuple[str, int, int, int, int] | None = None
     tree_filter_cursor_visible = True
@@ -252,7 +252,7 @@ def run_main_loop(
                 prev_left = state.left_width
                 state.left_width = clamp_left_width(term.columns, state.left_width - 2)
                 if state.left_width != prev_left:
-                    save_left_pane_percent(term.columns, state.left_width)
+                    save_left_pane_width(term.columns, state.left_width)
                     state.right_width = max(1, term.columns - state.left_width - 2)
                     if state.right_width != state.last_right_width:
                         state.last_right_width = state.right_width
@@ -263,7 +263,7 @@ def run_main_loop(
                 prev_left = state.left_width
                 state.left_width = clamp_left_width(term.columns, state.left_width + 2)
                 if state.left_width != prev_left:
-                    save_left_pane_percent(term.columns, state.left_width)
+                    save_left_pane_width(term.columns, state.left_width)
                     state.right_width = max(1, term.columns - state.left_width - 2)
                     if state.right_width != state.last_right_width:
                         state.last_right_width = state.right_width

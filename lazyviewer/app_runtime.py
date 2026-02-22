@@ -9,7 +9,10 @@ from pathlib import Path
 
 from .ansi import ANSI_ESCAPE_RE, build_screen_lines
 from .config import (
+    load_content_search_left_pane_percent,
     load_left_pane_percent,
+    save_content_search_left_pane_percent,
+    save_left_pane_percent,
     load_show_hidden,
 )
 from .editor import launch_editor
@@ -44,6 +47,8 @@ GIT_STATUS_REFRESH_SECONDS = 2.0
 TREE_WATCH_POLL_SECONDS = 0.5
 GIT_WATCH_POLL_SECONDS = 0.5
 GIT_FEATURES_DEFAULT_ENABLED = True
+CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT = 50.0
+CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT = 8.0
 
 
 def _skip_gitignored_for_hidden_mode(show_hidden: bool) -> bool:
@@ -256,11 +261,65 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         help_rows = help_panel_row_count(
             state.usable,
             state.show_help,
+            browser_visible=state.browser_visible,
             tree_filter_active=state.tree_filter_active,
             tree_filter_mode=state.tree_filter_mode,
             tree_filter_editing=state.tree_filter_editing,
         )
         return max(1, state.usable - help_rows)
+
+    def content_search_match_view_active() -> bool:
+        return (
+            state.tree_filter_active
+            and state.tree_filter_mode == "content"
+            and bool(state.tree_filter_query)
+        )
+
+    content_mode_left_width_active = content_search_match_view_active()
+
+    def sync_left_width_for_tree_filter_mode(force: bool = False) -> None:
+        nonlocal content_mode_left_width_active
+
+        use_content_mode_width = content_search_match_view_active()
+        if not force and use_content_mode_width == content_mode_left_width_active:
+            return
+        content_mode_left_width_active = use_content_mode_width
+
+        columns = shutil.get_terminal_size((80, 24)).columns
+        if use_content_mode_width:
+            saved_percent = load_content_search_left_pane_percent()
+            if saved_percent is None:
+                current_percent = (state.left_width / max(1, columns)) * 100.0
+                saved_percent = min(
+                    99.0,
+                    max(
+                        CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT,
+                        current_percent + CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT,
+                    ),
+                )
+        else:
+            saved_percent = load_left_pane_percent()
+
+        if saved_percent is None:
+            desired_left = compute_left_width(columns)
+        else:
+            desired_left = int((saved_percent / 100.0) * columns)
+        desired_left = clamp_left_width(columns, desired_left)
+        if desired_left == state.left_width:
+            return
+
+        state.left_width = desired_left
+        state.right_width = max(1, columns - state.left_width - 2)
+        if state.right_width != state.last_right_width:
+            state.last_right_width = state.right_width
+            rebuild_screen_lines(columns=columns)
+        state.dirty = True
+
+    def save_left_pane_width_for_mode(total_width: int, left_width: int) -> None:
+        if content_search_match_view_active():
+            save_content_search_left_pane_percent(total_width, left_width)
+            return
+        save_left_pane_percent(total_width, left_width)
 
     def rebuild_screen_lines(
         columns: int | None = None,
@@ -654,9 +713,27 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     coerce_tree_filter_result_index = tree_filter_ops.coerce_tree_filter_result_index
     move_tree_selection = tree_filter_ops.move_tree_selection
     rebuild_tree_entries = tree_filter_ops.rebuild_tree_entries
-    apply_tree_filter_query = tree_filter_ops.apply_tree_filter_query
-    open_tree_filter = tree_filter_ops.open_tree_filter
-    close_tree_filter = tree_filter_ops.close_tree_filter
+
+    def apply_tree_filter_query(
+        query: str,
+        preview_selection: bool = False,
+        select_first_file: bool = False,
+    ) -> None:
+        tree_filter_ops.apply_tree_filter_query(
+            query,
+            preview_selection=preview_selection,
+            select_first_file=select_first_file,
+        )
+        sync_left_width_for_tree_filter_mode()
+
+    def open_tree_filter(mode: str = "files") -> None:
+        tree_filter_ops.open_tree_filter(mode)
+        sync_left_width_for_tree_filter_mode()
+
+    def close_tree_filter(clear_query: bool = True) -> None:
+        tree_filter_ops.close_tree_filter(clear_query=clear_query)
+        sync_left_width_for_tree_filter_mode()
+
     activate_tree_filter_selection = tree_filter_ops.activate_tree_filter_selection
     jump_to_next_content_hit = tree_filter_ops.jump_to_next_content_hit
 
@@ -815,4 +892,5 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         jump_back_in_history=navigation_ops.jump_back_in_history,
         jump_forward_in_history=navigation_ops.jump_forward_in_history,
         handle_normal_key=handle_normal_key,
+        save_left_pane_width=save_left_pane_width_for_mode,
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 
@@ -25,6 +26,7 @@ CONTENT_SEARCH_MATCH_LIMIT_2CHAR = 1_000
 CONTENT_SEARCH_MATCH_LIMIT_3CHAR = 2_000
 CONTENT_SEARCH_MATCH_LIMIT_DEFAULT = 4_000
 CONTENT_SEARCH_FILE_LIMIT = 800
+CONTENT_SEARCH_CACHE_MAX_QUERIES = 64
 
 
 def _skip_gitignored_for_hidden_mode(show_hidden: bool) -> bool:
@@ -54,6 +56,10 @@ class TreeFilterOps:
         self.jump_to_path = jump_to_path
         self.jump_to_line = jump_to_line
         self.loading_until = 0.0
+        self.content_search_cache: OrderedDict[
+            tuple[str, str, bool, bool, int, int],
+            tuple[dict[Path, list[ContentMatch]], bool, str | None],
+        ] = OrderedDict()
 
     def get_loading_until(self) -> float:
         return self.loading_until
@@ -117,6 +123,42 @@ class TreeFilterOps:
         if len(query) == 3:
             return CONTENT_SEARCH_MATCH_LIMIT_3CHAR
         return CONTENT_SEARCH_MATCH_LIMIT_DEFAULT
+
+    def _content_search_cache_key(self, query: str, max_matches: int) -> tuple[str, str, bool, bool, int, int]:
+        skip_gitignored = _skip_gitignored_for_hidden_mode(self.state.show_hidden)
+        return (
+            str(self.state.tree_root.resolve()),
+            query,
+            self.state.show_hidden,
+            skip_gitignored,
+            max(1, max_matches),
+            CONTENT_SEARCH_FILE_LIMIT,
+        )
+
+    def _search_project_content_cached(
+        self,
+        query: str,
+        max_matches: int,
+    ) -> tuple[dict[Path, list[ContentMatch]], bool, str | None]:
+        key = self._content_search_cache_key(query, max_matches)
+        cached = self.content_search_cache.get(key)
+        if cached is not None:
+            self.content_search_cache.move_to_end(key)
+            return cached
+
+        result = search_project_content_rg(
+            self.state.tree_root,
+            query,
+            self.state.show_hidden,
+            skip_gitignored=_skip_gitignored_for_hidden_mode(self.state.show_hidden),
+            max_matches=max(1, max_matches),
+            max_files=CONTENT_SEARCH_FILE_LIMIT,
+        )
+        self.content_search_cache[key] = result
+        self.content_search_cache.move_to_end(key)
+        while len(self.content_search_cache) > CONTENT_SEARCH_CACHE_MAX_QUERIES:
+            self.content_search_cache.popitem(last=False)
+        return result
 
     def next_content_hit_entry_index(self, selected_idx: int, direction: int) -> int | None:
         if not self.state.tree_entries or direction == 0:
@@ -220,13 +262,9 @@ class TreeFilterOps:
         if self.state.tree_filter_active and self.state.tree_filter_query:
             if self.state.tree_filter_mode == "content":
                 match_limit = self.content_search_match_limit(self.state.tree_filter_query)
-                matches_by_file, truncated, _error = search_project_content_rg(
-                    self.state.tree_root,
+                matches_by_file, truncated, _error = self._search_project_content_cached(
                     self.state.tree_filter_query,
-                    self.state.show_hidden,
-                    skip_gitignored=_skip_gitignored_for_hidden_mode(self.state.show_hidden),
-                    max_matches=max(1, match_limit),
-                    max_files=CONTENT_SEARCH_FILE_LIMIT,
+                    match_limit,
                 )
                 self.state.tree_filter_match_count = sum(len(items) for items in matches_by_file.values())
                 self.state.tree_filter_truncated = truncated
@@ -330,10 +368,18 @@ class TreeFilterOps:
         select_first_file: bool = False,
     ) -> None:
         self.state.tree_filter_query = query
-        if query:
-            self.loading_until = time.monotonic() + 0.35
-        else:
+        if not query:
             self.loading_until = 0.0
+        else:
+            needs_loading_indicator = True
+            if self.state.tree_filter_mode == "content":
+                match_limit = self.content_search_match_limit(query)
+                cache_key = self._content_search_cache_key(query, match_limit)
+                needs_loading_indicator = cache_key not in self.content_search_cache
+            if needs_loading_indicator:
+                self.loading_until = time.monotonic() + 0.35
+            else:
+                self.loading_until = 0.0
         force_first_file = select_first_file and bool(query)
         preferred_path = None if force_first_file else self.state.current_path.resolve()
         self.rebuild_tree_entries(
