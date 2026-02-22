@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .navigation import JumpHistory, JumpLocation
 from .tree import TreeEntry
 
 
@@ -16,6 +17,7 @@ class AppState:
     selected_idx: int
     rendered: str
     lines: list[str]
+    line_map: list[int]
     start: int
     tree_start: int
     text_x: int
@@ -38,6 +40,7 @@ class AppState:
     tree_filter_query: str = ""
     tree_filter_match_count: int = 0
     tree_filter_truncated: bool = False
+    tree_filter_loading: bool = False
     tree_filter_prev_browser_visible: bool | None = None
     tree_render_expanded: set[Path] = field(default_factory=set)
     picker_active: bool = False
@@ -50,6 +53,7 @@ class AppState:
     picker_matches: list[Path] = field(default_factory=list)
     picker_match_labels: list[str] = field(default_factory=list)
     picker_match_lines: list[int] = field(default_factory=list)
+    picker_match_commands: list[str] = field(default_factory=list)
     picker_file_labels: list[str] = field(default_factory=list)
     picker_file_labels_folded: list[str] = field(default_factory=list)
     picker_files_root: Path | None = None
@@ -57,6 +61,8 @@ class AppState:
     picker_symbol_file: Path | None = None
     picker_symbol_labels: list[str] = field(default_factory=list)
     picker_symbol_lines: list[int] = field(default_factory=list)
+    picker_command_ids: list[str] = field(default_factory=list)
+    picker_command_labels: list[str] = field(default_factory=list)
     picker_prev_browser_visible: bool | None = None
     dir_preview_max_entries: int = 400
     dir_preview_truncated: bool = False
@@ -65,3 +71,7 @@ class AppState:
     preview_image_format: str | None = None
     git_status_overlay: dict[Path, int] = field(default_factory=dict)
     git_status_last_refresh: float = 0.0
+    jump_history: JumpHistory = field(default_factory=JumpHistory)
+    named_marks: dict[str, JumpLocation] = field(default_factory=dict)
+    pending_mark_set: bool = False
+    pending_mark_jump: bool = False

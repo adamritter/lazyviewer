@@ -7,25 +7,30 @@ from pathlib import Path
 from .ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line, slice_ansi_line
 from .tree import TreeEntry, clamp_left_width, format_tree_entry
 
+FILTER_SPINNER_FRAMES: tuple[str, ...] = ("|", "/", "-", "\\")
+
 HELP_PANEL_TREE_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mTREE\033[0m",
     "\033[2;38;5;250mnav:\033[0m \033[38;5;229mh/j/k/l\033[0m move  \033[38;5;229mEnter\033[0m toggle/open",
     "\033[2;38;5;250mfilter:\033[0m \033[38;5;229mCtrl+P\033[0m files  \033[38;5;229m/\033[0m content  \033[38;5;229mEnter\033[0m keep  \033[38;5;229mTab\033[0m edit  \033[38;5;229mn/N\033[0m hits",
-    "\033[2;38;5;250mroot/nav:\033[0m \033[38;5;229mr\033[0m set root  \033[38;5;229mR\033[0m parent root  \033[38;5;229mCtrl+U/D\033[0m smart dir jump (max 10)",
+    "\033[2;38;5;250mroot/nav:\033[0m \033[38;5;229mr\033[0m set root  \033[38;5;229mR\033[0m parent root  \033[38;5;229mAlt+Left/Right\033[0m back/forward",
+    "\033[2;38;5;250mmarks:\033[0m \033[38;5;229mm{key}\033[0m set  \033[38;5;229m'{key}\033[0m jump  \033[38;5;229mCtrl+U/D\033[0m smart dir jump (max 10)",
 )
 
 HELP_PANEL_TEXT_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mTEXT + EXTRAS\033[0m",
     "\033[2;38;5;250mscroll:\033[0m \033[38;5;229mUp/Down\033[0m line  \033[38;5;229md/u\033[0m half  \033[38;5;229mf/B\033[0m page  \033[38;5;229mg/G/10G\033[0m",
     "\033[2;38;5;250medit:\033[0m \033[38;5;229mLeft/Right\033[0m x-scroll  \033[38;5;229mw\033[0m wrap  \033[38;5;229me\033[0m edit",
-    "\033[2;38;5;250mextra:\033[0m \033[38;5;229ms\033[0m symbols  \033[38;5;229mt\033[0m tree  \033[38;5;229m.\033[0m hidden  \033[38;5;229m?\033[0m hide help  \033[38;5;229mq\033[0m quit",
+    "\033[2;38;5;250mextra:\033[0m \033[38;5;229m:\033[0m commands  \033[38;5;229ms\033[0m symbols  \033[38;5;229mm{key}/'{key}\033[0m marks  \033[38;5;229mt\033[0m tree",
+    "\033[2;38;5;250mmeta:\033[0m \033[38;5;229m.\033[0m hidden  \033[38;5;229mAlt+Left/Right\033[0m history  \033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
 )
 
 HELP_PANEL_TEXT_ONLY_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mKEYS\033[0m",
     "\033[2;38;5;250mscroll:\033[0m \033[38;5;229mUp/Down\033[0m  \033[38;5;229md/u\033[0m  \033[38;5;229mf/B\033[0m  \033[38;5;229mg/G/10G\033[0m  \033[38;5;229mLeft/Right\033[0m",
     "\033[2;38;5;250medit:\033[0m \033[38;5;229mw\033[0m wrap  \033[38;5;229me\033[0m edit  \033[38;5;229ms\033[0m symbols  \033[38;5;229mt\033[0m tree  \033[38;5;229mr/R\033[0m root  \033[38;5;229m.\033[0m hidden",
-    "\033[2;38;5;250mmeta:\033[0m \033[38;5;229mCtrl+P\033[0m file filter  \033[38;5;229m/\033[0m content filter  \033[38;5;229mn/N\033[0m next/prev hit  \033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
+    "\033[2;38;5;250mmeta:\033[0m \033[38;5;229m:\033[0m commands  \033[38;5;229mCtrl+P\033[0m files  \033[38;5;229m/\033[0m content  \033[38;5;229mn/N\033[0m hits",
+    "\033[2;38;5;250mnav:\033[0m \033[38;5;229mm{key}/'{key}\033[0m marks  \033[38;5;229mAlt+Left/Right\033[0m history  \033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
 )
 
 
@@ -157,6 +162,34 @@ def _highlight_ansi_substrings(
     return "".join(out)
 
 
+def _format_tree_filter_status(
+    query: str,
+    match_count: int,
+    truncated: bool,
+    loading: bool,
+    spinner_frame: int,
+) -> str:
+    if not query:
+        return ""
+
+    parts: list[str] = []
+    if loading:
+        spinner = FILTER_SPINNER_FRAMES[spinner_frame % len(FILTER_SPINNER_FRAMES)]
+        parts.append(f"{spinner} searching")
+
+    if match_count <= 0:
+        if not loading:
+            parts.append("no results")
+    else:
+        noun = "match" if match_count == 1 else "matches"
+        parts.append(f"{match_count:,} {noun}")
+
+    if truncated:
+        parts.append("truncated")
+
+    return " · ".join(parts)
+
+
 def render_dual_page(
     text_lines: list[str],
     text_start: int,
@@ -179,6 +212,9 @@ def render_dual_page(
     tree_filter_editing: bool = False,
     tree_filter_cursor_visible: bool = False,
     tree_filter_match_count: int = 0,
+    tree_filter_truncated: bool = False,
+    tree_filter_loading: bool = False,
+    tree_filter_spinner_frame: int = 0,
     tree_filter_prefix: str = "p>",
     tree_filter_placeholder: str = "type to filter files",
     picker_active: bool = False,
@@ -194,6 +230,7 @@ def render_dual_page(
     text_search_query: str = "",
     text_search_current_line: int = 0,
     text_search_current_column: int = 0,
+    preview_inline_header: str = "",
 ) -> None:
     out: list[str] = []
     out.append("\033[H\033[J")
@@ -203,10 +240,19 @@ def render_dual_page(
 
     if not browser_visible:
         line_width = max(1, width - 1)
-        text_end = min(len(text_lines), text_start + content_rows)
+        header_rows = 1 if preview_inline_header else 0
+        text_rows = max(0, content_rows - header_rows)
+        text_end = min(len(text_lines), text_start + text_rows)
         text_percent = 0.0 if len(text_lines) == 0 else (text_start / max(1, len(text_lines) - 1)) * 100.0
         for row in range(content_rows):
-            text_idx = text_start + row
+            if header_rows and row == 0:
+                header_text = clip_ansi_line(preview_inline_header, line_width)
+                out.append(header_text)
+                if "\033" in header_text:
+                    out.append("\033[0m")
+                out.append("\r\n")
+                continue
+            text_idx = text_start + row - header_rows
             if text_idx < len(text_lines):
                 text_raw = text_lines[text_idx].rstrip("\r\n")
                 if wrap_text:
@@ -242,12 +288,13 @@ def render_dual_page(
     divider_width = 1
     right_width = max(1, width - left_width - divider_width - 1)
 
-    text_end = min(len(text_lines), text_start + content_rows)
+    text_row_offset = 1 if preview_inline_header else 0
+    text_end = min(len(text_lines), text_start + max(0, content_rows - text_row_offset))
     text_percent = 0.0 if len(text_lines) == 0 else (text_start / max(1, len(text_lines) - 1)) * 100.0
-    symbol_picker_active = picker_active and picker_mode == "symbols"
-    tree_filter_row_visible = tree_filter_active and not symbol_picker_active
+    picker_overlay_active = picker_active and picker_mode in {"symbols", "commands"}
+    tree_filter_row_visible = tree_filter_active and not picker_overlay_active
     tree_row_offset = 1 if tree_filter_row_visible else 0
-    items = picker_items if symbol_picker_active else []
+    items = picker_items if picker_overlay_active else []
     if items:
         picker_selected = max(0, min(picker_selected, len(items) - 1))
     else:
@@ -257,9 +304,13 @@ def render_dual_page(
     picker_list_start = max(0, min(picker_list_start, max_picker_start))
 
     for row in range(content_rows):
-        if symbol_picker_active:
-            query_prefix = "s> "
-            placeholder = "type to filter symbols"
+        if picker_overlay_active:
+            if picker_mode == "commands":
+                query_prefix = ": "
+                placeholder = "type to filter commands"
+            else:
+                query_prefix = "s> "
+                placeholder = "type to filter symbols"
             if row == 0:
                 if picker_query:
                     query_text = f"\033[1;38;5;81m{query_prefix}{picker_query}\033[0m"
@@ -282,6 +333,13 @@ def render_dual_page(
                 else:
                     tree_text = ""
         elif tree_filter_row_visible and row == 0:
+            status_label = _format_tree_filter_status(
+                tree_filter_query,
+                tree_filter_match_count,
+                tree_filter_truncated,
+                tree_filter_loading,
+                tree_filter_spinner_frame,
+            )
             if tree_filter_editing:
                 base = f"{tree_filter_prefix} {tree_filter_query}" if tree_filter_query else f"{tree_filter_prefix} "
                 cursor = "_" if tree_filter_cursor_visible else " "
@@ -290,11 +348,11 @@ def render_dual_page(
                 query_text = f"\033[1;38;5;81m{tree_filter_prefix} {tree_filter_query}\033[0m"
             else:
                 query_text = f"\033[2;38;5;250m{tree_filter_prefix} {tree_filter_placeholder}\033[0m"
+            if status_label:
+                query_text += f"\033[2;38;5;250m  {status_label}\033[0m"
             tree_text = clip_ansi_line(query_text, left_width)
             if tree_filter_editing:
                 tree_text = selected_with_ansi(tree_text)
-            else:
-                tree_text = f"\033[38;5;81m{tree_text}\033[0m"
         else:
             tree_idx = tree_start + row - tree_row_offset
             if tree_idx < len(tree_entries):
@@ -318,25 +376,31 @@ def render_dual_page(
 
         out.append("\033[2m│\033[0m")
 
-        text_idx = text_start + row
-        if text_idx < len(text_lines):
-            text_raw = text_lines[text_idx].rstrip("\r\n")
-            if wrap_text:
-                text_raw = clip_ansi_line(text_raw, right_width)
-            else:
-                text_raw = slice_ansi_line(text_raw, text_x, right_width)
-            current_col = text_search_current_column if text_idx + 1 == text_search_current_line else None
-            text_raw = _highlight_ansi_substrings(
-                text_raw,
-                text_search_query,
-                current_column=current_col,
-                has_current_target=has_current_text_hit,
-            )
-            out.append(text_raw)
-            if "\033" in text_raw:
+        if text_row_offset and row == 0:
+            header_text = clip_ansi_line(preview_inline_header, right_width)
+            out.append(header_text)
+            if "\033" in header_text:
                 out.append("\033[0m")
         else:
-            out.append("")
+            text_idx = text_start + row - text_row_offset
+            if text_idx < len(text_lines):
+                text_raw = text_lines[text_idx].rstrip("\r\n")
+                if wrap_text:
+                    text_raw = clip_ansi_line(text_raw, right_width)
+                else:
+                    text_raw = slice_ansi_line(text_raw, text_x, right_width)
+                current_col = text_search_current_column if text_idx + 1 == text_search_current_line else None
+                text_raw = _highlight_ansi_substrings(
+                    text_raw,
+                    text_search_query,
+                    current_column=current_col,
+                    has_current_target=has_current_text_hit,
+                )
+                out.append(text_raw)
+                if "\033" in text_raw:
+                    out.append("\033[0m")
+            else:
+                out.append("")
         out.append("\r\n")
 
     for row in range(help_rows):
@@ -379,10 +443,13 @@ def render_help_page(width: int, height: int) -> None:
         "",
         "\033[1;38;5;81mGeneral\033[0m",
         "  \033[38;5;229m?\033[0m toggle help   \033[38;5;229mq\033[0m/\033[38;5;229mEsc\033[0m close help",
+        "  \033[38;5;229m:\033[0m command palette (fuzzy actions + Enter to run)",
         "  \033[38;5;229mCtrl+P\033[0m file filter mode, \033[38;5;229m/\033[0m content filter mode",
         "  \033[38;5;229mType/Backspace\033[0m edit query   \033[38;5;229mUp/Down\033[0m or \033[38;5;229mCtrl+J/K\033[0m move matches",
         "  \033[38;5;229mEnter\033[0m keeps content search active   \033[38;5;229mTab\033[0m edit query",
         "  \033[38;5;229mn/N\033[0m next/previous content hit",
+        "  \033[38;5;229mAlt+Left/Right\033[0m jump back/forward in history",
+        "  \033[38;5;229mm{key}\033[0m set named mark   \033[38;5;229m'{key}\033[0m jump to named mark",
         "  \033[38;5;229ms\033[0m symbol outline (functions/classes/imports) for current file",
         "  \033[38;5;229mt\033[0m show/hide tree pane",
         "  \033[38;5;229m.\033[0m show/hide hidden files and directories",

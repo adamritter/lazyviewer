@@ -73,6 +73,41 @@ class ReadKeyRegressionTests(unittest.TestCase):
 
         self.assertEqual(key, "CTRL_D")
 
+    def test_alt_left_sequence_is_recognized(self) -> None:
+        read_fd, write_fd = os.pipe()
+        try:
+            os.write(write_fd, b"\x1b[1;3D")
+            key = input_mod.read_key(read_fd, timeout_ms=20)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+        self.assertEqual(key, "ALT_LEFT")
+
+    def test_alt_right_sequence_is_recognized(self) -> None:
+        read_fd, write_fd = os.pipe()
+        try:
+            os.write(write_fd, b"\x1b[1;3C")
+            key = input_mod.read_key(read_fd, timeout_ms=20)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+        self.assertEqual(key, "ALT_RIGHT")
+
+    def test_meta_word_shortcuts_map_to_alt_left_right(self) -> None:
+        read_fd, write_fd = os.pipe()
+        try:
+            os.write(write_fd, b"\x1bb\x1bf")
+            first = input_mod.read_key(read_fd, timeout_ms=20)
+            second = input_mod.read_key(read_fd, timeout_ms=20)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+        self.assertEqual(first, "ALT_LEFT")
+        self.assertEqual(second, "ALT_RIGHT")
+
 
 if __name__ == "__main__":
     unittest.main()

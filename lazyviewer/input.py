@@ -54,6 +54,10 @@ def read_key(fd: int, timeout_ms: int | None = None) -> str:
     seq = _read_ready_byte(fd, ESC_SEQUENCE_TIMEOUT_MS)
     if seq is None:
         return "ESC"
+    if seq in {b"b", b"B"}:
+        return "ALT_LEFT"
+    if seq in {b"f", b"F"}:
+        return "ALT_RIGHT"
     if seq != b"[":
         _PENDING_BYTES.append(seq)
         return "ESC"
@@ -111,5 +115,9 @@ def read_key(fd: int, timeout_ms: int | None = None) -> str:
                 return "SHIFT_RIGHT"
             if seq3 == b"2" and seq4 == b"D":
                 return "SHIFT_LEFT"
+            if seq3 in {b"3", b"9"} and seq4 == b"C":
+                return "ALT_RIGHT"
+            if seq3 in {b"3", b"9"} and seq4 == b"D":
+                return "ALT_LEFT"
         return "ESC"
     return "ESC"

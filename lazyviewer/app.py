@@ -7,7 +7,7 @@ import threading
 import time
 from pathlib import Path
 
-from .ansi import build_screen_lines
+from .ansi import build_screen_lines_with_map
 from .config import (
     load_left_pane_percent,
     load_show_hidden,
@@ -21,9 +21,10 @@ from .fuzzy import (
     fuzzy_match_label_index,
     fuzzy_match_labels,
 )
-from .git_status import collect_git_status_overlay
+from .git_status import collect_git_line_context, collect_git_status_overlay
 from .highlight import colorize_source
 from .input import read_key
+from .navigation import JumpLocation, is_named_mark_key
 from .preview import (
     DIR_PREVIEW_GROWTH_STEP,
     DIR_PREVIEW_HARD_MAX_ENTRIES,
@@ -63,6 +64,21 @@ CONTENT_SEARCH_FILE_LIMIT = 800
 GIT_STATUS_REFRESH_SECONDS = 2.0
 TREE_WATCH_POLL_SECONDS = 0.5
 GIT_WATCH_POLL_SECONDS = 0.5
+
+COMMAND_PALETTE_ITEMS: tuple[tuple[str, str], ...] = (
+    ("filter_files", "Filter files (Ctrl+P)"),
+    ("search_content", "Search content (/)"),
+    ("open_symbols", "Open symbol outline (s)"),
+    ("history_back", "Jump back (Alt+Left)"),
+    ("history_forward", "Jump forward (Alt+Right)"),
+    ("toggle_tree", "Toggle tree pane (t)"),
+    ("toggle_wrap", "Toggle wrap (w)"),
+    ("toggle_hidden", "Toggle hidden files (.)"),
+    ("toggle_help", "Toggle help (?)"),
+    ("reroot_selected", "Set root to selected (r)"),
+    ("reroot_parent", "Set root to parent (R)"),
+    ("quit", "Quit (q)"),
+)
 
 
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
@@ -105,7 +121,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         dir_skip_gitignored=show_hidden,
     )
     rendered = initial_render.text
-    lines = build_screen_lines(rendered, right_width, wrap=False)
+    lines, line_map = build_screen_lines_with_map(rendered, right_width, wrap=False)
     max_start = max(0, len(lines) - usable)
 
     state = AppState(
@@ -118,6 +134,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         selected_idx=selected_idx,
         rendered=rendered,
         lines=lines,
+        line_map=line_map,
         start=0,
         tree_start=0,
         text_x=0,
@@ -149,6 +166,10 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     git_watch_signature: str | None = None
     git_watch_repo_root: Path | None = None
     git_watch_dir: Path | None = None
+    git_inline_context = ""
+    git_inline_context_path: Path | None = None
+    git_inline_context_line = 0
+    git_inline_context_force_refresh = True
 
     def index_warmup_worker() -> None:
         nonlocal index_warmup_pending, index_warmup_running
@@ -209,7 +230,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         columns: int | None = None,
         preserve_scroll: bool = True,
     ) -> None:
-        state.lines = build_screen_lines(
+        state.lines, state.line_map = build_screen_lines_with_map(
             state.rendered,
             effective_text_width(columns),
             wrap=state.wrap_text,
@@ -247,7 +268,56 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             image_width = max(1, columns - 1)
         return image_col, 1, image_width, image_rows
 
+    def current_preview_source_line() -> int:
+        if (
+            state.tree_filter_active
+            and state.tree_filter_mode == "content"
+            and state.tree_filter_query
+            and 0 <= state.selected_idx < len(state.tree_entries)
+        ):
+            selected_entry = state.tree_entries[state.selected_idx]
+            if (
+                selected_entry.kind == "search_hit"
+                and selected_entry.line is not None
+                and selected_entry.path.resolve() == state.current_path.resolve()
+            ):
+                return max(1, selected_entry.line)
+
+        if not state.line_map:
+            return 1
+        idx = max(0, min(state.start, len(state.line_map) - 1))
+        return max(1, state.line_map[idx])
+
+    def refresh_git_inline_context(force: bool = False) -> None:
+        nonlocal git_inline_context, git_inline_context_path, git_inline_context_line
+        target_path = state.current_path.resolve()
+        if not target_path.is_file():
+            if git_inline_context:
+                state.dirty = True
+            git_inline_context = ""
+            git_inline_context_path = None
+            git_inline_context_line = 0
+            return
+
+        source_line = current_preview_source_line()
+        if not force and git_inline_context_path == target_path and git_inline_context_line == source_line:
+            return
+
+        context = collect_git_line_context(
+            state.tree_root,
+            target_path,
+            source_line,
+            force_refresh=force,
+        )
+        next_inline_context = f"\033[2;38;5;250m{context}\033[0m" if context else ""
+        if next_inline_context != git_inline_context:
+            state.dirty = True
+        git_inline_context = next_inline_context
+        git_inline_context_path = target_path
+        git_inline_context_line = source_line
+
     def refresh_git_status_overlay(force: bool = False) -> None:
+        nonlocal git_inline_context_force_refresh
         now = time.monotonic()
         if not force and (now - state.git_status_last_refresh) < GIT_STATUS_REFRESH_SECONDS:
             return
@@ -255,6 +325,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         previous = state.git_status_overlay
         state.git_status_overlay = collect_git_status_overlay(state.tree_root)
         state.git_status_last_refresh = time.monotonic()
+        if force or state.git_status_overlay != previous:
+            git_inline_context_force_refresh = True
         if state.git_status_overlay != previous:
             state.dirty = True
 
@@ -583,8 +655,10 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             state.dirty = True
             return True
 
+        origin = current_jump_location()
         state.current_path = entry.path.resolve()
         refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
+        record_jump_if_changed(origin)
         state.dirty = True
         return True
 
@@ -606,8 +680,10 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         if target_idx is None or target_idx == state.selected_idx:
             return False
 
+        origin = current_jump_location()
         state.selected_idx = target_idx
         preview_selected_entry()
+        record_jump_if_changed(origin)
         return True
 
     def rebuild_tree_entries(
@@ -774,15 +850,19 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         selected_line = entry.line if entry.kind == "search_hit" else None
         if state.tree_filter_mode == "content":
             # Keep content-search mode active after Enter/double-click; Esc exits.
+            origin = current_jump_location()
             state.tree_filter_editing = False
             preview_selected_entry(force=True)
+            record_jump_if_changed(origin)
             state.dirty = True
             return
 
+        origin = current_jump_location()
         close_tree_filter(clear_query=True)
         jump_to_path(selected_path)
         if selected_line is not None:
             jump_to_line(max(0, selected_line - 1))
+        record_jump_if_changed(origin)
         state.dirty = True
 
     def refresh_symbol_picker_matches(reset_selection: bool = False) -> None:
@@ -794,6 +874,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state.picker_matches = []
         state.picker_match_labels = [label for _, label, _ in matched]
         state.picker_match_lines = [state.picker_symbol_lines[idx] for idx, _, _ in matched]
+        state.picker_match_commands = []
         if state.picker_match_labels:
             state.picker_message = ""
         elif not state.picker_message:
@@ -804,6 +885,33 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         )
         if reset_selection or not state.picker_match_labels:
             state.picker_list_start = 0
+
+    def refresh_command_picker_matches(reset_selection: bool = False) -> None:
+        matched = fuzzy_match_labels(
+            state.picker_query,
+            state.picker_command_labels,
+            limit=PICKER_RESULT_LIMIT,
+        )
+        state.picker_matches = []
+        state.picker_match_labels = [label for _, label, _ in matched]
+        state.picker_match_lines = []
+        state.picker_match_commands = [state.picker_command_ids[idx] for idx, _, _ in matched]
+        if state.picker_match_labels:
+            state.picker_message = ""
+        elif not state.picker_message:
+            state.picker_message = " no matching commands"
+        state.picker_selected = 0 if reset_selection else max(
+            0,
+            min(state.picker_selected, max(0, len(state.picker_match_labels) - 1)),
+        )
+        if reset_selection or not state.picker_match_labels:
+            state.picker_list_start = 0
+
+    def refresh_active_picker_matches(reset_selection: bool = False) -> None:
+        if state.picker_mode == "commands":
+            refresh_command_picker_matches(reset_selection=reset_selection)
+            return
+        refresh_symbol_picker_matches(reset_selection=reset_selection)
 
     def resolve_symbol_target() -> Path | None:
         if state.current_path.is_file():
@@ -828,6 +936,9 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state.picker_matches = []
         state.picker_match_labels = []
         state.picker_match_lines = []
+        state.picker_match_commands = []
+        state.picker_command_ids = []
+        state.picker_command_labels = []
         was_browser_visible = state.browser_visible
         state.browser_visible = True
         if state.wrap_text and not was_browser_visible:
@@ -858,6 +969,33 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         refresh_symbol_picker_matches(reset_selection=True)
         state.dirty = True
 
+    def open_command_picker() -> None:
+        if not state.picker_active:
+            state.picker_prev_browser_visible = state.browser_visible
+        state.picker_active = True
+        state.picker_mode = "commands"
+        state.picker_focus = "tree"
+        state.picker_message = ""
+        state.picker_query = ""
+        state.picker_selected = 0
+        state.picker_list_start = 0
+        state.picker_matches = []
+        state.picker_match_labels = []
+        state.picker_match_lines = []
+        state.picker_match_commands = []
+        state.picker_symbol_file = None
+        state.picker_symbol_labels = []
+        state.picker_symbol_lines = []
+        state.picker_command_ids = [command_id for command_id, _ in COMMAND_PALETTE_ITEMS]
+        state.picker_command_labels = [label for _, label in COMMAND_PALETTE_ITEMS]
+        was_browser_visible = state.browser_visible
+        state.browser_visible = True
+        if state.wrap_text and not was_browser_visible:
+            rebuild_screen_lines()
+
+        refresh_command_picker_matches(reset_selection=True)
+        state.dirty = True
+
     def close_picker(reset_query: bool = True) -> None:
         previous_browser_visible = state.picker_prev_browser_visible
         state.picker_active = False
@@ -871,9 +1009,12 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state.picker_matches = []
         state.picker_match_labels = []
         state.picker_match_lines = []
+        state.picker_match_commands = []
         state.picker_symbol_file = None
         state.picker_symbol_labels = []
         state.picker_symbol_lines = []
+        state.picker_command_ids = []
+        state.picker_command_labels = []
         state.picker_prev_browser_visible = None
         if previous_browser_visible is not None:
             browser_visibility_changed = state.browser_visible != previous_browser_visible
@@ -882,14 +1023,196 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 rebuild_screen_lines()
         state.dirty = True
 
-    def activate_picker_selection() -> None:
+    def current_term_columns() -> int:
+        return shutil.get_terminal_size((80, 24)).columns
+
+    def reroot_to_parent() -> None:
+        nonlocal tree_watch_signature
+        old_root = state.tree_root.resolve()
+        parent_root = old_root.parent.resolve()
+        if parent_root == old_root:
+            return
+        state.tree_root = parent_root
+        state.expanded = {state.tree_root, old_root}
+        rebuild_tree_entries(preferred_path=old_root, center_selection=True)
+        preview_selected_entry(force=True)
+        schedule_tree_filter_index_warmup()
+        tree_watch_signature = None
+        reset_git_watch_context()
+        refresh_git_status_overlay(force=True)
+        state.dirty = True
+
+    def reroot_to_selected_target() -> None:
+        nonlocal tree_watch_signature
+        selected_entry = (
+            state.tree_entries[state.selected_idx]
+            if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries)
+            else None
+        )
+        if selected_entry is not None:
+            selected_target = selected_entry.path.resolve()
+            target_root = selected_target if selected_entry.is_dir else selected_target.parent.resolve()
+        else:
+            selected_target = state.current_path.resolve()
+            target_root = selected_target if selected_target.is_dir() else selected_target.parent.resolve()
+
+        old_root = state.tree_root.resolve()
+        if target_root == old_root:
+            return
+        state.tree_root = target_root
+        state.expanded = {state.tree_root}
+        rebuild_tree_entries(preferred_path=selected_target, center_selection=True)
+        preview_selected_entry(force=True)
+        schedule_tree_filter_index_warmup()
+        tree_watch_signature = None
+        reset_git_watch_context()
+        refresh_git_status_overlay(force=True)
+        state.dirty = True
+
+    def toggle_hidden_files() -> None:
+        nonlocal tree_watch_signature
+        state.show_hidden = not state.show_hidden
+        save_show_hidden(state.show_hidden)
+        selected_path = state.tree_entries[state.selected_idx].path.resolve() if state.tree_entries else state.tree_root
+        rebuild_tree_entries(preferred_path=selected_path)
+        preview_selected_entry(force=True)
+        schedule_tree_filter_index_warmup()
+        tree_watch_signature = None
+        state.dirty = True
+
+    def toggle_tree_pane() -> None:
+        state.browser_visible = not state.browser_visible
+        if state.wrap_text:
+            rebuild_screen_lines(columns=current_term_columns())
+        state.dirty = True
+
+    def toggle_wrap_mode() -> None:
+        state.wrap_text = not state.wrap_text
+        if state.wrap_text:
+            state.text_x = 0
+        rebuild_screen_lines(columns=current_term_columns())
+        state.dirty = True
+
+    def toggle_help_panel() -> None:
+        state.show_help = not state.show_help
+        rebuild_screen_lines(columns=current_term_columns())
+        state.dirty = True
+
+    def execute_command_palette_action(command_id: str) -> bool:
+        if command_id == "filter_files":
+            open_tree_filter(mode="files")
+            return False
+        if command_id == "search_content":
+            open_tree_filter(mode="content")
+            return False
+        if command_id == "open_symbols":
+            open_symbol_picker()
+            return False
+        if command_id == "history_back":
+            if jump_back_in_history():
+                state.dirty = True
+            return False
+        if command_id == "history_forward":
+            if jump_forward_in_history():
+                state.dirty = True
+            return False
+        if command_id == "toggle_tree":
+            toggle_tree_pane()
+            return False
+        if command_id == "toggle_wrap":
+            toggle_wrap_mode()
+            return False
+        if command_id == "toggle_hidden":
+            toggle_hidden_files()
+            return False
+        if command_id == "toggle_help":
+            toggle_help_panel()
+            return False
+        if command_id == "reroot_selected":
+            reroot_to_selected_target()
+            return False
+        if command_id == "reroot_parent":
+            reroot_to_parent()
+            return False
+        if command_id == "quit":
+            return True
+        return False
+
+    def current_jump_location() -> JumpLocation:
+        return JumpLocation(
+            path=state.current_path.resolve(),
+            start=max(0, state.start),
+            text_x=max(0, state.text_x),
+        )
+
+    def record_jump_if_changed(origin: JumpLocation) -> None:
+        normalized_origin = origin.normalized()
+        if current_jump_location() == normalized_origin:
+            return
+        state.jump_history.record(normalized_origin)
+
+    def apply_jump_location(location: JumpLocation) -> bool:
+        target = location.normalized()
+        current_path = state.current_path.resolve()
+        path_changed = target.path != current_path
+        if path_changed:
+            jump_to_path(target.path)
+
+        state.max_start = max(0, len(state.lines) - visible_content_rows())
+        clamped_start = max(0, min(target.start, state.max_start))
+        clamped_text_x = 0 if state.wrap_text else max(0, target.text_x)
+        prev_start = state.start
+        prev_text_x = state.text_x
+        state.start = clamped_start
+        state.text_x = clamped_text_x
+        return path_changed or state.start != prev_start or state.text_x != prev_text_x
+
+    def jump_back_in_history() -> bool:
+        target = state.jump_history.go_back(current_jump_location())
+        if target is None:
+            return False
+        return apply_jump_location(target)
+
+    def jump_forward_in_history() -> bool:
+        target = state.jump_history.go_forward(current_jump_location())
+        if target is None:
+            return False
+        return apply_jump_location(target)
+
+    def set_named_mark(mark_key: str) -> bool:
+        if not is_named_mark_key(mark_key):
+            return False
+        state.named_marks[mark_key] = current_jump_location()
+        return True
+
+    def jump_to_named_mark(mark_key: str) -> bool:
+        if not is_named_mark_key(mark_key):
+            return False
+        target = state.named_marks.get(mark_key)
+        if target is None:
+            return False
+        origin = current_jump_location()
+        if target.normalized() == origin:
+            return False
+        state.jump_history.record(origin)
+        return apply_jump_location(target)
+
+    def activate_picker_selection() -> bool:
         if state.picker_mode == "symbols" and state.picker_match_lines:
             selected_line = state.picker_match_lines[state.picker_selected]
             symbol_file = state.picker_symbol_file
+            origin = current_jump_location()
             close_picker()
             if symbol_file is not None and symbol_file.resolve() != state.current_path.resolve():
                 jump_to_path(symbol_file.resolve())
             jump_to_line(selected_line)
+            record_jump_if_changed(origin)
+            return False
+        if state.picker_mode == "commands" and state.picker_match_commands:
+            command_id = state.picker_match_commands[state.picker_selected]
+            close_picker()
+            return execute_command_palette_action(command_id)
+        return False
 
     def reveal_path_in_tree(target: Path) -> None:
         nonlocal tree_watch_signature
@@ -958,7 +1281,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             if state.tree_start != prev_tree_start:
                 state.dirty = True
 
-            if state.picker_active and state.picker_mode == "symbols":
+            if state.picker_active and state.picker_mode in {"symbols", "commands"}:
                 picker_rows = max(1, visible_content_rows() - 1)
                 max_picker_start = max(0, len(state.picker_match_labels) - picker_rows)
                 prev_picker_start = state.picker_list_start
@@ -988,6 +1311,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             maybe_refresh_tree_watch()
             maybe_refresh_git_watch()
             refresh_git_status_overlay()
+            refresh_git_inline_context(force=git_inline_context_force_refresh)
+            git_inline_context_force_refresh = False
 
             if state.dirty:
                 preview_image_path = current_preview_image_path()
@@ -1009,22 +1334,24 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     state.wrap_text,
                     state.browser_visible,
                     state.show_hidden,
-                    state.show_help,
-                    state.tree_filter_active,
-                    state.tree_filter_query,
-                    state.tree_filter_editing,
-                    tree_filter_cursor_visible,
-                    state.tree_filter_match_count,
-                    tree_filter_prompt_prefix(),
-                    tree_filter_placeholder(),
-                    state.picker_active,
-                    state.picker_mode,
-                    state.picker_query,
-                    state.picker_match_labels,
-                    state.picker_selected,
-                    state.picker_focus,
-                    state.picker_list_start,
-                    state.picker_message,
+                    show_help=state.show_help,
+                    tree_filter_active=state.tree_filter_active,
+                    tree_filter_query=state.tree_filter_query,
+                    tree_filter_editing=state.tree_filter_editing,
+                    tree_filter_cursor_visible=tree_filter_cursor_visible,
+                    tree_filter_match_count=state.tree_filter_match_count,
+                    tree_filter_truncated=state.tree_filter_truncated,
+                    tree_filter_loading=state.tree_filter_loading,
+                    tree_filter_prefix=tree_filter_prompt_prefix(),
+                    tree_filter_placeholder=tree_filter_placeholder(),
+                    picker_active=state.picker_active,
+                    picker_mode=state.picker_mode,
+                    picker_query=state.picker_query,
+                    picker_items=state.picker_match_labels,
+                    picker_selected=state.picker_selected,
+                    picker_focus=state.picker_focus,
+                    picker_list_start=state.picker_list_start,
+                    picker_message=state.picker_message,
                     git_status_overlay=state.git_status_overlay,
                     tree_search_query=(
                         state.tree_filter_query
@@ -1060,6 +1387,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                         )
                         else 0
                     ),
+                    preview_inline_header="" if preview_image_path is not None else git_inline_context,
                 )
                 desired_image_state: tuple[str, int, int, int, int] | None = None
                 if preview_image_path is not None:
@@ -1096,7 +1424,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 key = "ENTER"
                 state.skip_next_lf = True
             elif key == "ENTER_LF":
-                if state.tree_filter_active and state.tree_filter_editing:
+                if state.tree_filter_active and state.tree_filter_editing and not state.picker_active:
                     key = "CTRL_J"
                 else:
                     key = "ENTER"
@@ -1127,7 +1455,43 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     state.dirty = True
                 continue
 
-            if key == "CTRL_P":
+            if state.pending_mark_set:
+                state.pending_mark_set = False
+                state.pending_mark_jump = False
+                state.count_buffer = ""
+                if key == "ESC":
+                    continue
+                if set_named_mark(key):
+                    state.dirty = True
+                continue
+
+            if state.pending_mark_jump:
+                state.pending_mark_set = False
+                state.pending_mark_jump = False
+                state.count_buffer = ""
+                if key == "ESC":
+                    continue
+                if jump_to_named_mark(key):
+                    state.dirty = True
+                continue
+
+            if key == "ALT_LEFT" and not state.picker_active and not (
+                state.tree_filter_active and state.tree_filter_editing
+            ):
+                state.count_buffer = ""
+                if jump_back_in_history():
+                    state.dirty = True
+                continue
+
+            if key == "ALT_RIGHT" and not state.picker_active and not (
+                state.tree_filter_active and state.tree_filter_editing
+            ):
+                state.count_buffer = ""
+                if jump_forward_in_history():
+                    state.dirty = True
+                continue
+
+            if key == "CTRL_P" and not state.picker_active:
                 state.count_buffer = ""
                 if state.tree_filter_active:
                     if state.tree_filter_mode == "files" and state.tree_filter_editing:
@@ -1155,10 +1519,109 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     open_tree_filter(mode="content")
                 continue
 
+            if key == ":" and not state.picker_active:
+                state.count_buffer = ""
+                open_command_picker()
+                continue
+
             if state.picker_active:
                 if key == "ESC" or key == "\x03":
                     close_picker()
                     continue
+
+                if state.picker_mode == "commands":
+                    if key == "BACKSPACE":
+                        if state.picker_query:
+                            state.picker_query = state.picker_query[:-1]
+                            refresh_command_picker_matches(reset_selection=True)
+                            state.dirty = True
+                        continue
+                    if len(key) == 1 and key.isprintable():
+                        state.picker_query += key
+                        refresh_command_picker_matches(reset_selection=True)
+                        state.dirty = True
+                        continue
+                    if key == "UP" or key.lower() == "k":
+                        if state.picker_match_labels:
+                            state.picker_selected = max(0, state.picker_selected - 1)
+                            state.dirty = True
+                        continue
+                    if key == "DOWN" or key.lower() == "j":
+                        if state.picker_match_labels:
+                            state.picker_selected = min(len(state.picker_match_labels) - 1, state.picker_selected + 1)
+                            state.dirty = True
+                        continue
+                    if key == "ENTER" or key.lower() == "l":
+                        should_quit = activate_picker_selection()
+                        if should_quit:
+                            break
+                        state.dirty = True
+                        continue
+                    if key == "TAB":
+                        continue
+                    if key.startswith("MOUSE_WHEEL_UP:") or key.startswith("MOUSE_WHEEL_DOWN:"):
+                        direction = -1 if key.startswith("MOUSE_WHEEL_UP:") else 1
+                        parts = key.split(":")
+                        col: int | None = None
+                        if len(parts) >= 3:
+                            try:
+                                col = int(parts[1])
+                            except Exception:
+                                col = None
+                        if state.browser_visible and col is not None and col <= state.left_width:
+                            if state.picker_match_labels:
+                                prev_selected = state.picker_selected
+                                state.picker_selected = max(
+                                    0,
+                                    min(len(state.picker_match_labels) - 1, state.picker_selected + direction),
+                                )
+                                if state.picker_selected != prev_selected:
+                                    state.dirty = True
+                        else:
+                            prev_start = state.start
+                            state.start += direction * 3
+                            state.start = max(0, min(state.start, state.max_start))
+                            if state.start != prev_start:
+                                state.dirty = True
+                        continue
+                    if key.startswith("MOUSE_LEFT_DOWN:"):
+                        parts = key.split(":")
+                        if len(parts) >= 3:
+                            try:
+                                col = int(parts[1])
+                                row = int(parts[2])
+                            except Exception:
+                                col = None
+                                row = None
+                            if (
+                                state.browser_visible
+                                and col is not None
+                                and row is not None
+                                and 1 <= row <= visible_content_rows()
+                                and col <= state.left_width
+                            ):
+                                if row > 1:
+                                    clicked_idx = state.picker_list_start + (row - 2)
+                                    if 0 <= clicked_idx < len(state.picker_match_labels):
+                                        prev_selected = state.picker_selected
+                                        state.picker_selected = clicked_idx
+                                        if state.picker_selected != prev_selected:
+                                            state.dirty = True
+                                        now = time.monotonic()
+                                        is_double = (
+                                            clicked_idx == state.last_click_idx
+                                            and (now - state.last_click_time) <= DOUBLE_CLICK_SECONDS
+                                        )
+                                        state.last_click_idx = clicked_idx
+                                        state.last_click_time = now
+                                        if is_double:
+                                            should_quit = activate_picker_selection()
+                                            if should_quit:
+                                                break
+                                            state.dirty = True
+                        continue
+                    continue
+
                 if key == "TAB":
                     state.picker_focus = "tree" if state.picker_focus == "query" else "query"
                     state.dirty = True
@@ -1172,17 +1635,19 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     if key == "BACKSPACE":
                         if state.picker_query:
                             state.picker_query = state.picker_query[:-1]
-                            refresh_symbol_picker_matches(reset_selection=True)
+                            refresh_active_picker_matches(reset_selection=True)
                             state.dirty = True
                         continue
                     if len(key) == 1 and key.isprintable():
                         state.picker_query += key
-                        refresh_symbol_picker_matches(reset_selection=True)
+                        refresh_active_picker_matches(reset_selection=True)
                         state.dirty = True
                     continue
 
                 if key == "ENTER" or key.lower() == "l":
-                    activate_picker_selection()
+                    should_quit = activate_picker_selection()
+                    if should_quit:
+                        break
                     state.dirty = True
                     continue
                 if key == "UP" or key.lower() == "k":
@@ -1254,7 +1719,9 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                                     state.last_click_idx = clicked_idx
                                     state.last_click_time = now
                                     if is_double:
-                                        activate_picker_selection()
+                                        should_quit = activate_picker_selection()
+                                        if should_quit:
+                                            break
                                         state.dirty = True
                     continue
                 continue
@@ -1333,6 +1800,18 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 open_symbol_picker()
                 continue
 
+            if key == "m":
+                state.count_buffer = ""
+                state.pending_mark_set = True
+                state.pending_mark_jump = False
+                continue
+
+            if key == "'":
+                state.count_buffer = ""
+                state.pending_mark_set = False
+                state.pending_mark_jump = True
+                continue
+
             if key.isdigit():
                 state.count_buffer += key
                 continue
@@ -1340,9 +1819,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             count = int(state.count_buffer) if state.count_buffer else None
             state.count_buffer = ""
             if key == "?":
-                state.show_help = not state.show_help
-                rebuild_screen_lines(columns=term.columns)
-                state.dirty = True
+                toggle_help_panel()
                 continue
             if key == "CTRL_U" or key == "CTRL_D":
                 if state.browser_visible and state.tree_entries:
@@ -1400,75 +1877,28 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                         target_idx = next_idx
                         moved += 1
                     if moved > 0:
+                        origin = current_jump_location()
                         prev_selected = state.selected_idx
                         state.selected_idx = target_idx
                         preview_selected_entry()
-                        if state.selected_idx != prev_selected:
+                        record_jump_if_changed(origin)
+                        if state.selected_idx != prev_selected or current_jump_location() != origin:
                             state.dirty = True
                 continue
             if key == "R":
-                old_root = state.tree_root.resolve()
-                parent_root = old_root.parent.resolve()
-                if parent_root != old_root:
-                    state.tree_root = parent_root
-                    state.expanded = {state.tree_root, old_root}
-                    rebuild_tree_entries(preferred_path=old_root, center_selection=True)
-                    preview_selected_entry(force=True)
-                    schedule_tree_filter_index_warmup()
-                    tree_watch_signature = None
-                    reset_git_watch_context()
-                    refresh_git_status_overlay(force=True)
-                    state.dirty = True
+                reroot_to_parent()
                 continue
             if key == "r":
-                selected_entry = (
-                    state.tree_entries[state.selected_idx]
-                    if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries)
-                    else None
-                )
-                if selected_entry is not None:
-                    selected_target = selected_entry.path.resolve()
-                    target_root = selected_target if selected_entry.is_dir else selected_target.parent.resolve()
-                else:
-                    selected_target = state.current_path.resolve()
-                    target_root = selected_target if selected_target.is_dir() else selected_target.parent.resolve()
-
-                old_root = state.tree_root.resolve()
-                if target_root != old_root:
-                    state.tree_root = target_root
-                    state.expanded = {state.tree_root}
-                    rebuild_tree_entries(preferred_path=selected_target, center_selection=True)
-                    preview_selected_entry(force=True)
-                    schedule_tree_filter_index_warmup()
-                    tree_watch_signature = None
-                    reset_git_watch_context()
-                    refresh_git_status_overlay(force=True)
-                    state.dirty = True
+                reroot_to_selected_target()
                 continue
             if key == ".":
-                state.show_hidden = not state.show_hidden
-                save_show_hidden(state.show_hidden)
-                selected_path = (
-                    state.tree_entries[state.selected_idx].path.resolve() if state.tree_entries else state.tree_root
-                )
-                rebuild_tree_entries(preferred_path=selected_path)
-                preview_selected_entry(force=True)
-                schedule_tree_filter_index_warmup()
-                tree_watch_signature = None
-                state.dirty = True
+                toggle_hidden_files()
                 continue
             if key.lower() == "t":
-                state.browser_visible = not state.browser_visible
-                if state.wrap_text:
-                    rebuild_screen_lines(columns=term.columns)
-                state.dirty = True
+                toggle_tree_pane()
                 continue
             if key.lower() == "w":
-                state.wrap_text = not state.wrap_text
-                if state.wrap_text:
-                    state.text_x = 0
-                rebuild_screen_lines(columns=term.columns)
-                state.dirty = True
+                toggle_wrap_mode()
                 continue
             if key.lower() == "e":
                 edit_target: Path | None = None
@@ -1531,8 +1961,10 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                             preview_selected_entry()
                             state.dirty = True
                 else:
+                    origin = current_jump_location()
                     state.current_path = entry.path.resolve()
                     refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
+                    record_jump_if_changed(origin)
                     state.dirty = True
                 continue
             if state.browser_visible and key.lower() == "h":

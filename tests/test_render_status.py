@@ -184,6 +184,43 @@ class RenderStatusTests(unittest.TestCase):
         rendered = b"".join(writes).decode("utf-8", errors="replace")
         self.assertIn("/> hello_", rendered)
 
+    def test_command_picker_query_row_uses_command_prefix(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            render_dual_page(
+                text_lines=["line 1", "line 2"],
+                text_start=0,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=4,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=80,
+                left_width=30,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=True,
+                show_hidden=False,
+                picker_active=True,
+                picker_mode="commands",
+                picker_query="wrap",
+                picker_items=["Toggle wrap (w)"],
+                picker_selected=0,
+                picker_focus="query",
+                picker_list_start=0,
+            )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertIn(": wrap", rendered)
+        self.assertIn("Toggle wrap (w)", rendered)
+
     def test_right_preview_highlights_content_search_matches(self) -> None:
         writes: list[bytes] = []
 
@@ -277,6 +314,37 @@ class RenderStatusTests(unittest.TestCase):
         rendered = b"".join(writes).decode("utf-8", errors="replace")
         self.assertIn("\033[1mbeta\033[22m \033[7;1mbeta\033[27;22m", rendered)
 
+    def test_right_preview_renders_inline_header_above_text(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            render_dual_page(
+                text_lines=["line 1", "line 2"],
+                text_start=0,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=4,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=80,
+                left_width=30,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=True,
+                show_hidden=False,
+                preview_inline_header="git L2 | hunk @@ -2 +2 @@ | blame test",
+            )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertIn("git L2 | hunk @@ -2 +2 @@ | blame test", rendered)
+        self.assertIn("line 1", rendered)
+
     def test_bottom_help_panel_splits_tree_and_text_sections_when_browser_visible(self) -> None:
         writes: list[bytes] = []
 
@@ -324,6 +392,10 @@ class RenderStatusTests(unittest.TestCase):
         self.assertIn("\033[38;5;229mr\033[0m", rendered)
         self.assertIn("\033[38;5;229mR\033[0m", rendered)
         self.assertIn("\033[38;5;229mn/N\033[0m", rendered)
+        self.assertIn("Alt+Left/Right", rendered)
+        self.assertIn("m{key}", rendered)
+        self.assertIn("'{key}", rendered)
+        self.assertIn("command palette", rendered)
         self.assertIn("Ctrl+U", rendered)
         self.assertIn("Ctrl+D", rendered)
         self.assertIn("tree root -> parent directory", rendered)
