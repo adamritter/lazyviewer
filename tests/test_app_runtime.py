@@ -1260,6 +1260,117 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertEqual(snapshots["selected_kind"], "search_hit")
             self.assertGreater(int(snapshots["start"]), 0)
 
+    def test_content_search_directory_arrow_click_collapses_and_reopens_subtree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            docs_dir = root / "docs"
+            docs_dir.mkdir()
+            docs_file = docs_dir / "readme.md"
+            docs_file.write_text("needle in docs\n", encoding="utf-8")
+            src_dir = root / "src"
+            src_dir.mkdir()
+            src_file = src_dir / "main.py"
+            src_file.write_text("needle in src\n", encoding="utf-8")
+            snapshots: dict[str, bool] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_search_content(_root, _query, _show_hidden, **_kwargs):
+                return (
+                    {
+                        docs_file.resolve(): [
+                            ContentMatch(
+                                path=docs_file.resolve(),
+                                line=1,
+                                column=1,
+                                preview="    needle in docs",
+                            )
+                        ],
+                        src_file.resolve(): [
+                            ContentMatch(
+                                path=src_file.resolve(),
+                                line=1,
+                                column=1,
+                                preview="needle in src",
+                            )
+                        ],
+                    },
+                    False,
+                    None,
+                )
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                open_tree_filter = _callback(kwargs, "open_tree_filter")
+                apply_tree_filter_query = _callback(kwargs, "apply_tree_filter_query")
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
+
+                open_tree_filter("content")
+                apply_tree_filter_query("needle", preview_selection=False, select_first_file=True)
+
+                docs_idx = next(
+                    idx for idx, entry in enumerate(state.tree_entries) if entry.path.resolve() == docs_dir.resolve()
+                )
+                docs_entry = state.tree_entries[docs_idx]
+                docs_row = (docs_idx - state.tree_start) + 2
+                arrow_col = 1 + (docs_entry.depth * 2)
+                snapshots["docs_child_visible_before"] = any(
+                    entry.path.resolve() == docs_file.resolve() and entry.depth > docs_entry.depth
+                    for entry in state.tree_entries
+                )
+
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{arrow_col}:{docs_row}")
+                snapshots["docs_collapsed"] = docs_dir.resolve() in state.tree_filter_collapsed_dirs
+                snapshots["docs_child_hidden_after_close"] = not any(
+                    entry.path.resolve() == docs_file.resolve() and entry.depth > docs_entry.depth
+                    for entry in state.tree_entries
+                )
+
+                docs_idx = next(
+                    idx for idx, entry in enumerate(state.tree_entries) if entry.path.resolve() == docs_dir.resolve()
+                )
+                docs_entry = state.tree_entries[docs_idx]
+                docs_row = (docs_idx - state.tree_start) + 2
+                arrow_col = 1 + (docs_entry.depth * 2)
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{arrow_col}:{docs_row}")
+
+                snapshots["docs_reopened"] = docs_dir.resolve() not in state.tree_filter_collapsed_dirs
+                snapshots["docs_child_visible_after_reopen"] = any(
+                    entry.path.resolve() == docs_file.resolve() and entry.depth > docs_entry.depth
+                    for entry in state.tree_entries
+                )
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch(
+                "lazyviewer.runtime_tree_filter.search_project_content_rg", side_effect=fake_search_content
+            ), mock.patch(
+                "lazyviewer.app_runtime.collect_project_file_labels", return_value=[]
+            ), mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            self.assertTrue(snapshots["docs_child_visible_before"])
+            self.assertTrue(snapshots["docs_collapsed"])
+            self.assertTrue(snapshots["docs_child_hidden_after_close"])
+            self.assertTrue(snapshots["docs_reopened"])
+            self.assertTrue(snapshots["docs_child_visible_after_reopen"])
+
     def test_runtime_render_shows_full_nested_sticky_chain(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()

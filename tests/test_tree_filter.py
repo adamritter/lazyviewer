@@ -303,6 +303,40 @@ class TreeFilterBehaviorTests(unittest.TestCase):
             self.assertIn((root / "docs").resolve(), render_expanded)
             self.assertIn((root / "src").resolve(), render_expanded)
 
+    def test_filter_tree_entries_for_content_matches_honors_collapsed_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            docs_file = root / "docs" / "readme.md"
+            src_file = root / "src" / "main.py"
+            matches_by_file = {
+                docs_file: [
+                    ContentMatch(path=docs_file, line=5, column=2, preview="search word"),
+                ],
+                src_file: [
+                    ContentMatch(path=src_file, line=10, column=3, preview="alpha = 1"),
+                ],
+            }
+
+            entries, render_expanded = filter_tree_entries_for_content_matches(
+                root=root,
+                expanded={root, (root / "docs"), (root / "src")},
+                matches_by_file=matches_by_file,
+                collapsed_dirs={(root / "docs").resolve()},
+            )
+
+            labels = []
+            for entry in entries:
+                if entry.path.resolve() == root:
+                    labels.append(".")
+                    continue
+                labels.append(entry.path.resolve().relative_to(root).as_posix())
+
+            self.assertIn("docs", labels)
+            self.assertNotIn("docs/readme.md", labels)
+            self.assertIn("src", labels)
+            self.assertIn("src/main.py", labels)
+            self.assertNotIn((root / "docs").resolve(), render_expanded)
+
     def test_find_content_hit_index_prefers_exact_line_and_column(self) -> None:
         root = Path("/tmp/project").resolve()
         file_path = root / "src" / "main.py"
@@ -339,7 +373,7 @@ class TreeFilterBehaviorTests(unittest.TestCase):
         self.assertEqual(find_content_hit_index(entries, file_path, preferred_line=100, preferred_column=100), 2)
         self.assertEqual(find_content_hit_index(entries, root / "missing.py"), None)
 
-    def test_format_tree_entry_search_hit_trims_leading_spaces_and_has_no_indent(self) -> None:
+    def test_format_tree_entry_search_hit_keeps_indentation_and_hides_line_column(self) -> None:
         root = Path("/tmp/project").resolve()
         file_path = root / "src" / "main.py"
         entry = TreeEntry(
@@ -359,9 +393,9 @@ class TreeFilterBehaviorTests(unittest.TestCase):
             search_query="",
         )
 
-        self.assertTrue(rendered.startswith("\033[38;5;44m· "))
-        self.assertIn("L9:3 hello world", rendered)
-        self.assertNotIn("L9:3       hello world", rendered)
+        self.assertTrue(rendered.startswith("      \033[38;5;44m· "))
+        self.assertIn("      hello world", rendered)
+        self.assertNotIn("L9:3", rendered)
 
     def test_format_tree_entry_highlights_search_hit_substring(self) -> None:
         root = Path("/tmp/project").resolve()
@@ -383,7 +417,7 @@ class TreeFilterBehaviorTests(unittest.TestCase):
             search_query="hello",
         )
 
-        self.assertIn("L12:7", rendered)
+        self.assertNotIn("L12:7", rendered)
         self.assertIn("\033[7;1mhello\033[27;22m", rendered)
 
 

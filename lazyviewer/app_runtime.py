@@ -277,6 +277,14 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     source_selection_drag_edge: str | None = None
     source_selection_drag_h_edge: str | None = None
 
+    def reset_source_selection_drag_state() -> None:
+        nonlocal source_selection_drag_active, source_selection_drag_pointer
+        nonlocal source_selection_drag_edge, source_selection_drag_h_edge
+        source_selection_drag_active = False
+        source_selection_drag_pointer = None
+        source_selection_drag_edge = None
+        source_selection_drag_h_edge = None
+
     def index_warmup_worker() -> None:
         nonlocal index_warmup_pending, index_warmup_running
         while True:
@@ -408,6 +416,16 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             state.start = 0
         if state.wrap_text:
             state.text_x = 0
+
+    def show_inline_error(message: str) -> None:
+        state.rendered = f"\033[31m{message}\033[0m"
+        rebuild_screen_lines(preserve_scroll=False)
+        state.text_x = 0
+        state.dir_preview_path = None
+        state.dir_preview_truncated = False
+        state.preview_image_path = None
+        state.preview_image_format = None
+        state.dirty = True
 
     def current_preview_image_path() -> Path | None:
         if not kitty_graphics_supported:
@@ -1014,10 +1032,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 state.dirty = True
                 return True
             if state.source_selection_anchor is None:
-                source_selection_drag_active = False
-                source_selection_drag_pointer = None
-                source_selection_drag_edge = None
-                source_selection_drag_h_edge = None
+                reset_source_selection_drag_state()
                 return True
             state.source_selection_focus = selection_pos
             preview_target = None
@@ -1025,18 +1040,12 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 preview_target = directory_preview_target_for_display_line(selection_pos[0])
             if preview_target is not None:
                 clear_source_selection()
-                source_selection_drag_active = False
-                source_selection_drag_pointer = None
-                source_selection_drag_edge = None
-                source_selection_drag_h_edge = None
+                reset_source_selection_drag_state()
                 jump_to_path_proxy(preview_target)
                 state.dirty = True
                 return True
             copy_selected_source_range(state.source_selection_anchor, selection_pos)
-            source_selection_drag_active = False
-            source_selection_drag_pointer = None
-            source_selection_drag_edge = None
-            source_selection_drag_h_edge = None
+            reset_source_selection_drag_state()
             state.dirty = True
             return True
 
@@ -1048,10 +1057,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 copy_selected_source_range(state.source_selection_anchor, end_pos)
                 state.source_selection_focus = end_pos
                 state.dirty = True
-            source_selection_drag_active = False
-            source_selection_drag_pointer = None
-            source_selection_drag_edge = None
-            source_selection_drag_h_edge = None
+            reset_source_selection_drag_state()
             return True
 
         if source_selection_drag_active:
@@ -1060,10 +1066,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
         if clear_source_selection():
             state.dirty = True
-        source_selection_drag_active = False
-        source_selection_drag_pointer = None
-        source_selection_drag_edge = None
-        source_selection_drag_h_edge = None
+        reset_source_selection_drag_state()
 
         if not (
             state.browser_visible
@@ -1078,8 +1081,35 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             state.dirty = True
             return True
 
-        clicked_idx = state.tree_start + (row - 1 - (1 if query_row_visible else 0))
-        clicked_idx = coerce_tree_filter_result_index(clicked_idx)
+        raw_clicked_idx = state.tree_start + (row - 1 - (1 if query_row_visible else 0))
+        if not (0 <= raw_clicked_idx < len(state.tree_entries)):
+            return True
+
+        raw_clicked_entry = state.tree_entries[raw_clicked_idx]
+        raw_arrow_col = 1 + (raw_clicked_entry.depth * 2)
+        if is_left_down and raw_clicked_entry.is_dir and raw_arrow_col <= col <= (raw_arrow_col + 1):
+            resolved = raw_clicked_entry.path.resolve()
+            if state.tree_filter_active and state.tree_filter_mode == "content":
+                if resolved in state.tree_filter_collapsed_dirs:
+                    state.tree_filter_collapsed_dirs.remove(resolved)
+                    state.expanded.add(resolved)
+                else:
+                    if resolved != state.tree_root:
+                        state.tree_filter_collapsed_dirs.add(resolved)
+                    state.expanded.discard(resolved)
+            else:
+                if resolved in state.expanded:
+                    state.expanded.remove(resolved)
+                else:
+                    state.expanded.add(resolved)
+            rebuild_tree_entries(preferred_path=resolved)
+            tree_watch_signature = None
+            state.last_click_idx = -1
+            state.last_click_time = 0.0
+            state.dirty = True
+            return True
+
+        clicked_idx = coerce_tree_filter_result_index(raw_clicked_idx)
         if clicked_idx is None:
             return True
 
@@ -1088,21 +1118,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         preview_selected_entry()
         if state.selected_idx != prev_selected:
             state.dirty = True
-
-        clicked_entry = state.tree_entries[state.selected_idx]
-        arrow_col = 1 + (clicked_entry.depth * 2)
-        if is_left_down and clicked_entry.is_dir and arrow_col <= col <= (arrow_col + 1):
-            resolved = clicked_entry.path.resolve()
-            if resolved in state.expanded:
-                state.expanded.remove(resolved)
-            else:
-                state.expanded.add(resolved)
-            rebuild_tree_entries(preferred_path=resolved)
-            tree_watch_signature = None
-            state.last_click_idx = -1
-            state.last_click_time = 0.0
-            state.dirty = True
-            return True
 
         now = time.monotonic()
         is_double = clicked_idx == state.last_click_idx and (now - state.last_click_time) <= DOUBLE_CLICK_SECONDS
@@ -1318,14 +1333,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
     def launch_lazygit() -> None:
         if shutil.which("lazygit") is None:
-            state.rendered = "\033[31mlazygit not found in PATH\033[0m"
-            rebuild_screen_lines(preserve_scroll=False)
-            state.text_x = 0
-            state.dir_preview_path = None
-            state.dir_preview_truncated = False
-            state.preview_image_path = None
-            state.preview_image_format = None
-            state.dirty = True
+            show_inline_error("lazygit not found in PATH")
             return
 
         launch_error: str | None = None
@@ -1343,14 +1351,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             terminal.enable_tui_mode()
 
         if launch_error is not None:
-            state.rendered = f"\033[31m{launch_error}\033[0m"
-            rebuild_screen_lines(preserve_scroll=False)
-            state.text_x = 0
-            state.dir_preview_path = None
-            state.dir_preview_truncated = False
-            state.preview_image_path = None
-            state.preview_image_format = None
-            state.dirty = True
+            show_inline_error(launch_error)
             return
 
         previous_current_path = state.current_path.resolve()

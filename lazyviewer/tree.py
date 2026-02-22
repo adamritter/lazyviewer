@@ -158,12 +158,18 @@ def filter_tree_entries_for_content_matches(
     root: Path,
     expanded: set[Path],
     matches_by_file: dict[Path, list[ContentMatch]],
+    collapsed_dirs: set[Path] | None = None,
 ) -> tuple[list[TreeEntry], set[Path]]:
     root = root.resolve()
     visible_dirs: set[Path] = {root}
     visible_files: set[Path] = set()
     normalized_matches: dict[Path, list[ContentMatch]] = {}
     forced_expanded: set[Path] = {root}
+    collapsed = {
+        path.resolve()
+        for path in (collapsed_dirs or set())
+        if path.resolve().is_relative_to(root)
+    }
 
     for raw_path, matches in matches_by_file.items():
         file_path = raw_path if raw_path.is_absolute() else (root / raw_path)
@@ -186,7 +192,8 @@ def filter_tree_entries_for_content_matches(
                 break
             parent = parent.parent
 
-    render_expanded = set(expanded) | forced_expanded
+    render_expanded = (set(expanded) | forced_expanded) - collapsed
+    render_expanded.add(root)
     children_by_parent: dict[Path, list[Path]] = {}
     for path in visible_dirs | visible_files:
         if path == root:
@@ -330,18 +337,12 @@ def format_tree_entry(
     search_query: str = "",
 ) -> str:
     if entry.kind == "search_hit":
+        indent = "  " * max(0, entry.depth - 1)
         marker_color = "\033[38;5;44m"
         text_color = "\033[38;5;250m"
         reset = "\033[0m"
-        line_label = ""
-        if entry.line is not None:
-            if entry.column is not None:
-                line_label = f"L{entry.line}:{entry.column} "
-            else:
-                line_label = f"L{entry.line} "
-        # Search-hit rows should stay visually compact in the tree.
-        content = _highlight_substring((entry.display or "").lstrip(), search_query)
-        return f"{marker_color}· {reset}{text_color}{line_label}{content}{reset}"
+        content = _highlight_substring(entry.display or "", search_query)
+        return f"{indent}{marker_color}· {reset}{text_color}{content}{reset}"
 
     indent = "  " * entry.depth
     if entry.path == root:

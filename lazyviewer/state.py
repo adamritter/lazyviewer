@@ -48,6 +48,7 @@ class AppState:
     tree_filter_match_count: int = 0
     tree_filter_truncated: bool = False
     tree_filter_loading: bool = False
+    tree_filter_collapsed_dirs: set[Path] = field(default_factory=set)
     tree_filter_prev_browser_visible: bool | None = None
     tree_render_expanded: set[Path] = field(default_factory=set)
     picker_active: bool = False

@@ -280,6 +280,7 @@ class TreeFilterOps:
                     self.state.tree_root,
                     self.state.expanded,
                     matches_by_file,
+                    collapsed_dirs=self.state.tree_filter_collapsed_dirs,
                 )
             else:
                 self.refresh_tree_filter_file_index()
@@ -414,6 +415,7 @@ class TreeFilterOps:
         self.state.tree_filter_match_count = 0
         self.state.tree_filter_truncated = False
         self.state.tree_filter_loading = False
+        self.state.tree_filter_collapsed_dirs = set()
         if was_active and previous_mode != mode:
             self.rebuild_tree_entries(preferred_path=self.state.current_path.resolve())
         self.state.dirty = True
@@ -427,6 +429,7 @@ class TreeFilterOps:
             self.state.tree_filter_query = ""
             self.state.tree_filter_truncated = False
         self.state.tree_filter_loading = False
+        self.state.tree_filter_collapsed_dirs = set()
         self.state.tree_filter_prev_browser_visible = None
         if previous_browser_visible is not None:
             browser_visibility_changed = self.state.browser_visible != previous_browser_visible

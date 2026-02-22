@@ -541,6 +541,8 @@ def handle_normal_key(
         if entry.is_dir:
             resolved = entry.path.resolve()
             if resolved not in state.expanded:
+                if state.tree_filter_active and state.tree_filter_mode == "content":
+                    state.tree_filter_collapsed_dirs.discard(resolved)
                 state.expanded.add(resolved)
                 rebuild_tree_entries(preferred_path=resolved)
                 mark_tree_watch_dirty()
@@ -566,6 +568,8 @@ def handle_normal_key(
             and entry.path.resolve() in state.expanded
             and entry.path.resolve() != state.tree_root
         ):
+            if state.tree_filter_active and state.tree_filter_mode == "content":
+                state.tree_filter_collapsed_dirs.add(entry.path.resolve())
             state.expanded.remove(entry.path.resolve())
             rebuild_tree_entries(preferred_path=entry.path.resolve())
             mark_tree_watch_dirty()
@@ -586,8 +590,12 @@ def handle_normal_key(
             resolved = entry.path.resolve()
             if resolved in state.expanded:
                 if resolved != state.tree_root:
+                    if state.tree_filter_active and state.tree_filter_mode == "content":
+                        state.tree_filter_collapsed_dirs.add(resolved)
                     state.expanded.remove(resolved)
             else:
+                if state.tree_filter_active and state.tree_filter_mode == "content":
+                    state.tree_filter_collapsed_dirs.discard(resolved)
                 state.expanded.add(resolved)
             rebuild_tree_entries(preferred_path=resolved)
             mark_tree_watch_dirty()
