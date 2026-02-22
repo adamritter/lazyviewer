@@ -15,6 +15,9 @@ GIT_DIFF_PREVIEW_CACHE_MAX = 128
 
 _DIFF_PREVIEW_CACHE: OrderedDict[tuple[str, int, int, str, bool, str], str | None] = OrderedDict()
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+_SGR_RE = re.compile(r"\x1b\[([0-9;]*)m")
+_ADDED_BG_SGR = "48;2;36;74;52"
+_REMOVED_BG_SGR = "48;2;92;43;49"
 
 
 @dataclass
@@ -186,12 +189,21 @@ def _format_marked_line(marker: str, code_line: str, colorize: bool) -> str:
         return f"{marker} {code_line}"
 
     if marker == "+":
-        prefix = "\033[38;5;42m+ \033[0m"
+        return _apply_line_background(code_line, _ADDED_BG_SGR)
     elif marker == "-":
-        prefix = "\033[38;5;203m- \033[0m"
-    else:
-        prefix = "\033[2;38;5;245m  \033[0m"
-    return f"{prefix}{code_line}"
+        return _apply_line_background(code_line, _REMOVED_BG_SGR)
+    return code_line
+
+
+def _apply_line_background(code_line: str, bg_sgr: str) -> str:
+    def _inject_bg(match: re.Match[str]) -> str:
+        params = match.group(1)
+        if params:
+            return f"\033[{params};{bg_sgr}m"
+        return f"\033[{bg_sgr}m"
+
+    line_with_persistent_bg = _SGR_RE.sub(_inject_bg, code_line)
+    return f"\033[{bg_sgr}m{line_with_persistent_bg}\033[K\033[0m"
 
 
 def _colorize_lines(lines: list[str], target: Path, style: str, colorize: bool) -> list[str]:
