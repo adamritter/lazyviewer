@@ -238,7 +238,17 @@ def handle_tree_filter_key(
     apply_tree_filter_query: Callable[..., None],
     jump_to_next_content_hit: Callable[[int], bool],
 ) -> bool:
-    if state.tree_filter_active and state.tree_filter_editing:
+    if not state.tree_filter_active:
+        return False
+
+    def apply_live_filter_query(query: str) -> None:
+        apply_tree_filter_query(
+            query,
+            preview_selection=True,
+            select_first_file=True,
+        )
+
+    if state.tree_filter_editing:
         if handle_tree_mouse_wheel(key):
             return True
         if handle_tree_mouse_click(key):
@@ -263,52 +273,39 @@ def handle_tree_filter_key(
             return True
         if key == "BACKSPACE":
             if state.tree_filter_query:
-                apply_tree_filter_query(
-                    state.tree_filter_query[:-1],
-                    preview_selection=True,
-                    select_first_file=True,
-                )
+                apply_live_filter_query(state.tree_filter_query[:-1])
             return True
         if key == "CTRL_U":
             if state.tree_filter_query:
-                apply_tree_filter_query(
-                    "",
-                    preview_selection=True,
-                    select_first_file=True,
-                )
+                apply_live_filter_query("")
             return True
         if key == "CTRL_QUESTION":
             toggle_help_panel()
             return True
         if len(key) == 1 and key.isprintable():
-            apply_tree_filter_query(
-                state.tree_filter_query + key,
-                preview_selection=True,
-                select_first_file=True,
-            )
+            apply_live_filter_query(state.tree_filter_query + key)
             return True
         return True
 
-    if state.tree_filter_active and not state.tree_filter_editing:
-        if key == "TAB":
-            state.tree_filter_editing = True
-            state.dirty = True
+    if key == "TAB":
+        state.tree_filter_editing = True
+        state.dirty = True
+        return True
+    if key == "ENTER":
+        activate_tree_filter_selection()
+        return True
+    if key == "ESC":
+        close_tree_filter(clear_query=True)
+        return True
+    if state.tree_filter_mode == "content":
+        if key == "n":
+            if jump_to_next_content_hit(1):
+                state.dirty = True
             return True
-        if key == "ENTER":
-            activate_tree_filter_selection()
+        if key == "N":
+            if jump_to_next_content_hit(-1):
+                state.dirty = True
             return True
-        if key == "ESC":
-            close_tree_filter(clear_query=True)
-            return True
-        if state.tree_filter_mode == "content":
-            if key == "n":
-                if jump_to_next_content_hit(1):
-                    state.dirty = True
-                return True
-            if key == "N":
-                if jump_to_next_content_hit(-1):
-                    state.dirty = True
-                return True
     return False
 
 
