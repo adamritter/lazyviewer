@@ -342,7 +342,6 @@ def format_tree_entry(
     search_query: str = "",
 ) -> str:
     if entry.kind == "search_hit":
-        indent = "  " * entry.depth
         marker_color = "\033[38;5;44m"
         text_color = "\033[38;5;250m"
         reset = "\033[0m"
@@ -352,8 +351,9 @@ def format_tree_entry(
                 line_label = f"L{entry.line}:{entry.column} "
             else:
                 line_label = f"L{entry.line} "
-        content = _highlight_substring(entry.display or "", search_query)
-        return f"{indent}{marker_color}· {reset}{text_color}{line_label}{content}{reset}"
+        # Search-hit rows should stay visually compact in the tree.
+        content = _highlight_substring((entry.display or "").lstrip(), search_query)
+        return f"{marker_color}· {reset}{text_color}{line_label}{content}{reset}"
 
     indent = "  " * entry.depth
     if entry.path == root:
