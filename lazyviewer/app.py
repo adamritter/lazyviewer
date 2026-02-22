@@ -32,7 +32,7 @@ from .preview import (
     build_rendered_for_path,
 )
 from .search import search_project_content_rg
-from .render import help_panel_row_count, render_dual_page
+from .render import RenderContext, help_panel_row_count, render_dual_page_context
 from .state import AppState
 from .symbols import collect_symbols
 from .terminal import TerminalController
@@ -354,6 +354,11 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         else:
             dir_limit = DIR_PREVIEW_INITIAL_MAX_ENTRIES
 
+        prefer_git_diff = not (
+            state.tree_filter_active
+            and state.tree_filter_mode == "content"
+            and bool(state.tree_filter_query)
+        )
         rendered_for_path = build_rendered_for_path(
             state.current_path,
             state.show_hidden,
@@ -361,6 +366,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             no_color,
             dir_max_entries=dir_limit,
             dir_skip_gitignored=state.show_hidden,
+            prefer_git_diff=prefer_git_diff,
         )
         state.rendered = rendered_for_path.text
         rebuild_screen_lines(preserve_scroll=not reset_scroll)
@@ -1325,22 +1331,22 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 preview_image_path = current_preview_image_path()
                 render_lines = [""] if preview_image_path is not None else state.lines
                 render_start = 0 if preview_image_path is not None else state.start
-                render_dual_page(
-                    render_lines,
-                    render_start,
-                    state.tree_entries,
-                    state.tree_start,
-                    state.selected_idx,
-                    state.usable,
-                    state.current_path,
-                    state.tree_root,
-                    state.tree_render_expanded,
-                    term.columns,
-                    state.left_width,
-                    state.text_x,
-                    state.wrap_text,
-                    state.browser_visible,
-                    state.show_hidden,
+                render_context = RenderContext(
+                    text_lines=render_lines,
+                    text_start=render_start,
+                    tree_entries=state.tree_entries,
+                    tree_start=state.tree_start,
+                    tree_selected=state.selected_idx,
+                    max_lines=state.usable,
+                    current_path=state.current_path,
+                    tree_root=state.tree_root,
+                    expanded=state.tree_render_expanded,
+                    width=term.columns,
+                    left_width=state.left_width,
+                    text_x=state.text_x,
+                    wrap_text=state.wrap_text,
+                    browser_visible=state.browser_visible,
+                    show_hidden=state.show_hidden,
                     show_help=state.show_help,
                     tree_filter_active=state.tree_filter_active,
                     tree_filter_query=state.tree_filter_query,
@@ -1396,6 +1402,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                         else 0
                     ),
                 )
+                render_dual_page_context(render_context)
                 desired_image_state: tuple[str, int, int, int, int] | None = None
                 if preview_image_path is not None:
                     image_col, image_row, image_width, image_height = current_preview_image_geometry(term.columns)

@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 
+from .git_status import build_unified_diff_preview_for_path
 from .gitignore import get_gitignore_matcher
 from .highlight import colorize_source, read_text, sanitize_terminal_text
 
@@ -153,6 +154,7 @@ def build_rendered_for_path(
     dir_max_depth: int = DIR_PREVIEW_DEFAULT_DEPTH,
     dir_max_entries: int = DIR_PREVIEW_INITIAL_MAX_ENTRIES,
     dir_skip_gitignored: bool = False,
+    prefer_git_diff: bool = True,
 ) -> RenderedPath:
     if target.is_dir():
         preview, truncated = build_directory_preview(
@@ -192,6 +194,15 @@ def build_rendered_for_path(
         else:
             message = f"{target}\n\n<binary file>"
         return RenderedPath(text=message, is_directory=False, truncated=False)
+
+    if prefer_git_diff:
+        diff_preview = build_unified_diff_preview_for_path(
+            target,
+            colorize=not no_color and os.isatty(sys.stdout.fileno()),
+            style=style,
+        )
+        if diff_preview:
+            return RenderedPath(text=diff_preview, is_directory=False, truncated=False)
 
     try:
         source = read_text(target)

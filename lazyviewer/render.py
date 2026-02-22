@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from .ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line, slice_ansi_line
@@ -32,6 +33,93 @@ HELP_PANEL_TEXT_ONLY_LINES: tuple[str, ...] = (
     "\033[2;38;5;250mmeta:\033[0m \033[38;5;229m:\033[0m commands  \033[38;5;229mCtrl+P\033[0m files  \033[38;5;229m/\033[0m content  \033[38;5;229mn/N\033[0m hits",
     "\033[2;38;5;250mnav:\033[0m \033[38;5;229mm{key}/'{key}\033[0m marks  \033[38;5;229mAlt+Left/Right\033[0m history  \033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
 )
+
+
+@dataclass
+class RenderContext:
+    text_lines: list[str]
+    text_start: int
+    tree_entries: list[TreeEntry]
+    tree_start: int
+    tree_selected: int
+    max_lines: int
+    current_path: Path
+    tree_root: Path
+    expanded: set[Path]
+    width: int
+    left_width: int
+    text_x: int
+    wrap_text: bool
+    browser_visible: bool
+    show_hidden: bool
+    show_help: bool = False
+    tree_filter_active: bool = False
+    tree_filter_query: str = ""
+    tree_filter_editing: bool = False
+    tree_filter_cursor_visible: bool = False
+    tree_filter_match_count: int = 0
+    tree_filter_truncated: bool = False
+    tree_filter_loading: bool = False
+    tree_filter_spinner_frame: int = 0
+    tree_filter_prefix: str = "p>"
+    tree_filter_placeholder: str = "type to filter files"
+    picker_active: bool = False
+    picker_mode: str = "symbols"
+    picker_query: str = ""
+    picker_items: list[str] | None = None
+    picker_selected: int = 0
+    picker_focus: str = "query"
+    picker_list_start: int = 0
+    picker_message: str = ""
+    git_status_overlay: dict[Path, int] | None = None
+    tree_search_query: str = ""
+    text_search_query: str = ""
+    text_search_current_line: int = 0
+    text_search_current_column: int = 0
+
+
+def render_dual_page_context(context: RenderContext) -> None:
+    render_dual_page(
+        context.text_lines,
+        context.text_start,
+        context.tree_entries,
+        context.tree_start,
+        context.tree_selected,
+        context.max_lines,
+        context.current_path,
+        context.tree_root,
+        context.expanded,
+        context.width,
+        context.left_width,
+        context.text_x,
+        context.wrap_text,
+        context.browser_visible,
+        context.show_hidden,
+        show_help=context.show_help,
+        tree_filter_active=context.tree_filter_active,
+        tree_filter_query=context.tree_filter_query,
+        tree_filter_editing=context.tree_filter_editing,
+        tree_filter_cursor_visible=context.tree_filter_cursor_visible,
+        tree_filter_match_count=context.tree_filter_match_count,
+        tree_filter_truncated=context.tree_filter_truncated,
+        tree_filter_loading=context.tree_filter_loading,
+        tree_filter_spinner_frame=context.tree_filter_spinner_frame,
+        tree_filter_prefix=context.tree_filter_prefix,
+        tree_filter_placeholder=context.tree_filter_placeholder,
+        picker_active=context.picker_active,
+        picker_mode=context.picker_mode,
+        picker_query=context.picker_query,
+        picker_items=context.picker_items,
+        picker_selected=context.picker_selected,
+        picker_focus=context.picker_focus,
+        picker_list_start=context.picker_list_start,
+        picker_message=context.picker_message,
+        git_status_overlay=context.git_status_overlay,
+        tree_search_query=context.tree_search_query,
+        text_search_query=context.text_search_query,
+        text_search_current_line=context.text_search_current_line,
+        text_search_current_column=context.text_search_current_column,
+    )
 
 
 def selected_with_ansi(text: str) -> str:

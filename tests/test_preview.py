@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -185,6 +187,84 @@ class PreviewBehaviorTests(unittest.TestCase):
             self.assertTrue(rendered.is_directory)
             self.assertTrue(rendered.truncated)
             self.assertIn("... truncated after 1 entries ...", plain)
+
+    @unittest.skipIf(shutil.which("git") is None, "git is required for git diff preview tests")
+    def test_build_rendered_for_path_shows_annotated_source_for_modified_git_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "tests@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Tests"], cwd=root, check=True)
+            file_path = root / "demo.py"
+            file_path.write_text("a = 1\nb = 2\nc = 3\n", encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=root, check=True)
+
+            file_path.write_text("a = 1\nb = 22\nc = 3\n", encoding="utf-8")
+            rendered = preview.build_rendered_for_path(
+                file_path,
+                show_hidden=False,
+                style="monokai",
+                no_color=True,
+            )
+            plain = strip_ansi(rendered.text)
+            self.assertEqual(
+                plain.splitlines(),
+                [
+                    "  a = 1",
+                    "- b = 2",
+                    "+ b = 22",
+                    "  c = 3",
+                ],
+            )
+
+    @unittest.skipIf(shutil.which("git") is None, "git is required for git diff preview tests")
+    def test_build_rendered_for_path_can_disable_git_diff_preview(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "tests@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Tests"], cwd=root, check=True)
+            file_path = root / "demo.py"
+            file_path.write_text("a = 1\nb = 2\n", encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=root, check=True)
+
+            file_path.write_text("a = 1\nb = 22\n", encoding="utf-8")
+            rendered = preview.build_rendered_for_path(
+                file_path,
+                show_hidden=False,
+                style="monokai",
+                no_color=True,
+                prefer_git_diff=False,
+            )
+            self.assertEqual(rendered.text, "a = 1\nb = 22\n")
+
+    @unittest.skipIf(shutil.which("git") is None, "git is required for git diff preview tests")
+    def test_build_rendered_for_path_git_diff_preview_keeps_program_coloring(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "tests@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Tests"], cwd=root, check=True)
+            file_path = root / "demo.py"
+            file_path.write_text("x = 1\nname = 'old'\n", encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=root, check=True)
+
+            file_path.write_text("x = 1\nname = 'new'\n", encoding="utf-8")
+            with mock.patch("lazyviewer.preview.os.isatty", return_value=True):
+                rendered = preview.build_rendered_for_path(
+                    file_path,
+                    show_hidden=False,
+                    style="monokai",
+                    no_color=False,
+                )
+
+            plain = strip_ansi(rendered.text)
+            self.assertIn("+ name = 'new'", plain)
+            self.assertIn("- name = 'old'", plain)
+            self.assertIn("\x1b[", rendered.text)
 
 
 if __name__ == "__main__":
