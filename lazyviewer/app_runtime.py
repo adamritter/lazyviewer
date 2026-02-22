@@ -338,6 +338,34 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         git_watch_signature = signature
         refresh_git_status_overlay(force=True)
 
+    def sorted_git_modified_file_paths() -> list[Path]:
+        if not state.git_status_overlay:
+            return []
+
+        root = state.tree_root.resolve()
+        rel_to_path: dict[str, Path] = {}
+        for raw_path, flags in state.git_status_overlay.items():
+            if flags == 0:
+                continue
+            path = raw_path.resolve()
+            if path == root or not path.is_relative_to(root):
+                continue
+            if not path.exists() or path.is_dir():
+                continue
+            try:
+                rel = path.relative_to(root)
+            except Exception:
+                continue
+            if not state.show_hidden and any(part.startswith(".") for part in rel.parts):
+                continue
+            rel_text = str(rel)
+            rel_to_path[rel_text] = path
+
+        if not rel_to_path:
+            return []
+        ordered_rel = sorted(rel_to_path, key=lambda item: (item.casefold(), item))
+        return [rel_to_path[rel] for rel in ordered_rel]
+
     def refresh_rendered_for_current_path(
         reset_scroll: bool = True,
         reset_dir_budget: bool = False,
@@ -570,6 +598,58 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     current_jump_location = navigation_ops.current_jump_location
     record_jump_if_changed = navigation_ops.record_jump_if_changed
 
+    def jump_to_next_git_modified(direction: int) -> bool:
+        if direction == 0:
+            return False
+
+        refresh_git_status_overlay()
+        modified_paths = sorted_git_modified_file_paths()
+        if not modified_paths:
+            return False
+
+        root = state.tree_root.resolve()
+        if state.browser_visible and state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
+            anchor_path = state.tree_entries[state.selected_idx].path.resolve()
+        else:
+            anchor_path = state.current_path.resolve()
+
+        ordered_items: list[tuple[tuple[str, str], Path]] = []
+        for path in modified_paths:
+            rel_text = str(path.relative_to(root))
+            ordered_items.append(((rel_text.casefold(), rel_text), path))
+
+        try:
+            anchor_rel_text = str(anchor_path.relative_to(root))
+            anchor_key: tuple[str, str] | None = (anchor_rel_text.casefold(), anchor_rel_text)
+        except Exception:
+            anchor_key = None
+
+        target: Path | None = None
+        if direction > 0:
+            if anchor_key is not None:
+                for item_key, path in ordered_items:
+                    if item_key > anchor_key:
+                        target = path
+                        break
+            if target is None:
+                target = ordered_items[0][1]
+        else:
+            if anchor_key is not None:
+                for item_key, path in reversed(ordered_items):
+                    if item_key < anchor_key:
+                        target = path
+                        break
+            if target is None:
+                target = ordered_items[-1][1]
+
+        if target is None or target == anchor_path:
+            return False
+
+        origin = current_jump_location()
+        navigation_ops.jump_to_path(target)
+        record_jump_if_changed(origin)
+        return True
+
     schedule_tree_filter_index_warmup()
     tree_watch_signature = build_tree_watch_signature(
         state.tree_root,
@@ -611,6 +691,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             rebuild_screen_lines=rebuild_screen_lines,
             mark_tree_watch_dirty=mark_tree_watch_dirty,
             launch_editor_for_path=launch_editor_for_path,
+            jump_to_next_git_modified=jump_to_next_git_modified,
         )
 
     run_main_loop(

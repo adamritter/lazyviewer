@@ -2,8 +2,15 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from pathlib import Path
 
+from .navigation import JumpLocation
 from .state import AppState
+from .tree import (
+    next_directory_entry_index,
+    next_index_after_directory_subtree,
+    next_opened_directory_entry_index,
+)
 
 
 def handle_picker_key(
@@ -302,4 +309,305 @@ def handle_tree_filter_key(
                 if jump_to_next_content_hit(-1):
                     state.dirty = True
                 return True
+    return False
+
+
+def handle_normal_key(
+    *,
+    key: str,
+    term_columns: int,
+    state: AppState,
+    current_jump_location: Callable[[], JumpLocation],
+    record_jump_if_changed: Callable[[JumpLocation], None],
+    open_symbol_picker: Callable[[], None],
+    reroot_to_parent: Callable[[], None],
+    reroot_to_selected_target: Callable[[], None],
+    toggle_hidden_files: Callable[[], None],
+    toggle_tree_pane: Callable[[], None],
+    toggle_wrap_mode: Callable[[], None],
+    toggle_help_panel: Callable[[], None],
+    handle_tree_mouse_wheel: Callable[[str], bool],
+    handle_tree_mouse_click: Callable[[str], bool],
+    move_tree_selection: Callable[[int], bool],
+    rebuild_tree_entries: Callable[..., None],
+    preview_selected_entry: Callable[..., None],
+    refresh_rendered_for_current_path: Callable[..., None],
+    refresh_git_status_overlay: Callable[..., None],
+    maybe_grow_directory_preview: Callable[[], bool],
+    visible_content_rows: Callable[[], int],
+    rebuild_screen_lines: Callable[..., None],
+    mark_tree_watch_dirty: Callable[[], None],
+    launch_editor_for_path: Callable[[Path], str | None],
+    jump_to_next_git_modified: Callable[[int], bool],
+) -> bool:
+    if key.lower() == "s" and not state.picker_active:
+        state.count_buffer = ""
+        open_symbol_picker()
+        return False
+
+    if key == "m":
+        state.count_buffer = ""
+        state.pending_mark_set = True
+        state.pending_mark_jump = False
+        return False
+
+    if key == "'":
+        state.count_buffer = ""
+        state.pending_mark_set = False
+        state.pending_mark_jump = True
+        return False
+
+    if key.isdigit():
+        state.count_buffer += key
+        return False
+
+    count = int(state.count_buffer) if state.count_buffer else None
+    state.count_buffer = ""
+    if key == "?":
+        toggle_help_panel()
+        return False
+    if key == "CTRL_U" or key == "CTRL_D":
+        if state.browser_visible and state.tree_entries:
+            direction = -1 if key == "CTRL_U" else 1
+            jump_steps = 1 if count is None else max(1, min(10, count))
+
+            def parent_directory_index(from_idx: int) -> int | None:
+                current_depth = state.tree_entries[from_idx].depth
+                idx = from_idx - 1
+                while idx >= 0:
+                    candidate = state.tree_entries[idx]
+                    if candidate.is_dir and candidate.depth < current_depth:
+                        return idx
+                    idx -= 1
+                return None
+
+            def smart_directory_jump(from_idx: int, jump_direction: int) -> int | None:
+                if jump_direction < 0:
+                    prev_opened = next_opened_directory_entry_index(
+                        state.tree_entries,
+                        from_idx,
+                        -1,
+                        state.expanded,
+                    )
+                    if prev_opened is not None:
+                        return prev_opened
+                    return parent_directory_index(from_idx)
+
+                current_entry = state.tree_entries[from_idx]
+                if current_entry.is_dir and current_entry.path.resolve() in state.expanded:
+                    after_current = next_index_after_directory_subtree(state.tree_entries, from_idx)
+                    if after_current is not None:
+                        return after_current
+
+                next_opened = next_opened_directory_entry_index(
+                    state.tree_entries,
+                    from_idx,
+                    1,
+                    state.expanded,
+                )
+                if next_opened is not None:
+                    after_next_opened = next_index_after_directory_subtree(state.tree_entries, next_opened)
+                    if after_next_opened is not None:
+                        return after_next_opened
+                    return next_opened
+
+                return next_directory_entry_index(state.tree_entries, from_idx, 1)
+
+            target_idx = state.selected_idx
+            moved = 0
+            while moved < jump_steps:
+                next_idx = smart_directory_jump(target_idx, direction)
+                if next_idx is None:
+                    break
+                target_idx = next_idx
+                moved += 1
+            if moved > 0:
+                origin = current_jump_location()
+                prev_selected = state.selected_idx
+                state.selected_idx = target_idx
+                preview_selected_entry()
+                record_jump_if_changed(origin)
+                if state.selected_idx != prev_selected or current_jump_location() != origin:
+                    state.dirty = True
+        return False
+    if key == "R":
+        reroot_to_parent()
+        return False
+    if key == "r":
+        reroot_to_selected_target()
+        return False
+    if key == ".":
+        toggle_hidden_files()
+        return False
+    if key.lower() == "t":
+        toggle_tree_pane()
+        return False
+    if key.lower() == "w":
+        toggle_wrap_mode()
+        return False
+    if key.lower() == "e":
+        edit_target: Path | None = None
+        if state.browser_visible and state.tree_entries:
+            selected_entry = state.tree_entries[state.selected_idx]
+            if not selected_entry.is_dir and selected_entry.path.is_file():
+                edit_target = selected_entry.path.resolve()
+        if edit_target is None and state.current_path.is_file():
+            edit_target = state.current_path.resolve()
+        if edit_target is None:
+            state.rendered = "\033[31m<cannot edit a directory>\033[0m"
+            rebuild_screen_lines(columns=term_columns, preserve_scroll=False)
+            state.text_x = 0
+            state.dirty = True
+            return False
+
+        error = launch_editor_for_path(edit_target)
+        state.current_path = edit_target
+        if error is None:
+            refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
+            refresh_git_status_overlay(force=True)
+        else:
+            state.rendered = f"\033[31m{error}\033[0m"
+            rebuild_screen_lines(columns=term_columns, preserve_scroll=False)
+            state.text_x = 0
+            state.dir_preview_path = None
+            state.dir_preview_truncated = False
+            state.preview_image_path = None
+            state.preview_image_format = None
+        state.dirty = True
+        return False
+    if key.lower() == "q" or key == "\x03":
+        return True
+    if not state.tree_filter_active and key == "n":
+        if jump_to_next_git_modified(1):
+            state.dirty = True
+        return False
+    if not state.tree_filter_active and key == "N":
+        if jump_to_next_git_modified(-1):
+            state.dirty = True
+        return False
+    if handle_tree_mouse_wheel(key):
+        return False
+    if handle_tree_mouse_click(key):
+        return False
+    if state.browser_visible and key.lower() == "j":
+        if move_tree_selection(1):
+            state.dirty = True
+        return False
+    if state.browser_visible and key.lower() == "k":
+        if move_tree_selection(-1):
+            state.dirty = True
+        return False
+    if state.browser_visible and key.lower() == "l":
+        entry = state.tree_entries[state.selected_idx]
+        if entry.is_dir:
+            resolved = entry.path.resolve()
+            if resolved not in state.expanded:
+                state.expanded.add(resolved)
+                rebuild_tree_entries(preferred_path=resolved)
+                mark_tree_watch_dirty()
+                preview_selected_entry()
+                state.dirty = True
+            else:
+                next_idx = state.selected_idx + 1
+                if next_idx < len(state.tree_entries) and state.tree_entries[next_idx].depth > entry.depth:
+                    state.selected_idx = next_idx
+                    preview_selected_entry()
+                    state.dirty = True
+        else:
+            origin = current_jump_location()
+            state.current_path = entry.path.resolve()
+            refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
+            record_jump_if_changed(origin)
+            state.dirty = True
+        return False
+    if state.browser_visible and key.lower() == "h":
+        entry = state.tree_entries[state.selected_idx]
+        if (
+            entry.is_dir
+            and entry.path.resolve() in state.expanded
+            and entry.path.resolve() != state.tree_root
+        ):
+            state.expanded.remove(entry.path.resolve())
+            rebuild_tree_entries(preferred_path=entry.path.resolve())
+            mark_tree_watch_dirty()
+            preview_selected_entry()
+            state.dirty = True
+        elif entry.path.resolve() != state.tree_root:
+            parent = entry.path.parent.resolve()
+            for idx, candidate in enumerate(state.tree_entries):
+                if candidate.path.resolve() == parent:
+                    state.selected_idx = idx
+                    preview_selected_entry()
+                    state.dirty = True
+                    break
+        return False
+    if state.browser_visible and key == "ENTER":
+        entry = state.tree_entries[state.selected_idx]
+        if entry.is_dir:
+            resolved = entry.path.resolve()
+            if resolved in state.expanded:
+                if resolved != state.tree_root:
+                    state.expanded.remove(resolved)
+            else:
+                state.expanded.add(resolved)
+            rebuild_tree_entries(preferred_path=resolved)
+            mark_tree_watch_dirty()
+            preview_selected_entry()
+            state.dirty = True
+            return False
+
+    prev_start = state.start
+    prev_text_x = state.text_x
+    scrolling_down = False
+    page_rows = visible_content_rows()
+    if key == " " or key.lower() == "f":
+        pages = count if count is not None else 1
+        state.start += page_rows * max(1, pages)
+        scrolling_down = True
+    elif key.lower() == "d":
+        mult = count if count is not None else 1
+        state.start += max(1, page_rows // 2) * max(1, mult)
+        scrolling_down = True
+    elif key.lower() == "u":
+        mult = count if count is not None else 1
+        state.start -= max(1, page_rows // 2) * max(1, mult)
+    elif key == "DOWN" or (not state.browser_visible and key.lower() == "j"):
+        state.start += count if count is not None else 1
+        scrolling_down = True
+    elif key == "UP" or (not state.browser_visible and key.lower() == "k"):
+        state.start -= count if count is not None else 1
+    elif key == "g":
+        if count is None:
+            state.start = 0
+        else:
+            state.start = max(0, min(count - 1, state.max_start))
+    elif key == "G":
+        if count is None:
+            state.start = state.max_start
+        else:
+            state.start = max(0, min(count - 1, state.max_start))
+        scrolling_down = True
+    elif key == "ENTER":
+        state.start += count if count is not None else 1
+        scrolling_down = True
+    elif key == "B":
+        pages = count if count is not None else 1
+        state.start -= page_rows * max(1, pages)
+    elif (key == "LEFT" or (not state.browser_visible and key.lower() == "h")) and not state.wrap_text:
+        step = count if count is not None else 4
+        state.text_x = max(0, state.text_x - max(1, step))
+    elif (key == "RIGHT" or (not state.browser_visible and key.lower() == "l")) and not state.wrap_text:
+        step = count if count is not None else 4
+        state.text_x += max(1, step)
+    elif key == "HOME":
+        state.start = 0
+    elif key == "END":
+        state.start = state.max_start
+    elif key == "ESC":
+        return True
+
+    state.start = max(0, min(state.start, state.max_start))
+    grew_preview = scrolling_down and maybe_grow_directory_preview()
+    if state.start != prev_start or state.text_x != prev_text_x or grew_preview:
+        state.dirty = True
     return False
