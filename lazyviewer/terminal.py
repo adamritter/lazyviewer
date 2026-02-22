@@ -14,12 +14,11 @@ class TerminalController:
 
     def enable_tui_mode(self) -> None:
         tty.setraw(self.stdin_fd, termios.TCSAFLUSH)
-        # Enter alternate screen, then enable mouse wheel reporting and hide cursor.
-        os.write(self.stdout_fd, b"\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h")
+        # Enable mouse wheel reporting (xterm compatible) and hide cursor.
+        os.write(self.stdout_fd, b"\x1b[?25l\x1b[?1000h\x1b[?1006h")
 
     def disable_tui_mode(self) -> None:
-        # Disable mouse reporting, show cursor, and restore the main screen buffer.
-        os.write(self.stdout_fd, b"\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l")
+        os.write(self.stdout_fd, b"\x1b[?1000l\x1b[?1006l\x1b[?25h")
         termios.tcsetattr(self.stdin_fd, termios.TCSAFLUSH, self._saved_tty_state)
 
     @contextlib.contextmanager
