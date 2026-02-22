@@ -125,6 +125,27 @@ class PreviewBehaviorTests(unittest.TestCase):
             self.assertFalse(rendered.truncated)
             self.assertIn("<binary file:", rendered.text)
             self.assertIn("compiled.pyc", rendered.text)
+            self.assertIsNone(rendered.image_path)
+            self.assertIsNone(rendered.image_format)
+
+    def test_build_rendered_for_path_png_uses_image_preview_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            file_path = Path(tmp) / "image.png"
+            file_path.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\x00IHDR\x00\x00\x00\x00")
+
+            rendered = preview.build_rendered_for_path(
+                file_path,
+                show_hidden=False,
+                style="monokai",
+                no_color=False,
+            )
+
+            self.assertFalse(rendered.is_directory)
+            self.assertFalse(rendered.truncated)
+            self.assertEqual(rendered.image_format, "png")
+            self.assertEqual(rendered.image_path, file_path.resolve())
+            self.assertIn("Kitty graphics protocol", rendered.text)
+            self.assertNotIn("<binary file:", rendered.text)
 
     def test_build_rendered_for_path_large_file_skips_colorization(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -130,11 +130,15 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         dir_preview_max_entries=DIR_PREVIEW_INITIAL_MAX_ENTRIES,
         dir_preview_truncated=initial_render.truncated,
         dir_preview_path=current_path if initial_render.is_directory else None,
+        preview_image_path=initial_render.image_path,
+        preview_image_format=initial_render.image_format,
     )
 
     stdin_fd = sys.stdin.fileno()
     stdout_fd = sys.stdout.fileno()
     terminal = TerminalController(stdin_fd, stdout_fd)
+    kitty_graphics_supported = terminal.supports_kitty_graphics()
+    kitty_image_visible = False
     tree_filter_cursor_visible = True
     index_warmup_lock = threading.Lock()
     index_warmup_pending: tuple[Path, bool] | None = None
@@ -217,6 +221,31 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             state.start = 0
         if state.wrap_text:
             state.text_x = 0
+
+    def current_preview_image_path() -> Path | None:
+        if not kitty_graphics_supported:
+            return None
+        if state.preview_image_format != "png":
+            return None
+        if state.preview_image_path is None:
+            return None
+        try:
+            image_path = state.preview_image_path.resolve()
+        except Exception:
+            image_path = state.preview_image_path
+        if not image_path.exists() or not image_path.is_file():
+            return None
+        return image_path
+
+    def current_preview_image_geometry(columns: int) -> tuple[int, int, int, int]:
+        image_rows = visible_content_rows()
+        if state.browser_visible:
+            image_col = state.left_width + 2
+            image_width = max(1, columns - state.left_width - 2 - 1)
+        else:
+            image_col = 1
+            image_width = max(1, columns - 1)
+        return image_col, 1, image_width, image_rows
 
     def refresh_git_status_overlay(force: bool = False) -> None:
         now = time.monotonic()
@@ -317,6 +346,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         rebuild_screen_lines(preserve_scroll=not reset_scroll)
         state.dir_preview_truncated = rendered_for_path.truncated
         state.dir_preview_path = resolved_target if rendered_for_path.is_directory else None
+        state.preview_image_path = rendered_for_path.image_path
+        state.preview_image_format = rendered_for_path.image_format
         if reset_scroll:
             state.text_x = 0
 
@@ -959,9 +990,15 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             refresh_git_status_overlay()
 
             if state.dirty:
+                preview_image_path = current_preview_image_path()
+                render_lines = [""] if preview_image_path is not None else state.lines
+                render_start = 0 if preview_image_path is not None else state.start
+                if kitty_image_visible:
+                    terminal.kitty_clear_images()
+                    kitty_image_visible = False
                 render_dual_page(
-                    state.lines,
-                    state.start,
+                    render_lines,
+                    render_start,
                     state.tree_entries,
                     state.tree_start,
                     state.selected_idx,
@@ -1027,6 +1064,16 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                         else 0
                     ),
                 )
+                if preview_image_path is not None:
+                    image_col, image_row, image_width, image_height = current_preview_image_geometry(term.columns)
+                    terminal.kitty_draw_png(
+                        preview_image_path,
+                        col=image_col,
+                        row=image_row,
+                        width_cells=image_width,
+                        height_cells=image_height,
+                    )
+                    kitty_image_visible = True
                 state.dirty = False
 
             key = read_key(stdin_fd, timeout_ms=120)
@@ -1440,6 +1487,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     state.text_x = 0
                     state.dir_preview_path = None
                     state.dir_preview_truncated = False
+                    state.preview_image_path = None
+                    state.preview_image_format = None
                 state.dirty = True
                 continue
             if key.lower() == "q" or key == "\x03":

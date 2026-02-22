@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+from pathlib import Path
 import termios
 import unittest
 from unittest import mock
@@ -38,6 +40,41 @@ class TerminalBehaviorTests(unittest.TestCase):
 
         enable_mock.assert_called_once()
         disable_mock.assert_called_once()
+
+    def test_supports_kitty_graphics_checks_term_and_env(self) -> None:
+        with mock.patch("lazyviewer.terminal.termios.tcgetattr", return_value=[0]):
+            controller = TerminalController(stdin_fd=0, stdout_fd=1)
+
+        with mock.patch.dict("lazyviewer.terminal.os.environ", {"TERM": "xterm-kitty"}, clear=True):
+            self.assertTrue(controller.supports_kitty_graphics())
+
+        with mock.patch.dict("lazyviewer.terminal.os.environ", {"KITTY_WINDOW_ID": "12"}, clear=True):
+            self.assertTrue(controller.supports_kitty_graphics())
+
+        with mock.patch.dict("lazyviewer.terminal.os.environ", {"TERM": "xterm-256color"}, clear=True):
+            self.assertFalse(controller.supports_kitty_graphics())
+
+    def test_kitty_graphics_commands_emit_expected_sequences(self) -> None:
+        with mock.patch("lazyviewer.terminal.termios.tcgetattr", return_value=[0]), mock.patch(
+            "lazyviewer.terminal.os.write"
+        ) as write_mock:
+            controller = TerminalController(stdin_fd=0, stdout_fd=1)
+            controller.kitty_clear_images()
+            controller.kitty_draw_png(Path("/tmp/demo.png"), col=5, row=3, width_cells=20, height_cells=7)
+
+        self.assertEqual(write_mock.call_args_list[0].args, (1, b"\x1b_Ga=d,d=A,q=2;\x1b\\"))
+        encoded = base64.b64encode(b"/tmp/demo.png").decode("ascii")
+        self.assertEqual(
+            write_mock.call_args_list[1].args,
+            (
+                1,
+                (
+                    f"\x1b7\x1b[3;5H"
+                    f"\x1b_Ga=T,t=f,f=100,q=2,c=20,r=7;{encoded}\x1b\\"
+                    "\x1b8"
+                ).encode("ascii"),
+            ),
+        )
 
 
 if __name__ == "__main__":

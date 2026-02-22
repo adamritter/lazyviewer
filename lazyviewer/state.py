@@ -61,5 +61,7 @@ class AppState:
     dir_preview_max_entries: int = 400
     dir_preview_truncated: bool = False
     dir_preview_path: Path | None = None
+    preview_image_path: Path | None = None
+    preview_image_format: str | None = None
     git_status_overlay: dict[Path, int] = field(default_factory=dict)
     git_status_last_refresh: float = 0.0

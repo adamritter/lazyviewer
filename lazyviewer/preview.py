@@ -16,6 +16,7 @@ DIR_PREVIEW_HARD_MAX_ENTRIES = 20_000
 DIR_PREVIEW_CACHE_MAX = 128
 BINARY_PROBE_BYTES = 4_096
 COLORIZE_MAX_FILE_BYTES = 256_000
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _DIR_PREVIEW_CACHE: OrderedDict[tuple[str, bool, int, int, bool, int], tuple[str, bool]] = OrderedDict()
 
 
@@ -24,6 +25,8 @@ class RenderedPath:
     text: str
     is_directory: bool
     truncated: bool
+    image_path: Path | None = None
+    image_format: str | None = None
 
 
 def _cache_key_for_directory(
@@ -171,6 +174,18 @@ def build_rendered_for_path(
             sample = handle.read(BINARY_PROBE_BYTES)
     except Exception:
         sample = b""
+    if sample.startswith(PNG_SIGNATURE):
+        try:
+            image_path = target.resolve()
+        except Exception:
+            image_path = target
+        return RenderedPath(
+            text=f"{target}\n\n<PNG image preview via Kitty graphics protocol>",
+            is_directory=False,
+            truncated=False,
+            image_path=image_path,
+            image_format="png",
+        )
     if b"\x00" in sample:
         if file_size >= 0:
             message = f"{target}\n\n<binary file: {file_size} bytes>"

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import contextlib
 import os
+from pathlib import Path
 import termios
 import tty
 
@@ -21,6 +23,32 @@ class TerminalController:
         # Disable mouse reporting, show cursor, and restore the main screen buffer.
         os.write(self.stdout_fd, b"\x1b[?1000l\x1b[?1006l\x1b[?25h\x1b[?1049l")
         termios.tcsetattr(self.stdin_fd, termios.TCSAFLUSH, self._saved_tty_state)
+
+    def supports_kitty_graphics(self) -> bool:
+        term = os.environ.get("TERM", "")
+        if term == "xterm-kitty":
+            return True
+        return bool(os.environ.get("KITTY_WINDOW_ID"))
+
+    def kitty_clear_images(self) -> None:
+        # Delete all images and placements from the current screen.
+        os.write(self.stdout_fd, b"\x1b_Ga=d,d=A,q=2;\x1b\\")
+
+    def kitty_draw_png(
+        self,
+        image_path: Path,
+        col: int,
+        row: int,
+        width_cells: int,
+        height_cells: int,
+    ) -> None:
+        encoded_path = base64.b64encode(str(image_path).encode("utf-8")).decode("ascii")
+        payload = (
+            f"\x1b7\x1b[{max(1, row)};{max(1, col)}H"
+            f"\x1b_Ga=T,t=f,f=100,q=2,c={max(1, width_cells)},r={max(1, height_cells)};{encoded_path}\x1b\\"
+            "\x1b8"
+        )
+        os.write(self.stdout_fd, payload.encode("ascii"))
 
     @contextlib.contextmanager
     def raw_mode(self):
