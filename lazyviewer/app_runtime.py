@@ -258,6 +258,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     source_selection_drag_active = False
     source_selection_drag_pointer: tuple[int, int] | None = None
     source_selection_drag_edge: str | None = None
+    source_selection_drag_h_edge: str | None = None
 
     def index_warmup_worker() -> None:
         nonlocal index_warmup_pending, index_warmup_running
@@ -684,6 +685,30 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             max_width = max(max_width, rendered_line_display_width(line))
         return max(0, max_width - viewport_width)
 
+    def source_pane_col_bounds() -> tuple[int, int]:
+        if state.browser_visible:
+            min_col = state.left_width + 2
+            pane_width = max(1, state.right_width)
+        else:
+            min_col = 1
+            pane_width = preview_pane_width()
+        max_col = min_col + pane_width - 1
+        return min_col, max_col
+
+    def _drag_scroll_step(overshoot: int, span: int) -> int:
+        if overshoot < 1:
+            overshoot = 1
+        base_step = max(1, min(max(1, span // 2), overshoot))
+        return max(
+            1,
+            (
+                base_step * SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR
+                + SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR
+                - 1
+            )
+            // SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR,
+        )
+
     def source_selection_position(col: int, row: int) -> tuple[int, int] | None:
         visible_rows = visible_content_rows()
         if row < 1 or row > visible_rows:
@@ -784,47 +809,29 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         if visible_rows <= 0:
             return
 
-        min_source_col = state.left_width + 2 if state.browser_visible else 1
-        col = max(col, min_source_col)
+        min_source_col, max_source_col = source_pane_col_bounds()
+        target_col = max(min_source_col, min(col, max_source_col))
         changed = False
 
         top_edge_active = row < 1 or (row == 1 and source_selection_drag_edge == "top")
         bottom_edge_active = row > visible_rows or (
             row == visible_rows and source_selection_drag_edge == "bottom"
         )
+        left_edge_active = col < min_source_col or (col == min_source_col and source_selection_drag_h_edge == "left")
+        right_edge_active = col > max_source_col or (
+            col == max_source_col and source_selection_drag_h_edge == "right"
+        )
 
         if top_edge_active:
             overshoot = 1 - row
-            if overshoot < 1:
-                overshoot = 1
-            base_step = max(1, min(max(1, visible_rows // 2), overshoot))
-            step = max(
-                1,
-                (
-                    base_step * SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR
-                    + SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR
-                    - 1
-                )
-                // SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR,
-            )
+            step = _drag_scroll_step(overshoot, visible_rows)
             previous_start = state.start
             state.start = max(0, state.start - step)
             changed = state.start != previous_start
             target_row = 1
         elif bottom_edge_active:
             overshoot = row - visible_rows
-            if overshoot < 1:
-                overshoot = 1
-            base_step = max(1, min(max(1, visible_rows // 2), overshoot))
-            step = max(
-                1,
-                (
-                    base_step * SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR
-                    + SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR
-                    - 1
-                )
-                // SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR,
-            )
+            step = _drag_scroll_step(overshoot, visible_rows)
             previous_start = state.start
             state.start = min(state.max_start, state.start + step)
             grew_preview = False
@@ -837,7 +844,22 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         else:
             target_row = row
 
-        target_pos = source_selection_position(col, target_row)
+        if left_edge_active:
+            overshoot = min_source_col - col
+            step = _drag_scroll_step(overshoot, max_source_col - min_source_col + 1)
+            previous_text_x = state.text_x
+            state.text_x = max(0, state.text_x - step)
+            if state.text_x != previous_text_x:
+                changed = True
+        elif right_edge_active:
+            overshoot = col - max_source_col
+            step = _drag_scroll_step(overshoot, max_source_col - min_source_col + 1)
+            previous_text_x = state.text_x
+            state.text_x = min(max_horizontal_text_offset(), state.text_x + step)
+            if state.text_x != previous_text_x:
+                changed = True
+
+        target_pos = source_selection_position(target_col, target_row)
         if target_pos is not None and target_pos != state.source_selection_focus:
             state.source_selection_focus = target_pos
             changed = True
@@ -921,7 +943,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
     def handle_tree_mouse_click(mouse_key: str) -> bool:
         nonlocal tree_watch_signature, source_selection_drag_active, source_selection_drag_pointer
-        nonlocal source_selection_drag_edge
+        nonlocal source_selection_drag_edge, source_selection_drag_h_edge
         is_left_down = mouse_key.startswith("MOUSE_LEFT_DOWN:")
         is_left_up = mouse_key.startswith("MOUSE_LEFT_UP:")
         if not (is_left_down or is_left_up):
@@ -933,6 +955,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         if source_selection_drag_active and is_left_down:
             visible_rows = visible_content_rows()
             previous_row = source_selection_drag_pointer[1] if source_selection_drag_pointer is not None else row
+            previous_col = source_selection_drag_pointer[0] if source_selection_drag_pointer is not None else col
             source_selection_drag_pointer = (col, row)
             if row < 1:
                 source_selection_drag_edge = "top"
@@ -946,6 +969,18 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 source_selection_drag_edge = "bottom"
             else:
                 source_selection_drag_edge = None
+
+            min_source_col, max_source_col = source_pane_col_bounds()
+            if col < min_source_col:
+                source_selection_drag_h_edge = "left"
+            elif col > max_source_col:
+                source_selection_drag_h_edge = "right"
+            elif col == min_source_col and (previous_col > col or source_selection_drag_h_edge == "left"):
+                source_selection_drag_h_edge = "left"
+            elif col == max_source_col and (previous_col < col or source_selection_drag_h_edge == "right"):
+                source_selection_drag_h_edge = "right"
+            else:
+                source_selection_drag_h_edge = None
             tick_source_selection_drag()
             return True
 
@@ -958,12 +993,14 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 source_selection_drag_active = True
                 source_selection_drag_pointer = (col, row)
                 source_selection_drag_edge = None
+                source_selection_drag_h_edge = None
                 state.dirty = True
                 return True
             if state.source_selection_anchor is None:
                 source_selection_drag_active = False
                 source_selection_drag_pointer = None
                 source_selection_drag_edge = None
+                source_selection_drag_h_edge = None
                 return True
             state.source_selection_focus = selection_pos
             preview_target = None
@@ -974,6 +1011,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 source_selection_drag_active = False
                 source_selection_drag_pointer = None
                 source_selection_drag_edge = None
+                source_selection_drag_h_edge = None
                 jump_to_path_proxy(preview_target)
                 state.dirty = True
                 return True
@@ -981,6 +1019,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             source_selection_drag_active = False
             source_selection_drag_pointer = None
             source_selection_drag_edge = None
+            source_selection_drag_h_edge = None
             state.dirty = True
             return True
 
@@ -995,6 +1034,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             source_selection_drag_active = False
             source_selection_drag_pointer = None
             source_selection_drag_edge = None
+            source_selection_drag_h_edge = None
             return True
 
         if source_selection_drag_active:
@@ -1006,6 +1046,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         source_selection_drag_active = False
         source_selection_drag_pointer = None
         source_selection_drag_edge = None
+        source_selection_drag_h_edge = None
 
         if not (
             state.browser_visible
