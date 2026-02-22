@@ -103,11 +103,17 @@ def read_key(fd: int, timeout_ms: int | None = None) -> str:
             row = int(row_s)
         except Exception:
             return "ESC"
-        if btn == 64:
-            return f"MOUSE_WHEEL_UP:{col}:{row}"
-        if btn == 65:
-            return f"MOUSE_WHEEL_DOWN:{col}:{row}"
         button = btn & 0b11
+        is_wheel = (btn & 0b0100_0000) != 0
+        if is_wheel:
+            if button == 0:
+                return f"MOUSE_WHEEL_UP:{col}:{row}"
+            if button == 1:
+                return f"MOUSE_WHEEL_DOWN:{col}:{row}"
+            if button == 2:
+                return f"MOUSE_WHEEL_LEFT:{col}:{row}"
+            if button == 3:
+                return f"MOUSE_WHEEL_RIGHT:{col}:{row}"
         if button == 0:
             suffix = "DOWN" if part == b"M" else "UP"
             return f"MOUSE_LEFT_{suffix}:{col}:{row}"

@@ -15,7 +15,7 @@ import threading
 import time
 from pathlib import Path
 
-from .ansi import ANSI_ESCAPE_RE, build_screen_lines
+from .ansi import ANSI_ESCAPE_RE, build_screen_lines, char_display_width
 from .config import (
     load_content_search_left_pane_percent,
     load_left_pane_percent,
@@ -662,6 +662,28 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         except Exception:
             return None, None
 
+    def preview_pane_width() -> int:
+        if state.browser_visible:
+            return max(1, state.right_width)
+        term = shutil.get_terminal_size((80, 24))
+        return max(1, term.columns - 1)
+
+    def rendered_line_display_width(line: str) -> int:
+        plain = ANSI_ESCAPE_RE.sub("", line).rstrip("\r\n")
+        col = 0
+        for ch in plain:
+            col += char_display_width(ch, col)
+        return col
+
+    def max_horizontal_text_offset() -> int:
+        if state.wrap_text or not state.lines:
+            return 0
+        viewport_width = preview_pane_width()
+        max_width = 0
+        for line in state.lines:
+            max_width = max(max_width, rendered_line_display_width(line))
+        return max(0, max_width - viewport_width)
+
     def source_selection_position(col: int, row: int) -> tuple[int, int] | None:
         visible_rows = visible_content_rows()
         if row < 1 or row > visible_rows:
@@ -863,11 +885,27 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         return _copy_text_to_clipboard(selected_text)
 
     def handle_tree_mouse_wheel(mouse_key: str) -> bool:
-        if not (mouse_key.startswith("MOUSE_WHEEL_UP:") or mouse_key.startswith("MOUSE_WHEEL_DOWN:")):
+        is_vertical = mouse_key.startswith("MOUSE_WHEEL_UP:") or mouse_key.startswith("MOUSE_WHEEL_DOWN:")
+        is_horizontal = mouse_key.startswith("MOUSE_WHEEL_LEFT:") or mouse_key.startswith("MOUSE_WHEEL_RIGHT:")
+        if not (is_vertical or is_horizontal):
             return False
 
-        direction = -1 if mouse_key.startswith("MOUSE_WHEEL_UP:") else 1
         col, _row = parse_mouse_col_row(mouse_key)
+
+        if is_horizontal:
+            if state.browser_visible and col is not None and col <= state.left_width:
+                return True
+            prev_text_x = state.text_x
+            step = 4
+            if mouse_key.startswith("MOUSE_WHEEL_LEFT:"):
+                state.text_x = max(0, state.text_x - step)
+            else:
+                state.text_x = min(max_horizontal_text_offset(), state.text_x + step)
+            if state.text_x != prev_text_x:
+                state.dirty = True
+            return True
+
+        direction = -1 if mouse_key.startswith("MOUSE_WHEEL_UP:") else 1
         if state.browser_visible and col is not None and col <= state.left_width:
             if move_tree_selection(direction):
                 state.dirty = True

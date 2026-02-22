@@ -158,6 +158,33 @@ class ReadKeyRegressionTests(unittest.TestCase):
 
         self.assertEqual(key, "MOUSE_LEFT_DOWN:15:7")
 
+    def test_sgr_mouse_wheel_left_and_right_are_recognized(self) -> None:
+        read_fd, write_fd = os.pipe()
+        try:
+            os.write(write_fd, b"\x1b[<66;10;4M\x1b[<67;11;5M")
+            left = input_mod.read_key(read_fd, timeout_ms=20)
+            right = input_mod.read_key(read_fd, timeout_ms=20)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+        self.assertEqual(left, "MOUSE_WHEEL_LEFT:10:4")
+        self.assertEqual(right, "MOUSE_WHEEL_RIGHT:11:5")
+
+    def test_sgr_mouse_wheel_with_shift_modifier_still_maps_to_vertical_wheel(self) -> None:
+        read_fd, write_fd = os.pipe()
+        try:
+            # 64/65 wheel events plus shift modifier bit (4) -> 68/69.
+            os.write(write_fd, b"\x1b[<68;12;6M\x1b[<69;13;7M")
+            up = input_mod.read_key(read_fd, timeout_ms=20)
+            down = input_mod.read_key(read_fd, timeout_ms=20)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+        self.assertEqual(up, "MOUSE_WHEEL_UP:12:6")
+        self.assertEqual(down, "MOUSE_WHEEL_DOWN:13:7")
+
 
 if __name__ == "__main__":
     unittest.main()
