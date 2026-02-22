@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sys
 
-from .ansi import clip_ansi_line
+from ..ansi import clip_ansi_line
 
 HELP_PANEL_TREE_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mTREE\033[0m",

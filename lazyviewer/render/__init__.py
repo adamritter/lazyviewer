@@ -5,15 +5,15 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from .ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line, slice_ansi_line
-from .render_help import (
+from ..ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line, slice_ansi_line
+from .help import (
     HELP_PANEL_TEXT_LINES,
     HELP_PANEL_TEXT_ONLY_LINES,
     HELP_PANEL_TREE_LINES,
     help_panel_row_count,
     render_help_page,
 )
-from .tree import TreeEntry, clamp_left_width, format_tree_entry
+from ..tree import TreeEntry, clamp_left_width, format_tree_entry
 
 FILTER_SPINNER_FRAMES: tuple[str, ...] = ("|", "/", "-", "\\")
 
