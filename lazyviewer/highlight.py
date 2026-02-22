@@ -1,6 +1,20 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+_PYGMENTS_READY = False
+_PYGMENTS_AVAILABLE = False
+_PYGMENTS_HIGHLIGHT = None
+_PYGMENTS_GET_LEXER_FOR_FILENAME = None
+_PYGMENTS_TEXT_LEXER = None
+_PYGMENTS_TERMINAL_FORMATTER = None
+_PYGMENTS_GET_STYLE_BY_NAME = None
+_PYGMENTS_FORMATTERS: dict[str, object] = {}
+_PYGMENTS_VALID_STYLES: set[str] = set()
+_PYGMENTS_INVALID_STYLES: set[str] = set()
 
 
 def read_text(path: Path) -> str:
@@ -14,6 +28,9 @@ def read_text(path: Path) -> str:
 
 def sanitize_terminal_text(source: str) -> str:
     """Escape terminal control bytes to avoid side effects (bell, cursor moves, etc.)."""
+    if _CONTROL_RE.search(source) is None:
+        return source
+
     out: list[str] = []
     for ch in source:
         code = ord(ch)
@@ -69,28 +86,80 @@ def fallback_highlight(source: str) -> str:
         return source
 
 
-def pygments_highlight(source: str, path: Path, style: str = "monokai") -> str | None:
+def _ensure_pygments_loaded() -> bool:
+    global _PYGMENTS_READY
+    global _PYGMENTS_AVAILABLE
+    global _PYGMENTS_HIGHLIGHT
+    global _PYGMENTS_GET_LEXER_FOR_FILENAME
+    global _PYGMENTS_TEXT_LEXER
+    global _PYGMENTS_TERMINAL_FORMATTER
+    global _PYGMENTS_GET_STYLE_BY_NAME
+
+    if _PYGMENTS_READY:
+        return _PYGMENTS_AVAILABLE
+
+    _PYGMENTS_READY = True
     try:
-        from pygments import highlight
+        from pygments import highlight as pygments_highlight
         from pygments.formatters import TerminalFormatter
         from pygments.lexers import TextLexer, get_lexer_for_filename
         from pygments.styles import get_style_by_name
     except ImportError:
+        _PYGMENTS_AVAILABLE = False
+        return False
+
+    _PYGMENTS_HIGHLIGHT = pygments_highlight
+    _PYGMENTS_GET_LEXER_FOR_FILENAME = get_lexer_for_filename
+    _PYGMENTS_TEXT_LEXER = TextLexer
+    _PYGMENTS_TERMINAL_FORMATTER = TerminalFormatter
+    _PYGMENTS_GET_STYLE_BY_NAME = get_style_by_name
+    _PYGMENTS_AVAILABLE = True
+    return True
+
+
+def _normalize_style(style: str) -> str:
+    if style in _PYGMENTS_VALID_STYLES:
+        return style
+    if style in _PYGMENTS_INVALID_STYLES:
+        return "monokai"
+
+    try:
+        assert _PYGMENTS_GET_STYLE_BY_NAME is not None
+        _PYGMENTS_GET_STYLE_BY_NAME(style)
+        _PYGMENTS_VALID_STYLES.add(style)
+        return style
+    except Exception:
+        _PYGMENTS_INVALID_STYLES.add(style)
+        return "monokai"
+
+
+def _formatter_for_style(style: str):
+    formatter = _PYGMENTS_FORMATTERS.get(style)
+    if formatter is not None:
+        return formatter
+    assert _PYGMENTS_TERMINAL_FORMATTER is not None
+    formatter = _PYGMENTS_TERMINAL_FORMATTER(style=style)
+    _PYGMENTS_FORMATTERS[style] = formatter
+    return formatter
+
+
+def pygments_highlight(source: str, path: Path, style: str = "monokai") -> str | None:
+    if not _ensure_pygments_loaded():
         return None
 
-    try:
-        get_style_by_name(style)
-    except Exception:
-        style = "monokai"
+    style = _normalize_style(style)
+    formatter = _formatter_for_style(style)
 
     try:
-        lexer = get_lexer_for_filename(path.name, source)
+        assert _PYGMENTS_GET_LEXER_FOR_FILENAME is not None
+        lexer = _PYGMENTS_GET_LEXER_FOR_FILENAME(path.name, source)
     except Exception:
-        lexer = TextLexer()
+        assert _PYGMENTS_TEXT_LEXER is not None
+        lexer = _PYGMENTS_TEXT_LEXER()
 
-    formatter = TerminalFormatter(style=style)
     try:
-        return highlight(source, lexer, formatter)
+        assert _PYGMENTS_HIGHLIGHT is not None
+        return _PYGMENTS_HIGHLIGHT(source, lexer, formatter)
     except Exception:
         return None
 

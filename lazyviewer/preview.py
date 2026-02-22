@@ -14,6 +14,8 @@ DIR_PREVIEW_INITIAL_MAX_ENTRIES = 400
 DIR_PREVIEW_GROWTH_STEP = 400
 DIR_PREVIEW_HARD_MAX_ENTRIES = 20_000
 DIR_PREVIEW_CACHE_MAX = 128
+BINARY_PROBE_BYTES = 4_096
+COLORIZE_MAX_FILE_BYTES = 256_000
 _DIR_PREVIEW_CACHE: OrderedDict[tuple[str, bool, int, int, bool, int], tuple[str, bool]] = OrderedDict()
 
 
@@ -158,6 +160,24 @@ def build_rendered_for_path(
             skip_gitignored=dir_skip_gitignored,
         )
         return RenderedPath(text=preview, is_directory=True, truncated=truncated)
+
+    try:
+        file_size = target.stat().st_size
+    except Exception:
+        file_size = -1
+
+    try:
+        with target.open("rb") as handle:
+            sample = handle.read(BINARY_PROBE_BYTES)
+    except Exception:
+        sample = b""
+    if b"\x00" in sample:
+        if file_size >= 0:
+            message = f"{target}\n\n<binary file: {file_size} bytes>"
+        else:
+            message = f"{target}\n\n<binary file>"
+        return RenderedPath(text=message, is_directory=False, truncated=False)
+
     try:
         source = read_text(target)
     except Exception as exc:
@@ -167,7 +187,8 @@ def build_rendered_for_path(
             truncated=False,
         )
     source = sanitize_terminal_text(source)
-    if no_color:
+    skip_colorize_for_size = file_size > COLORIZE_MAX_FILE_BYTES if file_size >= 0 else False
+    if no_color or skip_colorize_for_size:
         return RenderedPath(text=source, is_directory=False, truncated=False)
     if os.isatty(sys.stdout.fileno()):
         return RenderedPath(

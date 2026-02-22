@@ -109,6 +109,43 @@ class PreviewBehaviorTests(unittest.TestCase):
             self.assertNotIn("\x07", rendered.text)
             self.assertNotIn("\x1b", rendered.text)
 
+    def test_build_rendered_for_path_binary_with_nul_shows_binary_notice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            file_path = Path(tmp) / "compiled.pyc"
+            file_path.write_bytes(b"\x00\x01\x02abc")
+
+            rendered = preview.build_rendered_for_path(
+                file_path,
+                show_hidden=False,
+                style="monokai",
+                no_color=False,
+            )
+
+            self.assertFalse(rendered.is_directory)
+            self.assertFalse(rendered.truncated)
+            self.assertIn("<binary file:", rendered.text)
+            self.assertIn("compiled.pyc", rendered.text)
+
+    def test_build_rendered_for_path_large_file_skips_colorization(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            file_path = Path(tmp) / "big.py"
+            file_path.write_text("x = 1\n" * 60_000, encoding="utf-8")
+
+            with mock.patch("lazyviewer.preview.os.isatty", return_value=True), mock.patch(
+                "lazyviewer.preview.colorize_source"
+            ) as colorize_mock:
+                rendered = preview.build_rendered_for_path(
+                    file_path,
+                    show_hidden=False,
+                    style="monokai",
+                    no_color=False,
+                )
+
+            self.assertFalse(rendered.is_directory)
+            self.assertFalse(rendered.truncated)
+            self.assertIn("x = 1", rendered.text)
+            colorize_mock.assert_not_called()
+
     def test_build_rendered_for_path_directory_reports_truncation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
