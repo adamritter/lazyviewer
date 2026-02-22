@@ -57,6 +57,8 @@ GIT_WATCH_POLL_SECONDS = 0.5
 GIT_FEATURES_DEFAULT_ENABLED = True
 CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT = 50.0
 CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT = 8.0
+SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR = 2
+SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR = 1
 
 
 def _skip_gitignored_for_hidden_mode(show_hidden: bool) -> bool:
@@ -252,6 +254,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     git_watch_repo_root: Path | None = None
     git_watch_dir: Path | None = None
     source_selection_drag_active = False
+    source_selection_drag_pointer: tuple[int, int] | None = None
+    source_selection_drag_edge: str | None = None
 
     def index_warmup_worker() -> None:
         nonlocal index_warmup_pending, index_warmup_running
@@ -674,6 +678,78 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         line_idx = max(0, min(state.start + row - 1, len(state.lines) - 1))
         return line_idx, text_col
 
+    def tick_source_selection_drag() -> None:
+        if not source_selection_drag_active or state.source_selection_anchor is None:
+            return
+        if source_selection_drag_pointer is None:
+            return
+
+        col, row = source_selection_drag_pointer
+        visible_rows = visible_content_rows()
+        if visible_rows <= 0:
+            return
+
+        min_source_col = state.left_width + 2 if state.browser_visible else 1
+        col = max(col, min_source_col)
+        changed = False
+
+        top_edge_active = row < 1 or (row == 1 and source_selection_drag_edge == "top")
+        bottom_edge_active = row > visible_rows or (
+            row == visible_rows and source_selection_drag_edge == "bottom"
+        )
+
+        if top_edge_active:
+            overshoot = 1 - row
+            if overshoot < 1:
+                overshoot = 1
+            base_step = max(1, min(max(1, visible_rows // 2), overshoot))
+            step = max(
+                1,
+                (
+                    base_step * SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR
+                    + SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR
+                    - 1
+                )
+                // SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR,
+            )
+            previous_start = state.start
+            state.start = max(0, state.start - step)
+            changed = state.start != previous_start
+            target_row = 1
+        elif bottom_edge_active:
+            overshoot = row - visible_rows
+            if overshoot < 1:
+                overshoot = 1
+            base_step = max(1, min(max(1, visible_rows // 2), overshoot))
+            step = max(
+                1,
+                (
+                    base_step * SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR
+                    + SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR
+                    - 1
+                )
+                // SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR,
+            )
+            previous_start = state.start
+            state.start = min(state.max_start, state.start + step)
+            grew_preview = False
+            if state.start == previous_start:
+                grew_preview = maybe_grow_directory_preview()
+                if grew_preview:
+                    state.start = min(state.max_start, state.start + step)
+            changed = state.start != previous_start or grew_preview
+            target_row = visible_rows
+        else:
+            target_row = row
+
+        target_pos = source_selection_position(col, target_row)
+        if target_pos is not None and target_pos != state.source_selection_focus:
+            state.source_selection_focus = target_pos
+            changed = True
+
+        if changed:
+            state.dirty = True
+
     def copy_selected_source_range(
         start_pos: tuple[int, int],
         end_pos: tuple[int, int],
@@ -733,7 +809,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         return True
 
     def handle_tree_mouse_click(mouse_key: str) -> bool:
-        nonlocal tree_watch_signature, source_selection_drag_active
+        nonlocal tree_watch_signature, source_selection_drag_active, source_selection_drag_pointer
+        nonlocal source_selection_drag_edge
         is_left_down = mouse_key.startswith("MOUSE_LEFT_DOWN:")
         is_left_up = mouse_key.startswith("MOUSE_LEFT_UP:")
         if not (is_left_down or is_left_up):
@@ -741,6 +818,24 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
         col, row = parse_mouse_col_row(mouse_key)
         if col is None or row is None:
+            return True
+        if source_selection_drag_active and is_left_down:
+            visible_rows = visible_content_rows()
+            previous_row = source_selection_drag_pointer[1] if source_selection_drag_pointer is not None else row
+            source_selection_drag_pointer = (col, row)
+            if row < 1:
+                source_selection_drag_edge = "top"
+            elif row > visible_rows:
+                source_selection_drag_edge = "bottom"
+            elif row == 1 and (previous_row > row or source_selection_drag_edge == "top"):
+                source_selection_drag_edge = "top"
+            elif row == visible_rows and (
+                previous_row < row or source_selection_drag_edge == "bottom"
+            ):
+                source_selection_drag_edge = "bottom"
+            else:
+                source_selection_drag_edge = None
+            tick_source_selection_drag()
             return True
 
         selection_pos = source_selection_position(col, row)
@@ -750,23 +845,34 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     state.source_selection_anchor = selection_pos
                 state.source_selection_focus = selection_pos
                 source_selection_drag_active = True
+                source_selection_drag_pointer = (col, row)
+                source_selection_drag_edge = None
                 state.dirty = True
                 return True
             if state.source_selection_anchor is None:
+                source_selection_drag_active = False
+                source_selection_drag_pointer = None
+                source_selection_drag_edge = None
                 return True
             copy_selected_source_range(state.source_selection_anchor, selection_pos)
             state.source_selection_focus = selection_pos
             source_selection_drag_active = False
+            source_selection_drag_pointer = None
+            source_selection_drag_edge = None
             state.dirty = True
             return True
 
         if is_left_up:
             if source_selection_drag_active and state.source_selection_anchor is not None:
+                source_selection_drag_pointer = (col, row)
+                tick_source_selection_drag()
                 end_pos = state.source_selection_focus or state.source_selection_anchor
                 copy_selected_source_range(state.source_selection_anchor, end_pos)
                 state.source_selection_focus = end_pos
                 state.dirty = True
             source_selection_drag_active = False
+            source_selection_drag_pointer = None
+            source_selection_drag_edge = None
             return True
 
         if source_selection_drag_active:
@@ -776,6 +882,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         if clear_source_selection():
             state.dirty = True
         source_selection_drag_active = False
+        source_selection_drag_pointer = None
+        source_selection_drag_edge = None
 
         if not (
             state.browser_visible
@@ -1107,4 +1215,5 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         jump_forward_in_history=navigation_ops.jump_forward_in_history,
         handle_normal_key=handle_normal_key,
         save_left_pane_width=save_left_pane_width_for_mode,
+        tick_source_selection_drag=tick_source_selection_drag,
     )

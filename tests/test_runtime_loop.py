@@ -234,6 +234,71 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
         self.assertTrue(terminal.mouse_reporting_calls)
         self.assertNotIn(False, terminal.mouse_reporting_calls)
 
+    def test_keyboard_interrupt_during_key_read_is_ignored(self) -> None:
+        state = _make_state()
+        terminal = _FakeTerminal()
+        events = iter([KeyboardInterrupt(), "q"])
+        read_calls = {"count": 0}
+
+        def _read_key(*_args, **_kwargs):
+            read_calls["count"] += 1
+            event = next(events)
+            if isinstance(event, BaseException):
+                raise event
+            return event
+
+        with mock.patch(
+            "lazyviewer.runtime_loop.shutil.get_terminal_size",
+            return_value=mock.Mock(columns=120, lines=40),
+        ), mock.patch(
+            "lazyviewer.runtime_loop.read_key",
+            side_effect=_read_key,
+        ), mock.patch(
+            "lazyviewer.runtime_loop.render_dual_page_context",
+            return_value=None,
+        ):
+            run_main_loop(
+                state=state,
+                terminal=terminal,  # type: ignore[arg-type]
+                stdin_fd=0,
+                double_click_seconds=0.35,
+                filter_cursor_blink_seconds=0.5,
+                tree_filter_spinner_frame_seconds=0.12,
+                get_tree_filter_loading_until=lambda: 0.0,
+                tree_view_rows=lambda: 20,
+                tree_filter_prompt_prefix=lambda: "p>",
+                tree_filter_placeholder=lambda: "type",
+                visible_content_rows=lambda: 20,
+                rebuild_screen_lines=lambda **_kwargs: None,
+                maybe_refresh_tree_watch=lambda: None,
+                maybe_refresh_git_watch=lambda: None,
+                refresh_git_status_overlay=lambda **_kwargs: None,
+                current_preview_image_path=lambda: None,
+                current_preview_image_geometry=lambda _columns: (1, 1, 1, 1),
+                open_tree_filter=lambda _mode: None,
+                open_command_picker=lambda: None,
+                close_picker=lambda **_kwargs: None,
+                refresh_command_picker_matches=lambda **_kwargs: None,
+                activate_picker_selection=lambda: False,
+                refresh_active_picker_matches=lambda **_kwargs: None,
+                handle_tree_mouse_wheel=lambda _key: False,
+                handle_tree_mouse_click=lambda _key: False,
+                toggle_help_panel=lambda: None,
+                close_tree_filter=lambda **_kwargs: None,
+                activate_tree_filter_selection=lambda: None,
+                move_tree_selection=lambda _direction: False,
+                apply_tree_filter_query=lambda *_args, **_kwargs: None,
+                jump_to_next_content_hit=lambda _direction: False,
+                set_named_mark=lambda _key: False,
+                jump_to_named_mark=lambda _key: False,
+                jump_back_in_history=lambda: False,
+                jump_forward_in_history=lambda: False,
+                handle_normal_key=lambda key, _columns: key == "q",
+                save_left_pane_width=lambda _total, _left: None,
+            )
+
+        self.assertGreaterEqual(read_calls["count"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

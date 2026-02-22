@@ -313,6 +313,80 @@ def _blank_line_exits_symbol_scope(
     return False
 
 
+def _source_line_exits_symbol_scope(
+    text_lines: list[str],
+    source_line: int,
+    wrap_text: bool,
+    current_path: Path,
+    sticky_symbol: SymbolEntry,
+) -> bool:
+    if source_line <= (sticky_symbol.line + 1):
+        return False
+
+    if _source_line_is_blank(text_lines, source_line, wrap_text):
+        return _blank_line_exits_symbol_scope(
+            text_lines,
+            source_line,
+            wrap_text,
+            current_path,
+            sticky_symbol,
+        )
+
+    header_plain = ANSI_ESCAPE_RE.sub("", _source_line_raw_text(text_lines, sticky_symbol.line + 1, wrap_text))
+    header_indent = _leading_indent_columns(header_plain)
+
+    for candidate_line in range(sticky_symbol.line + 2, source_line + 1):
+        if _source_line_is_blank(text_lines, candidate_line, wrap_text):
+            continue
+        candidate_plain = ANSI_ESCAPE_RE.sub("", _source_line_raw_text(text_lines, candidate_line, wrap_text))
+        candidate_text = candidate_plain.lstrip()
+        if candidate_text.startswith("}"):
+            continue
+        if _leading_indent_columns(candidate_plain) <= header_indent:
+            return True
+
+    return False
+
+
+def sticky_symbol_headers_for_position(
+    *,
+    text_lines: list[str],
+    text_start: int,
+    content_rows: int,
+    current_path: Path,
+    wrap_text: bool,
+    preview_is_git_diff: bool,
+) -> list[SymbolEntry]:
+    if preview_is_git_diff or not current_path.is_file() or content_rows <= 1:
+        return []
+
+    start_source, _, _ = _status_line_range(text_lines, text_start, 1, wrap_text)
+    sticky_symbols = collect_sticky_symbol_headers(
+        current_path,
+        start_source,
+        max_headers=max(1, content_rows - 1),
+    )
+    if not sticky_symbols:
+        return []
+
+    visible_symbols: list[SymbolEntry] = []
+    for symbol in sticky_symbols:
+        symbol_source_line = symbol.line + 1
+        if start_source == symbol_source_line + 1:
+            continue
+        if _source_line_exits_symbol_scope(
+            text_lines,
+            start_source,
+            wrap_text,
+            current_path,
+            symbol,
+        ):
+            continue
+        visible_symbols.append(symbol)
+
+    return visible_symbols
+
+
 def _extract_source_line_text(
     text_lines: list[str],
     source_line: int,
@@ -707,28 +781,14 @@ def render_dual_page(
     has_current_text_hit = text_search_current_line > 0 and text_search_current_column > 0
     selection_range = _normalized_selection_range(source_selection_anchor, source_selection_focus)
 
-    sticky_symbols: list[SymbolEntry] = []
-    if not preview_is_git_diff and current_path.is_file():
-        start_source, _, _ = _status_line_range(text_lines, text_start, 1, wrap_text)
-        if content_rows > 1:
-            sticky_symbols = collect_sticky_symbol_headers(
-                current_path,
-                start_source,
-                max_headers=max(1, content_rows - 1),
-            )
-            if sticky_symbols:
-                nearest_symbol = sticky_symbols[-1]
-                symbol_source_line = nearest_symbol.line + 1
-                if start_source == symbol_source_line + 1:
-                    sticky_symbols = []
-                elif _source_line_is_blank(text_lines, start_source, wrap_text) and _blank_line_exits_symbol_scope(
-                    text_lines,
-                    start_source,
-                    wrap_text,
-                    current_path,
-                    nearest_symbol,
-                ):
-                    sticky_symbols = []
+    sticky_symbols = sticky_symbol_headers_for_position(
+        text_lines=text_lines,
+        text_start=text_start,
+        content_rows=content_rows,
+        current_path=current_path,
+        wrap_text=wrap_text,
+        preview_is_git_diff=preview_is_git_diff,
+    )
 
     if not browser_visible:
         line_width = max(1, width - 1)

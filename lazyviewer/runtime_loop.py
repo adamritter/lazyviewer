@@ -58,6 +58,7 @@ def run_main_loop(
     jump_forward_in_history: Callable[[], bool],
     handle_normal_key: Callable[[str, int], bool],
     save_left_pane_width: Callable[[int, int], None],
+    tick_source_selection_drag: Callable[[], None] | None = None,
 ) -> None:
     kitty_image_state: tuple[str, int, int, int, int] | None = None
     tree_filter_cursor_visible = True
@@ -134,6 +135,8 @@ def run_main_loop(
             maybe_refresh_tree_watch()
             maybe_refresh_git_watch()
             refresh_git_status_overlay()
+            if tick_source_selection_drag is not None:
+                tick_source_selection_drag()
 
             if state.dirty:
                 preview_image_path = current_preview_image_path()
@@ -239,7 +242,11 @@ def run_main_loop(
                     kitty_image_state = desired_image_state
                 state.dirty = False
 
-            key = read_key(stdin_fd, timeout_ms=120)
+            try:
+                key = read_key(stdin_fd, timeout_ms=120)
+            except KeyboardInterrupt:
+                # Ignore SIGINT-style interrupts so terminal copy shortcuts do not exit the app.
+                continue
             if key == "":
                 continue
             if state.skip_next_lf and key == "ENTER_LF":

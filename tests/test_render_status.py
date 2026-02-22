@@ -12,7 +12,36 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.render import build_status_line, help_panel_row_count, render_dual_page, render_help_page
+from lazyviewer.render import (
+    build_status_line,
+    help_panel_row_count,
+    render_dual_page,
+    render_help_page,
+    sticky_symbol_headers_for_position,
+)
+
+
+def _sticky_case(
+    source: str,
+    source_line: int,
+    *,
+    suffix: str = ".py",
+    wrap_text: bool = False,
+    content_rows: int = 8,
+) -> list[tuple[str, str]]:
+    text_lines = source.splitlines()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / f"case{suffix}"
+        path.write_text(source, encoding="utf-8")
+        sticky = sticky_symbol_headers_for_position(
+            text_lines=text_lines,
+            text_start=max(0, source_line - 1),
+            content_rows=content_rows,
+            current_path=path,
+            wrap_text=wrap_text,
+            preview_is_git_diff=False,
+        )
+    return [(entry.kind, entry.name) for entry in sticky]
 
 
 class RenderStatusTests(unittest.TestCase):
@@ -873,7 +902,7 @@ class RenderStatusTests(unittest.TestCase):
         self.assertGreater(run_idx, inner_idx)
         self.assertIn("return value", rendered)
 
-    def test_render_enter_from_header_advances_to_first_body_line(self) -> None:
+    def test_render_first_body_line_shows_sticky_header(self) -> None:
         writes: list[bytes] = []
 
         def capture(_fd: int, data: bytes) -> int:
@@ -911,8 +940,9 @@ class RenderStatusTests(unittest.TestCase):
                 )
 
         rendered = b"".join(writes).decode("utf-8", errors="replace")
-        self.assertRegex(rendered, r"^\x1b\[H\x1b\[J\s+first = 1")
-        self.assertNotIn("─", rendered)
+        self.assertRegex(rendered, r"\x1b\[4mdef run\(\):")
+        self.assertIn("─", rendered)
+        self.assertIn("first = 1", rendered)
 
     def test_render_keeps_sticky_header_on_blank_line_inside_function(self) -> None:
         writes: list[bytes] = []
@@ -999,6 +1029,79 @@ class RenderStatusTests(unittest.TestCase):
         self.assertNotIn("def first():", rendered)
         self.assertNotIn("─", rendered)
         self.assertIn("def second():", rendered)
+
+    def test_sticky_case_helper_drops_finished_function_before_top_level_for(self) -> None:
+        source = (
+            "def run():\n"
+            "    value = 1\n"
+            "\n"
+            "for item in items:\n"
+            "    print(item)\n"
+        )
+        self.assertEqual(_sticky_case(source, 4), [])
+        self.assertEqual(_sticky_case(source, 5), [])
+
+    def test_sticky_case_helper_shows_function_on_first_body_line(self) -> None:
+        source = (
+            "def run():\n"
+            "    first = 1\n"
+            "    second = 2\n"
+        )
+        self.assertEqual(_sticky_case(source, 2), [("fn", "run")])
+
+    def test_sticky_case_helper_keeps_outer_class_when_previous_method_ends(self) -> None:
+        source = (
+            "class Box:\n"
+            "    def first(self):\n"
+            "        return 1\n"
+            "\n"
+            "    def second(self):\n"
+            "        value = 2\n"
+            "        return value\n"
+        )
+        self.assertEqual(_sticky_case(source, 5), [("class", "Box")])
+        self.assertEqual(_sticky_case(source, 6), [("class", "Box")])
+        self.assertEqual(_sticky_case(source, 7), [("class", "Box"), ("fn", "second")])
+
+    def test_sticky_case_helper_handles_closing_brace_transition(self) -> None:
+        source = (
+            "function run() {\n"
+            "  if (value) {\n"
+            "    use(value);\n"
+            "  }\n"
+            "}\n"
+            "\n"
+            "for (const item of items) {\n"
+            "  use(item);\n"
+            "}\n"
+        )
+        self.assertEqual(_sticky_case(source, 5, suffix=".js"), [("fn", "run")])
+        self.assertEqual(_sticky_case(source, 6, suffix=".js"), [])
+        self.assertEqual(_sticky_case(source, 7, suffix=".js"), [])
+
+    def test_sticky_case_helper_drops_function_before_decorator_and_next_definition(self) -> None:
+        source = (
+            "def first():\n"
+            "    return 1\n"
+            "\n"
+            "@decorator\n"
+            "def second():\n"
+            "    return 2\n"
+        )
+        self.assertEqual(_sticky_case(source, 4), [])
+        self.assertEqual(_sticky_case(source, 5), [])
+
+    def test_sticky_case_helper_drops_function_before_top_level_comment_and_loop(self) -> None:
+        source = (
+            "def first():\n"
+            "    return 1\n"
+            "\n"
+            "# outside the function now\n"
+            "for value in values:\n"
+            "    print(value)\n"
+        )
+        self.assertEqual(_sticky_case(source, 4), [])
+        self.assertEqual(_sticky_case(source, 6), [])
 
     def test_render_sticky_headers_preserve_source_highlighting(self) -> None:
         writes: list[bytes] = []
