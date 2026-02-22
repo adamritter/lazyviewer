@@ -1006,6 +1006,83 @@ class RenderStatusTests(unittest.TestCase):
         self.assertIn("fourth = 4", scrolled_2_rendered)
         self.assertNotIn("second = 2", scrolled_2_rendered)
 
+    def test_render_nested_sticky_headers_transition_smoothly_for_class_and_method(self) -> None:
+        source = (
+            "class Box:\n"
+            "    def run(self):\n"
+            "        first = 1\n"
+            "        second = 2\n"
+            "        third = 3\n"
+            "        fourth = 4\n"
+        )
+        text_lines = source.splitlines()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "demo.py"
+            path.write_text(source, encoding="utf-8")
+
+            writes_scrolled_1: list[bytes] = []
+            writes_scrolled_2: list[bytes] = []
+
+            with mock.patch(
+                "lazyviewer.render.os.write",
+                side_effect=lambda _fd, data: writes_scrolled_1.append(data) or len(data),
+            ):
+                render_dual_page(
+                    text_lines=text_lines,
+                    text_start=1,
+                    tree_entries=[],
+                    tree_start=0,
+                    tree_selected=0,
+                    max_lines=4,
+                    current_path=path,
+                    tree_root=path.parent,
+                    expanded=set(),
+                    width=100,
+                    left_width=30,
+                    text_x=0,
+                    wrap_text=False,
+                    browser_visible=False,
+                    show_hidden=False,
+                )
+
+            with mock.patch(
+                "lazyviewer.render.os.write",
+                side_effect=lambda _fd, data: writes_scrolled_2.append(data) or len(data),
+            ):
+                render_dual_page(
+                    text_lines=text_lines,
+                    text_start=2,
+                    tree_entries=[],
+                    tree_start=0,
+                    tree_selected=0,
+                    max_lines=4,
+                    current_path=path,
+                    tree_root=path.parent,
+                    expanded=set(),
+                    width=100,
+                    left_width=30,
+                    text_x=0,
+                    wrap_text=False,
+                    browser_visible=False,
+                    show_hidden=False,
+                )
+
+        scrolled_1_rendered = b"".join(writes_scrolled_1).decode("utf-8", errors="replace")
+        scrolled_2_rendered = b"".join(writes_scrolled_2).decode("utf-8", errors="replace")
+
+        self.assertRegex(scrolled_1_rendered, r"\x1b\[4mclass Box:")
+        self.assertRegex(scrolled_1_rendered, r"\x1b\[4m\s+def run\(self\):")
+        self.assertIn("second = 2", scrolled_1_rendered)
+        self.assertIn("third = 3", scrolled_1_rendered)
+        self.assertNotIn("first = 1", scrolled_1_rendered)
+
+        self.assertRegex(scrolled_2_rendered, r"\x1b\[4mclass Box:")
+        self.assertRegex(scrolled_2_rendered, r"\x1b\[4m\s+def run\(self\):")
+        self.assertIn("third = 3", scrolled_2_rendered)
+        self.assertIn("fourth = 4", scrolled_2_rendered)
+        self.assertNotIn("second = 2", scrolled_2_rendered)
+
     def test_render_keeps_sticky_header_on_blank_line_inside_function(self) -> None:
         writes: list[bytes] = []
 
@@ -1121,7 +1198,7 @@ class RenderStatusTests(unittest.TestCase):
             "        value = 2\n"
             "        return value\n"
         )
-        self.assertEqual(_sticky_case(source, 5), [("class", "Box")])
+        self.assertEqual(_sticky_case(source, 5), [("class", "Box"), ("fn", "second")])
         self.assertEqual(_sticky_case(source, 6), [("class", "Box"), ("fn", "second")])
         self.assertEqual(_sticky_case(source, 7), [("class", "Box"), ("fn", "second")])
 

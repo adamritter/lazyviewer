@@ -360,26 +360,51 @@ def sticky_symbol_headers_for_position(
     if preview_is_git_diff or not current_path.is_file() or content_rows <= 1:
         return []
 
+    def visible_sticky_symbols(candidates: list[SymbolEntry], source_line: int) -> list[SymbolEntry]:
+        visible: list[SymbolEntry] = []
+        for symbol in candidates:
+            if _source_line_exits_symbol_scope(
+                text_lines,
+                source_line,
+                wrap_text,
+                current_path,
+                symbol,
+            ):
+                continue
+            visible.append(symbol)
+        return visible
+
     start_source, _, _ = _status_line_range(text_lines, text_start, 1, wrap_text)
+    max_headers = max(1, content_rows - 1)
     sticky_symbols = collect_sticky_symbol_headers(
         current_path,
         start_source,
-        max_headers=max(1, content_rows - 1),
+        max_headers=max_headers,
     )
     if not sticky_symbols:
         return []
 
-    visible_symbols: list[SymbolEntry] = []
-    for symbol in sticky_symbols:
-        if _source_line_exits_symbol_scope(
-            text_lines,
-            start_source,
-            wrap_text,
+    visible_symbols = visible_sticky_symbols(sticky_symbols, start_source)
+    if not visible_symbols:
+        return []
+
+    # Smooth nested transitions: when an inner symbol starts exactly at the
+    # viewport top and an outer sticky already exists, include the inner symbol
+    # immediately so scrolling by one line keeps body progression consistent.
+    if len(visible_symbols) < max_headers:
+        next_symbols = collect_sticky_symbol_headers(
             current_path,
-            symbol,
-        ):
-            continue
-        visible_symbols.append(symbol)
+            start_source + 1,
+            max_headers=max_headers,
+        )
+        if next_symbols:
+            visible_next = visible_sticky_symbols(next_symbols, start_source)
+            if (
+                len(visible_next) == (len(visible_symbols) + 1)
+                and visible_next[:-1] == visible_symbols
+                and (visible_next[-1].line + 1) == start_source
+            ):
+                return visible_next
 
     return visible_symbols
 
