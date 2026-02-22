@@ -10,8 +10,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lazyviewer.fuzzy import fuzzy_match_file_index, to_project_relative
-from lazyviewer.search import ContentMatch
+from lazyviewer.search.content import ContentMatch
+from lazyviewer.search.fuzzy import fuzzy_match_file_index, to_project_relative
 from lazyviewer.tree import (
     TreeEntry,
     filter_tree_entries_for_content_matches,

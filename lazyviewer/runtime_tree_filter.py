@@ -11,9 +11,13 @@ from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
 
-from .fuzzy import STRICT_SUBSTRING_ONLY_MIN_FILES, fuzzy_match_label_index
 from .navigation import JumpLocation
-from .search import search_project_content_rg
+from .search.content import ContentMatch, search_project_content_rg
+from .search.fuzzy import (
+    STRICT_SUBSTRING_ONLY_MIN_FILES,
+    collect_project_file_labels,
+    fuzzy_match_label_index,
+)
 from .state import AppState
 from .tree import (
     build_tree_entries,
@@ -71,8 +75,6 @@ class TreeFilterOps:
         return self.loading_until
 
     def refresh_tree_filter_file_index(self) -> None:
-        from .fuzzy import collect_project_file_labels
-
         root = self.state.tree_root.resolve()
         if self.state.picker_files_root == root and self.state.picker_files_show_hidden == self.state.show_hidden:
             return

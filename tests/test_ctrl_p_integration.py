@@ -9,7 +9,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from lazyviewer.fuzzy import fuzzy_match_file_index
+from lazyviewer.search.fuzzy import fuzzy_match_file_index
 from lazyviewer.tree import filter_tree_entries_for_files
 
 

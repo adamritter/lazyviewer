@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.search import ContentMatch, search_project_content_rg
+from lazyviewer.search.content import ContentMatch, search_project_content_rg
 
 
 class _FakePopen:
@@ -56,8 +56,8 @@ class SearchBehaviorTests(unittest.TestCase):
         ]
         fake = _FakePopen([json.dumps(payload) for payload in payloads], returncode=0)
 
-        with mock.patch("lazyviewer.search.shutil.which", return_value="/usr/bin/rg"), mock.patch(
-            "lazyviewer.search.subprocess.Popen",
+        with mock.patch("lazyviewer.search.content.shutil.which", return_value="/usr/bin/rg"), mock.patch(
+            "lazyviewer.search.content.subprocess.Popen",
             return_value=fake,
         ):
             matches_by_file, truncated, error = search_project_content_rg(
@@ -76,7 +76,7 @@ class SearchBehaviorTests(unittest.TestCase):
         self.assertEqual([(m.line, m.column, m.preview) for m in matches], [(10, 1, "alpha = 1"), (20, 2, "beta = 2")])
 
     def test_search_project_content_rg_returns_error_without_rg(self) -> None:
-        with mock.patch("lazyviewer.search.shutil.which", return_value=None):
+        with mock.patch("lazyviewer.search.content.shutil.which", return_value=None):
             matches_by_file, truncated, error = search_project_content_rg(
                 root=Path("/tmp/project"),
                 query="x",
@@ -88,8 +88,8 @@ class SearchBehaviorTests(unittest.TestCase):
 
     def test_search_project_content_rg_propagates_rg_failure_without_matches(self) -> None:
         fake = _FakePopen([], returncode=2, stderr="bad pattern")
-        with mock.patch("lazyviewer.search.shutil.which", return_value="/usr/bin/rg"), mock.patch(
-            "lazyviewer.search.subprocess.Popen",
+        with mock.patch("lazyviewer.search.content.shutil.which", return_value="/usr/bin/rg"), mock.patch(
+            "lazyviewer.search.content.subprocess.Popen",
             return_value=fake,
         ):
             matches_by_file, truncated, error = search_project_content_rg(

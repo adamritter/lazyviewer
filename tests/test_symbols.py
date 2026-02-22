@@ -293,6 +293,22 @@ class SymbolsBehaviorTests(unittest.TestCase):
         self.assertEqual([entry.kind for entry in out], ["class", "fn"])
         self.assertEqual([entry.name for entry in out], ["Demo", "run"])
 
+    def test_collect_sticky_symbol_headers_include_immediate_function_on_first_body_line(self) -> None:
+        source = (
+            "function boot() {\n"
+            "  return 2;\n"
+            "  return 3;\n"
+            "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.js"
+            path.write_text(source, encoding="utf-8")
+            symbols.clear_symbol_context_cache()
+            with mock.patch("lazyviewer.symbols._load_parser", return_value=(None, symbols.MISSING_PARSER_ERROR)):
+                headers = symbols.collect_sticky_symbol_headers(path, visible_start_line=2, max_headers=2)
+
+        self.assertEqual([(entry.kind, entry.name, entry.line) for entry in headers], [("fn", "boot", 0)])
+
     def test_collect_sticky_symbol_headers_returns_recent_hidden_headers(self) -> None:
         source = (
             "class Box {\n"
@@ -308,9 +324,32 @@ class SymbolsBehaviorTests(unittest.TestCase):
             path.write_text(source, encoding="utf-8")
             symbols.clear_symbol_context_cache()
             with mock.patch("lazyviewer.symbols._load_parser", return_value=(None, symbols.MISSING_PARSER_ERROR)):
-                headers = symbols.collect_sticky_symbol_headers(path, visible_start_line=6, max_headers=2)
+                headers = symbols.collect_sticky_symbol_headers(path, visible_start_line=7, max_headers=2)
 
-        self.assertEqual(headers, ["class Box", "fn boot"])
+        self.assertEqual(
+            [(entry.kind, entry.name, entry.line) for entry in headers],
+            [("fn", "boot", 4)],
+        )
+
+    def test_collect_sticky_symbol_headers_returns_full_enclosing_chain(self) -> None:
+        source = (
+            "class Outer:\n"
+            "    class Inner:\n"
+            "        def run(self):\n"
+            "            value = 2\n"
+            "            return value\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.py"
+            path.write_text(source, encoding="utf-8")
+            symbols.clear_symbol_context_cache()
+            with mock.patch("lazyviewer.symbols._load_parser", return_value=(None, symbols.MISSING_PARSER_ERROR)):
+                headers = symbols.collect_sticky_symbol_headers(path, visible_start_line=5, max_headers=8)
+
+        self.assertEqual(
+            [(entry.kind, entry.name, entry.line) for entry in headers],
+            [("class", "Outer", 0), ("class", "Inner", 1), ("fn", "run", 2)],
+        )
 
 
 if __name__ == "__main__":

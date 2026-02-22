@@ -11,8 +11,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .config import save_named_marks, save_show_hidden
-from .fuzzy import fuzzy_match_labels
 from .navigation import JumpLocation, is_named_mark_key
+from .search.fuzzy import fuzzy_match_labels
 from .state import AppState
 from .symbols import collect_symbols
 

@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest import mock
 
 from lazyviewer import preview
+from lazyviewer.git_status import GIT_STATUS_CHANGED, GIT_STATUS_UNTRACKED
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
@@ -83,6 +84,34 @@ class PreviewBehaviorTests(unittest.TestCase):
 
             self.assertEqual(first, second)
             self.assertEqual(call_count, 1)
+
+    def test_build_directory_preview_appends_git_status_badges(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            src = root / "src"
+            src.mkdir()
+            file_path = src / "main.py"
+            file_path.write_text("print('ok')\n", encoding="utf-8")
+
+            overlay = {
+                root: GIT_STATUS_CHANGED,
+                src.resolve(): GIT_STATUS_UNTRACKED,
+                file_path.resolve(): GIT_STATUS_CHANGED | GIT_STATUS_UNTRACKED,
+            }
+
+            rendered, truncated = preview.build_directory_preview(
+                root,
+                show_hidden=False,
+                max_depth=3,
+                max_entries=20,
+                git_status_overlay=overlay,
+            )
+            plain = strip_ansi(rendered)
+
+            self.assertFalse(truncated)
+            self.assertIn(f"{root}/ [M]", plain)
+            self.assertIn("src/ [?]", plain)
+            self.assertIn("main.py [M][?]", plain)
 
     def test_build_rendered_for_path_file_returns_plain_text_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -193,6 +222,25 @@ class PreviewBehaviorTests(unittest.TestCase):
             self.assertTrue(rendered.is_directory)
             self.assertTrue(rendered.truncated)
             self.assertIn("... truncated after 1 entries ...", plain)
+
+    def test_build_rendered_for_path_directory_includes_git_status_badges(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            file_path = root / "demo.py"
+            file_path.write_text("print('x')\n", encoding="utf-8")
+            overlay = {file_path.resolve(): GIT_STATUS_CHANGED}
+
+            rendered = preview.build_rendered_for_path(
+                root,
+                show_hidden=False,
+                style="monokai",
+                no_color=True,
+                dir_git_status_overlay=overlay,
+            )
+            plain = strip_ansi(rendered.text)
+
+            self.assertTrue(rendered.is_directory)
+            self.assertIn("demo.py [M]", plain)
 
     @unittest.skipIf(shutil.which("git") is None, "git is required for git diff preview tests")
     def test_build_rendered_for_path_shows_annotated_source_for_modified_git_file(self) -> None:

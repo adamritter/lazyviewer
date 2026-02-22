@@ -11,7 +11,7 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
-from lazyviewer.fuzzy import (
+from lazyviewer.search.fuzzy import (
     STRICT_SUBSTRING_ONLY_MIN_FILES,
     clear_project_files_cache,
     collect_project_file_labels,
@@ -238,8 +238,8 @@ class FuzzyBehaviorTests(unittest.TestCase):
             (root / "a.txt").write_text("a", encoding="utf-8")
 
             cp = mock.Mock(stdout="src/main.py\na.txt\n")
-            with mock.patch("lazyviewer.fuzzy.shutil.which", return_value="/usr/bin/rg"), mock.patch(
-                "lazyviewer.fuzzy.subprocess.run",
+            with mock.patch("lazyviewer.search.fuzzy.shutil.which", return_value="/usr/bin/rg"), mock.patch(
+                "lazyviewer.search.fuzzy.subprocess.run",
                 return_value=cp,
             ) as run_mock:
                 first = collect_project_files(root, show_hidden=False)
@@ -254,8 +254,8 @@ class FuzzyBehaviorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             cp = mock.Mock(stdout="src/main.py\na.txt\n")
-            with mock.patch("lazyviewer.fuzzy.shutil.which", return_value="/usr/bin/rg"), mock.patch(
-                "lazyviewer.fuzzy.subprocess.run",
+            with mock.patch("lazyviewer.search.fuzzy.shutil.which", return_value="/usr/bin/rg"), mock.patch(
+                "lazyviewer.search.fuzzy.subprocess.run",
                 return_value=cp,
             ) as run_mock:
                 first = collect_project_file_labels(root, show_hidden=False)
@@ -288,8 +288,8 @@ class FuzzyBehaviorTests(unittest.TestCase):
             (root / "src" / "main.py").write_text("print('hi')", encoding="utf-8")
             (root / "a.txt").write_text("a", encoding="utf-8")
 
-            with mock.patch("lazyviewer.fuzzy.shutil.which", return_value="/usr/bin/rg"), mock.patch(
-                "lazyviewer.fuzzy.subprocess.run",
+            with mock.patch("lazyviewer.search.fuzzy.shutil.which", return_value="/usr/bin/rg"), mock.patch(
+                "lazyviewer.search.fuzzy.subprocess.run",
                 side_effect=RuntimeError("rg failed"),
             ):
                 files = collect_project_files(root, show_hidden=False)

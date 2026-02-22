@@ -6,10 +6,11 @@ Keeps keybinding regressions isolated from full runtime integration tests.
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
-from lazyviewer.key_handlers import handle_normal_key, handle_tree_filter_key
+from lazyviewer.key_handlers import handle_normal_key, handle_picker_key, handle_tree_filter_key
 from lazyviewer.navigation import JumpLocation
 from lazyviewer.state import AppState
 from lazyviewer.tree import TreeEntry
@@ -48,6 +49,7 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         jump_to_next_git_modified,
         launch_lazygit=lambda: None,
         launch_editor_for_path=None,
+        visible_rows: int = 20,
     ) -> bool:
         if launch_editor_for_path is None:
             launch_editor_for_path = lambda _path: None
@@ -74,7 +76,7 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
             refresh_rendered_for_current_path=lambda **_kwargs: None,
             refresh_git_status_overlay=lambda **_kwargs: None,
             maybe_grow_directory_preview=lambda: False,
-            visible_content_rows=lambda: 20,
+            visible_content_rows=lambda: visible_rows,
             rebuild_screen_lines=lambda **_kwargs: None,
             mark_tree_watch_dirty=lambda: None,
             launch_editor_for_path=launch_editor_for_path,
@@ -110,6 +112,41 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
 
         self.assertFalse(should_quit)
         self.assertEqual(called["count"], 1)
+
+    def test_ctrl_c_quits_in_normal_mode(self) -> None:
+        state = _make_state()
+
+        should_quit = self._invoke(
+            state=state,
+            key="\x03",
+            toggle_git_features=lambda: None,
+            launch_lazygit=lambda: None,
+            jump_to_next_git_modified=lambda _direction: False,
+        )
+
+        self.assertTrue(should_quit)
+
+    def test_ctrl_c_closes_picker(self) -> None:
+        state = _make_state()
+        state.picker_active = True
+        state.picker_mode = "commands"
+        state.picker_query = "abc"
+        close_calls = {"count": 0}
+
+        handled, should_quit = handle_picker_key(
+            key="\x03",
+            state=state,
+            double_click_seconds=0.25,
+            close_picker=lambda: close_calls.__setitem__("count", close_calls["count"] + 1),
+            refresh_command_picker_matches=lambda **_kwargs: None,
+            activate_picker_selection=lambda: False,
+            visible_content_rows=lambda: 20,
+            refresh_active_picker_matches=lambda **_kwargs: None,
+        )
+
+        self.assertTrue(handled)
+        self.assertFalse(should_quit)
+        self.assertEqual(close_calls["count"], 1)
 
     def test_n_is_ignored_when_git_features_disabled(self) -> None:
         state = _make_state()
@@ -225,6 +262,133 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         self.assertFalse(should_quit)
         self.assertEqual(launched, [Path("/tmp").resolve()])
         self.assertEqual(state.current_path, Path("/tmp").resolve())
+
+    def test_enter_and_down_move_one_line_the_same(self) -> None:
+        state = _make_state()
+        state.browser_visible = False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.py"
+            source = (
+                "def run():\n"
+                "    first = 1\n"
+                "    second = 2\n"
+                "    third = 3\n"
+            )
+            path.write_text(source, encoding="utf-8")
+            state.current_path = path
+            state.lines = source.splitlines(keepends=True)
+            state.max_start = len(state.lines) - 1
+            should_quit = self._invoke(
+                state=state,
+                key="ENTER",
+                toggle_git_features=lambda: None,
+                jump_to_next_git_modified=lambda _direction: False,
+                visible_rows=2,
+            )
+            self.assertFalse(should_quit)
+            self.assertEqual(state.start, 1)
+
+            state.start = 0
+            should_quit = self._invoke(
+                state=state,
+                key="DOWN",
+                toggle_git_features=lambda: None,
+                jump_to_next_git_modified=lambda _direction: False,
+                visible_rows=2,
+            )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(state.start, 1)
+
+    def test_enter_count_keeps_explicit_step_size(self) -> None:
+        state = _make_state()
+        state.browser_visible = False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.py"
+            source = (
+                "def run():\n"
+                "    first = 1\n"
+                "    second = 2\n"
+                "    third = 3\n"
+                "    fourth = 4\n"
+            )
+            path.write_text(source, encoding="utf-8")
+            state.current_path = path
+            state.lines = source.splitlines(keepends=True)
+            state.max_start = len(state.lines) - 1
+            state.count_buffer = "3"
+            should_quit = self._invoke(
+                state=state,
+                key="ENTER",
+                toggle_git_features=lambda: None,
+                jump_to_next_git_modified=lambda _direction: False,
+                visible_rows=2,
+            )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(state.start, 3)
+
+    def test_G_reaches_end_when_sticky_header_reduces_text_rows(self) -> None:
+        state = _make_state()
+        state.browser_visible = False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.py"
+            source = (
+                "def run():\n"
+                "    one = 1\n"
+                "    two = 2\n"
+                "    three = 3\n"
+                "    four = 4\n"
+            )
+            path.write_text(source, encoding="utf-8")
+            state.current_path = path
+            state.lines = source.splitlines(keepends=True)
+            visible_rows = 3
+            state.max_start = max(0, len(state.lines) - visible_rows)
+
+            should_quit = self._invoke(
+                state=state,
+                key="G",
+                toggle_git_features=lambda: None,
+                jump_to_next_git_modified=lambda _direction: False,
+                visible_rows=visible_rows,
+            )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(state.start, 3)
+
+    def test_space_reaches_end_when_sticky_header_reduces_text_rows(self) -> None:
+        state = _make_state()
+        state.browser_visible = False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.py"
+            source = (
+                "def run():\n"
+                "    one = 1\n"
+                "    two = 2\n"
+                "    three = 3\n"
+                "    four = 4\n"
+            )
+            path.write_text(source, encoding="utf-8")
+            state.current_path = path
+            state.lines = source.splitlines(keepends=True)
+            visible_rows = 3
+            state.max_start = max(0, len(state.lines) - visible_rows)
+
+            should_quit = self._invoke(
+                state=state,
+                key=" ",
+                toggle_git_features=lambda: None,
+                jump_to_next_git_modified=lambda _direction: False,
+                visible_rows=visible_rows,
+            )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(state.start, 3)
 
     def test_e_forces_preview_rebuild_after_successful_edit(self) -> None:
         state = _make_state()

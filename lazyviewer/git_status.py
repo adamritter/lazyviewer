@@ -41,6 +41,24 @@ def _merge_flags(overlay: dict[Path, int], target: Path, flags: int) -> None:
     overlay[target] = overlay.get(target, 0) | flags
 
 
+def format_git_status_badges(path: Path, git_status_overlay: dict[Path, int] | None) -> str:
+    if not git_status_overlay:
+        return ""
+
+    flags = git_status_overlay.get(path.resolve(), 0)
+    if flags == 0:
+        return ""
+
+    badges: list[str] = []
+    if flags & GIT_STATUS_CHANGED:
+        badges.append("\033[38;5;214m[M]\033[0m")
+    if flags & GIT_STATUS_UNTRACKED:
+        badges.append("\033[38;5;42m[?]\033[0m")
+    if not badges:
+        return ""
+    return " " + "".join(badges)
+
+
 def _cache_get(key: tuple[str, int, int, str, bool, str]) -> tuple[bool, str | None]:
     if key not in _DIFF_PREVIEW_CACHE:
         return False, None

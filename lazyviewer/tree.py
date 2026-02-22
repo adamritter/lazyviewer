@@ -10,9 +10,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .git_status import GIT_STATUS_CHANGED, GIT_STATUS_UNTRACKED
+from .git_status import format_git_status_badges
 from .gitignore import get_gitignore_matcher
-from .search import ContentMatch
+from .search.content import ContentMatch
 
 
 @dataclass(frozen=True)
@@ -322,24 +322,6 @@ def next_index_after_directory_subtree(entries: list[TreeEntry], directory_idx: 
     return idx
 
 
-def _format_git_status_badges(path: Path, git_status_overlay: dict[Path, int] | None) -> str:
-    if not git_status_overlay:
-        return ""
-
-    flags = git_status_overlay.get(path.resolve(), 0)
-    if flags == 0:
-        return ""
-
-    badges: list[str] = []
-    if flags & GIT_STATUS_CHANGED:
-        badges.append("\033[38;5;214m[M]\033[0m")
-    if flags & GIT_STATUS_UNTRACKED:
-        badges.append("\033[38;5;42m[?]\033[0m")
-    if not badges:
-        return ""
-    return " " + "".join(badges)
-
-
 def format_tree_entry(
     entry: TreeEntry,
     root: Path,
@@ -370,7 +352,7 @@ def format_tree_entry(
     file_color = file_color_for(entry.path)
     marker_color = "\033[38;5;44m"
     reset = "\033[0m"
-    badges = _format_git_status_badges(entry.path, git_status_overlay)
+    badges = format_git_status_badges(entry.path, git_status_overlay)
     if entry.is_dir:
         marker = "▾ " if entry.path.resolve() in expanded else "▸ "
         return f"{indent}{marker_color}{marker}{reset}{dir_color}{name}{reset}{badges}"

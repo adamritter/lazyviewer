@@ -902,32 +902,38 @@ class RenderStatusTests(unittest.TestCase):
         self.assertGreater(run_idx, inner_idx)
         self.assertIn("return value", rendered)
 
-    def test_render_first_body_line_shows_sticky_header(self) -> None:
-        writes: list[bytes] = []
-
-        def capture(_fd: int, data: bytes) -> int:
-            writes.append(data)
-            return len(data)
-
+    def test_render_one_line_scroll_shows_sticky_and_skips_first_body_line(self) -> None:
         source = (
             "def run():\n"
             "    first = 1\n"
             "    second = 2\n"
-            "    return first + second\n"
+            "    third = 3\n"
         )
         text_lines = source.splitlines()
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "demo.py"
             path.write_text(source, encoding="utf-8")
-            with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+
+            writes_top: list[bytes] = []
+            writes_scrolled: list[bytes] = []
+
+            def capture_top(_fd: int, data: bytes) -> int:
+                writes_top.append(data)
+                return len(data)
+
+            def capture_scrolled(_fd: int, data: bytes) -> int:
+                writes_scrolled.append(data)
+                return len(data)
+
+            with mock.patch("lazyviewer.render.os.write", side_effect=capture_top):
                 render_dual_page(
                     text_lines=text_lines,
-                    text_start=1,
+                    text_start=0,
                     tree_entries=[],
                     tree_start=0,
                     tree_selected=0,
-                    max_lines=5,
+                    max_lines=3,
                     current_path=path,
                     tree_root=path.parent,
                     expanded=set(),
@@ -939,10 +945,37 @@ class RenderStatusTests(unittest.TestCase):
                     show_hidden=False,
                 )
 
-        rendered = b"".join(writes).decode("utf-8", errors="replace")
-        self.assertRegex(rendered, r"\x1b\[4mdef run\(\):")
-        self.assertIn("─", rendered)
-        self.assertIn("first = 1", rendered)
+            with mock.patch("lazyviewer.render.os.write", side_effect=capture_scrolled):
+                render_dual_page(
+                    text_lines=text_lines,
+                    text_start=1,
+                    tree_entries=[],
+                    tree_start=0,
+                    tree_selected=0,
+                    max_lines=3,
+                    current_path=path,
+                    tree_root=path.parent,
+                    expanded=set(),
+                    width=100,
+                    left_width=30,
+                    text_x=0,
+                    wrap_text=False,
+                    browser_visible=False,
+                    show_hidden=False,
+                )
+
+        top_rendered = b"".join(writes_top).decode("utf-8", errors="replace")
+        scrolled_rendered = b"".join(writes_scrolled).decode("utf-8", errors="replace")
+
+        self.assertIn("def run():", top_rendered)
+        self.assertIn("first = 1", top_rendered)
+        self.assertIn("second = 2", top_rendered)
+
+        self.assertRegex(scrolled_rendered, r"\x1b\[4mdef run\(\):")
+        self.assertIn("─", scrolled_rendered)
+        self.assertIn("second = 2", scrolled_rendered)
+        self.assertIn("third = 3", scrolled_rendered)
+        self.assertNotIn("first = 1", scrolled_rendered)
 
     def test_render_keeps_sticky_header_on_blank_line_inside_function(self) -> None:
         writes: list[bytes] = []
@@ -1060,7 +1093,7 @@ class RenderStatusTests(unittest.TestCase):
             "        return value\n"
         )
         self.assertEqual(_sticky_case(source, 5), [("class", "Box")])
-        self.assertEqual(_sticky_case(source, 6), [("class", "Box")])
+        self.assertEqual(_sticky_case(source, 6), [("class", "Box"), ("fn", "second")])
         self.assertEqual(_sticky_case(source, 7), [("class", "Box"), ("fn", "second")])
 
     def test_sticky_case_helper_handles_closing_brace_transition(self) -> None:

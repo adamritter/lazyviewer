@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lazyviewer.fuzzy import clear_project_files_cache, collect_project_files, to_project_relative
+from lazyviewer.search.fuzzy import clear_project_files_cache, collect_project_files, to_project_relative
 from lazyviewer.gitignore import clear_gitignore_cache
 from lazyviewer.preview import build_directory_preview
 from lazyviewer.tree import build_tree_entries

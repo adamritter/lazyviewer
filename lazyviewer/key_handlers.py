@@ -11,12 +11,45 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .navigation import JumpLocation
+from .render import sticky_symbol_headers_for_position
 from .state import AppState
 from .tree import (
     next_directory_entry_index,
     next_index_after_directory_subtree,
     next_opened_directory_entry_index,
 )
+
+
+def _sticky_header_rows_for_start(
+    state: AppState,
+    *,
+    display_start: int,
+    visible_rows: int,
+) -> int:
+    try:
+        sticky_symbols = sticky_symbol_headers_for_position(
+            text_lines=state.lines,
+            text_start=display_start,
+            content_rows=visible_rows,
+            current_path=state.current_path,
+            wrap_text=state.wrap_text,
+            preview_is_git_diff=state.preview_is_git_diff,
+        )
+    except Exception:
+        return 0
+
+    return len(sticky_symbols)
+
+
+def _effective_max_start(state: AppState, visible_rows: int) -> int:
+    base_max_start = max(0, len(state.lines) - max(1, visible_rows))
+    sticky_rows = _sticky_header_rows_for_start(
+        state,
+        display_start=base_max_start,
+        visible_rows=visible_rows,
+    )
+    max_display_index = max(0, len(state.lines) - 1)
+    return min(max_display_index, base_max_start + sticky_rows)
 
 
 def handle_picker_key(
@@ -579,6 +612,7 @@ def handle_normal_key(
     prev_text_x = state.text_x
     scrolling_down = False
     page_rows = visible_content_rows()
+    effective_max_start = _effective_max_start(state, page_rows)
     if key == " " or key.lower() == "f":
         pages = count if count is not None else 1
         state.start += page_rows * max(1, pages)
@@ -602,9 +636,9 @@ def handle_normal_key(
             state.start = max(0, min(count - 1, state.max_start))
     elif key == "G":
         if count is None:
-            state.start = state.max_start
+            state.start = effective_max_start
         else:
-            state.start = max(0, min(count - 1, state.max_start))
+            state.start = max(0, min(count - 1, effective_max_start))
         scrolling_down = True
     elif key == "ENTER":
         state.start += count if count is not None else 1
@@ -621,11 +655,12 @@ def handle_normal_key(
     elif key == "HOME":
         state.start = 0
     elif key == "END":
-        state.start = state.max_start
+        state.start = effective_max_start
     elif key == "ESC":
         return True
 
-    state.start = max(0, min(state.start, state.max_start))
+    state.start = max(0, min(state.start, effective_max_start))
+    state.max_start = max(state.max_start, effective_max_start)
     grew_preview = scrolling_down and maybe_grow_directory_preview()
     if state.start != prev_start or state.text_x != prev_text_x or grew_preview:
         state.dirty = True

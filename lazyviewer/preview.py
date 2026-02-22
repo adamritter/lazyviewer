@@ -12,7 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-from .git_status import build_unified_diff_preview_for_path
+from .git_status import build_unified_diff_preview_for_path, format_git_status_badges
 from .gitignore import get_gitignore_matcher
 from .highlight import colorize_source, read_text, sanitize_terminal_text
 
@@ -24,7 +24,7 @@ DIR_PREVIEW_CACHE_MAX = 128
 BINARY_PROBE_BYTES = 4_096
 COLORIZE_MAX_FILE_BYTES = 256_000
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-_DIR_PREVIEW_CACHE: OrderedDict[tuple[str, bool, int, int, bool, int], tuple[str, bool]] = OrderedDict()
+_DIR_PREVIEW_CACHE: OrderedDict[tuple[str, bool, int, int, bool, int, int], tuple[str, bool]] = OrderedDict()
 
 
 @dataclass(frozen=True)
@@ -43,16 +43,17 @@ def _cache_key_for_directory(
     max_depth: int,
     max_entries: int,
     skip_gitignored: bool,
-) -> tuple[str, bool, int, int, bool, int] | None:
+    git_overlay_signature: int,
+) -> tuple[str, bool, int, int, bool, int, int] | None:
     try:
         resolved = root_dir.resolve()
         mtime_ns = resolved.stat().st_mtime_ns
     except Exception:
         return None
-    return (str(resolved), show_hidden, max_depth, max_entries, skip_gitignored, int(mtime_ns))
+    return (str(resolved), show_hidden, max_depth, max_entries, skip_gitignored, int(mtime_ns), git_overlay_signature)
 
 
-def _cache_get(key: tuple[str, bool, int, int, bool, int] | None) -> tuple[str, bool] | None:
+def _cache_get(key: tuple[str, bool, int, int, bool, int, int] | None) -> tuple[str, bool] | None:
     if key is None:
         return None
     cached = _DIR_PREVIEW_CACHE.get(key)
@@ -62,7 +63,7 @@ def _cache_get(key: tuple[str, bool, int, int, bool, int] | None) -> tuple[str, 
     return cached
 
 
-def _cache_put(key: tuple[str, bool, int, int, bool, int] | None, preview: str, truncated: bool) -> None:
+def _cache_put(key: tuple[str, bool, int, int, bool, int, int] | None, preview: str, truncated: bool) -> None:
     if key is None:
         return
     _DIR_PREVIEW_CACHE[key] = (preview, truncated)
@@ -75,14 +76,58 @@ def clear_directory_preview_cache() -> None:
     _DIR_PREVIEW_CACHE.clear()
 
 
+def _directory_overlay_signature(root_dir: Path, git_status_overlay: dict[Path, int] | None) -> int:
+    if not git_status_overlay:
+        return 0
+
+    try:
+        root = root_dir.resolve()
+    except Exception:
+        root = root_dir
+
+    entries: list[tuple[str, int]] = []
+    for raw_path, flags in git_status_overlay.items():
+        if flags == 0:
+            continue
+        try:
+            path = raw_path.resolve()
+        except Exception:
+            path = raw_path
+
+        if path == root:
+            entries.append((".", int(flags)))
+            continue
+        if not path.is_relative_to(root):
+            continue
+        try:
+            rel = path.relative_to(root).as_posix()
+        except Exception:
+            continue
+        entries.append((rel, int(flags)))
+
+    if not entries:
+        return 0
+    entries.sort()
+    return hash(tuple(entries))
+
+
 def build_directory_preview(
     root_dir: Path,
     show_hidden: bool,
     max_depth: int = DIR_PREVIEW_DEFAULT_DEPTH,
     max_entries: int = DIR_PREVIEW_INITIAL_MAX_ENTRIES,
     skip_gitignored: bool = False,
+    git_status_overlay: dict[Path, int] | None = None,
 ) -> tuple[str, bool]:
-    cache_key = _cache_key_for_directory(root_dir, show_hidden, max_depth, max_entries, skip_gitignored)
+    overlay_signature = _directory_overlay_signature(root_dir, git_status_overlay)
+    cache_key = _cache_key_for_directory(
+        root_dir,
+        show_hidden,
+        max_depth,
+        max_entries,
+        skip_gitignored,
+        overlay_signature,
+    )
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
@@ -98,7 +143,8 @@ def build_directory_preview(
         root_label = f"{root_dir.resolve()}/"
     except Exception:
         root_label = f"{root_dir}/"
-    lines_out: list[str] = [f"{dir_color}{root_label}{reset}", ""]
+    root_badges = format_git_status_badges(root_dir, git_status_overlay)
+    lines_out: list[str] = [f"{dir_color}{root_label}{reset}{root_badges}", ""]
     emitted = 0
 
     def iter_children(directory: Path) -> tuple[list[tuple[str, Path, bool]], Exception | None]:
@@ -141,7 +187,8 @@ def build_directory_preview(
             branch = "└─ " if last else "├─ "
             suffix = "/" if is_dir else ""
             name_color = dir_color if is_dir else file_color
-            lines_out.append(f"{branch_color}{prefix}{branch}{reset}{name_color}{name}{suffix}{reset}")
+            badges = format_git_status_badges(child_path, git_status_overlay)
+            lines_out.append(f"{branch_color}{prefix}{branch}{reset}{name_color}{name}{suffix}{reset}{badges}")
             emitted += 1
             if is_dir:
                 walk(child_path, prefix + ("   " if last else "│  "), depth + 1)
@@ -166,6 +213,7 @@ def build_rendered_for_path(
     dir_max_entries: int = DIR_PREVIEW_INITIAL_MAX_ENTRIES,
     dir_skip_gitignored: bool = False,
     prefer_git_diff: bool = True,
+    dir_git_status_overlay: dict[Path, int] | None = None,
 ) -> RenderedPath:
     if target.is_dir():
         preview, truncated = build_directory_preview(
@@ -174,6 +222,7 @@ def build_rendered_for_path(
             max_depth=dir_max_depth,
             max_entries=dir_max_entries,
             skip_gitignored=dir_skip_gitignored,
+            git_status_overlay=dir_git_status_overlay,
         )
         return RenderedPath(text=preview, is_directory=True, truncated=truncated)
 
