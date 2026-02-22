@@ -28,6 +28,7 @@ class RenderedPath:
     truncated: bool
     image_path: Path | None = None
     image_format: str | None = None
+    is_git_diff_preview: bool = False
 
 
 def _cache_key_for_directory(
@@ -202,7 +203,12 @@ def build_rendered_for_path(
             style=style,
         )
         if diff_preview:
-            return RenderedPath(text=diff_preview, is_directory=False, truncated=False)
+            return RenderedPath(
+                text=diff_preview,
+                is_directory=False,
+                truncated=False,
+                is_git_diff_preview=True,
+            )
 
     try:
         source = read_text(target)

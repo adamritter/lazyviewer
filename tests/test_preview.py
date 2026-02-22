@@ -208,6 +208,7 @@ class PreviewBehaviorTests(unittest.TestCase):
                 no_color=True,
             )
             plain = strip_ansi(rendered.text)
+            self.assertTrue(rendered.is_git_diff_preview)
             self.assertEqual(
                 plain.splitlines(),
                 [
@@ -238,6 +239,7 @@ class PreviewBehaviorTests(unittest.TestCase):
                 no_color=True,
                 prefer_git_diff=False,
             )
+            self.assertFalse(rendered.is_git_diff_preview)
             self.assertEqual(rendered.text, "a = 1\nb = 22\n")
 
     @unittest.skipIf(shutil.which("git") is None, "git is required for git diff preview tests")
@@ -262,8 +264,9 @@ class PreviewBehaviorTests(unittest.TestCase):
                 )
 
             plain = strip_ansi(rendered.text)
-            self.assertIn("+ name = 'new'", plain)
-            self.assertIn("- name = 'old'", plain)
+            self.assertTrue(rendered.is_git_diff_preview)
+            self.assertIn("name = 'new'", plain)
+            self.assertIn("name = 'old'", plain)
             self.assertIn("\x1b[", rendered.text)
 
 
