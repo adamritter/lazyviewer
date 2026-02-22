@@ -94,6 +94,34 @@ class FuzzyBehaviorTests(unittest.TestCase):
         self.assertEqual(idx, 1)
         self.assertEqual(label, labels[1])
 
+    def test_substring_match_turns_off_fuzzy_for_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "docs").mkdir()
+            (root / "docs" / "readme.md").write_text("docs", encoding="utf-8")
+            (root / "tools").mkdir()
+            (root / "tools" / "r_e_a_d_helper.py").write_text("helpers", encoding="utf-8")
+            files = [root / "docs" / "readme.md", root / "tools" / "r_e_a_d_helper.py"]
+
+            matches = fuzzy_match_paths("read", files, root, limit=10)
+
+            self.assertEqual(len(matches), 1)
+            self.assertEqual(matches[0][1], "docs/readme.md")
+
+    def test_substring_match_turns_off_fuzzy_for_labels(self) -> None:
+        labels = [
+            "BetaThing",
+            "B_e_t_a_Helper",
+            "Other",
+        ]
+
+        matches = fuzzy_match_labels("beta", labels, limit=10)
+
+        self.assertEqual(len(matches), 1)
+        idx, label, _score = matches[0]
+        self.assertEqual(idx, 0)
+        self.assertEqual(label, "BetaThing")
+
 
 if __name__ == "__main__":
     unittest.main()

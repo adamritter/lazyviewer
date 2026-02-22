@@ -57,9 +57,32 @@ def fuzzy_score(query: str, candidate: str) -> int | None:
     return score
 
 
+def substring_index(query: str, candidate: str) -> int | None:
+    if not query:
+        return 0
+    idx = candidate.casefold().find(query.casefold())
+    if idx < 0:
+        return None
+    return idx
+
+
 def fuzzy_match_paths(
     query: str, files: list[Path], root: Path, limit: int = 200
 ) -> list[tuple[Path, str, int]]:
+    substring_scored: list[tuple[int, int, str, Path]] = []
+    for path in files:
+        label = to_project_relative(path, root)
+        idx = substring_index(query, label)
+        if idx is None:
+            continue
+        substring_scored.append((idx, len(label), label, path))
+    if substring_scored:
+        substring_scored.sort(key=lambda item: (item[0], item[1], item[2]))
+        return [
+            (path, label, 10_000 - (idx * 50) - label_len)
+            for idx, label_len, label, path in substring_scored[: max(1, limit)]
+        ]
+
     scored: list[tuple[int, int, str, Path]] = []
     for path in files:
         label = to_project_relative(path, root)
@@ -72,6 +95,19 @@ def fuzzy_match_paths(
 
 
 def fuzzy_match_labels(query: str, labels: list[str], limit: int = 200) -> list[tuple[int, str, int]]:
+    substring_scored: list[tuple[int, int, str, int]] = []
+    for idx, label in enumerate(labels):
+        substr_idx = substring_index(query, label)
+        if substr_idx is None:
+            continue
+        substring_scored.append((substr_idx, len(label), label, idx))
+    if substring_scored:
+        substring_scored.sort(key=lambda item: (item[0], item[1], item[2]))
+        return [
+            (label_idx, label, 10_000 - (substr_idx * 50) - label_len)
+            for substr_idx, label_len, label, label_idx in substring_scored[: max(1, limit)]
+        ]
+
     scored: list[tuple[int, int, str, int]] = []
     for idx, label in enumerate(labels):
         score = fuzzy_score(query, label)

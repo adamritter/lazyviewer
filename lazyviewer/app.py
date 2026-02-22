@@ -27,10 +27,17 @@ from .render import help_panel_row_count, render_dual_page
 from .state import AppState
 from .symbols import collect_symbols
 from .terminal import TerminalController
-from .tree import build_tree_entries, clamp_left_width, compute_left_width, filter_tree_entries_for_files
+from .tree import (
+    build_tree_entries,
+    clamp_left_width,
+    compute_left_width,
+    filter_tree_entries_for_files,
+    next_file_entry_index,
+)
 
 DOUBLE_CLICK_SECONDS = 0.35
 PICKER_RESULT_LIMIT = 200
+FILTER_CURSOR_BLINK_SECONDS = 0.5
 
 
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
@@ -102,6 +109,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     stdin_fd = sys.stdin.fileno()
     stdout_fd = sys.stdout.fileno()
     terminal = TerminalController(stdin_fd, stdout_fd)
+    tree_filter_cursor_visible = True
 
     def effective_text_width(columns: int | None = None) -> int:
         if columns is None:
@@ -214,7 +222,11 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             return max(1, rows - 1)
         return rows
 
-    def rebuild_tree_entries(preferred_path: Path | None = None, center_selection: bool = False) -> None:
+    def rebuild_tree_entries(
+        preferred_path: Path | None = None,
+        center_selection: bool = False,
+        force_first_file: bool = False,
+    ) -> None:
         if preferred_path is None:
             if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
                 preferred_path = state.tree_entries[state.selected_idx].path.resolve()
@@ -242,22 +254,35 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             state.tree_render_expanded = set(state.expanded)
             state.tree_entries = build_tree_entries(state.tree_root, state.expanded, state.show_hidden)
 
-        preferred_target = preferred_path.resolve()
-        state.selected_idx = 0
-        for idx, entry in enumerate(state.tree_entries):
-            if entry.path.resolve() == preferred_target:
-                state.selected_idx = idx
-                break
+        if force_first_file:
+            first_file_idx = next_file_entry_index(state.tree_entries, -1, 1)
+            state.selected_idx = first_file_idx if first_file_idx is not None else 0
         else:
-            state.selected_idx = default_selected_index(prefer_files=bool(state.tree_filter_query))
+            preferred_target = preferred_path.resolve()
+            state.selected_idx = 0
+            for idx, entry in enumerate(state.tree_entries):
+                if entry.path.resolve() == preferred_target:
+                    state.selected_idx = idx
+                    break
+            else:
+                state.selected_idx = default_selected_index(prefer_files=bool(state.tree_filter_query))
 
         if center_selection:
             rows = tree_view_rows()
             state.tree_start = max(0, state.selected_idx - max(1, rows // 2))
 
-    def apply_tree_filter_query(query: str, preview_selection: bool = False) -> None:
+    def apply_tree_filter_query(
+        query: str,
+        preview_selection: bool = False,
+        select_first_file: bool = False,
+    ) -> None:
         state.tree_filter_query = query
-        rebuild_tree_entries(preferred_path=state.current_path.resolve())
+        force_first_file = select_first_file and bool(query)
+        preferred_path = None if force_first_file else state.current_path.resolve()
+        rebuild_tree_entries(
+            preferred_path=preferred_path,
+            force_first_file=force_first_file,
+        )
         if preview_selection:
             preview_selected_entry(force=True)
         state.dirty = True
@@ -286,6 +311,27 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             if state.wrap_text and browser_visibility_changed:
                 rebuild_screen_lines()
         rebuild_tree_entries(preferred_path=state.current_path.resolve())
+        state.dirty = True
+
+    def activate_tree_filter_selection() -> None:
+        if not state.tree_entries:
+            close_tree_filter(clear_query=True)
+            return
+
+        entry = state.tree_entries[state.selected_idx]
+        if entry.is_dir:
+            candidate_idx = next_file_entry_index(state.tree_entries, state.selected_idx, 1)
+            if candidate_idx is None:
+                candidate_idx = next_file_entry_index(state.tree_entries, state.selected_idx, -1)
+            if candidate_idx is None:
+                close_tree_filter(clear_query=True)
+                return
+            state.selected_idx = candidate_idx
+            entry = state.tree_entries[state.selected_idx]
+
+        selected_path = entry.path.resolve()
+        close_tree_filter(clear_query=True)
+        jump_to_path(selected_path)
         state.dirty = True
 
     def refresh_symbol_picker_matches(reset_selection: bool = False) -> None:
@@ -459,6 +505,21 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 if state.picker_list_start != prev_picker_start:
                     state.dirty = True
 
+            blinking_filter = (
+                state.tree_filter_active
+                and state.tree_filter_editing
+                and not state.picker_active
+                and state.browser_visible
+            )
+            if blinking_filter:
+                blink_phase = (int(time.monotonic() / FILTER_CURSOR_BLINK_SECONDS) % 2) == 0
+                if blink_phase != tree_filter_cursor_visible:
+                    tree_filter_cursor_visible = blink_phase
+                    state.dirty = True
+            elif not tree_filter_cursor_visible:
+                tree_filter_cursor_visible = True
+                state.dirty = True
+
             if state.dirty:
                 render_dual_page(
                     state.lines,
@@ -480,6 +541,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     state.tree_filter_active,
                     state.tree_filter_query,
                     state.tree_filter_editing,
+                    tree_filter_cursor_visible,
                     state.tree_filter_match_count,
                     state.picker_active,
                     state.picker_mode,
@@ -631,36 +693,53 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 if key == "ESC":
                     close_tree_filter(clear_query=True)
                     continue
-                if key == "TAB" or key == "ENTER":
+                if key == "ENTER":
+                    activate_tree_filter_selection()
+                    continue
+                if key == "TAB":
                     state.tree_filter_editing = False
                     state.dirty = True
                     continue
                 if key == "UP" or key == "CTRL_K":
-                    if state.tree_entries:
+                    target_idx = next_file_entry_index(state.tree_entries, state.selected_idx, -1)
+                    if target_idx is not None:
                         prev_selected = state.selected_idx
-                        state.selected_idx = max(0, state.selected_idx - 1)
+                        state.selected_idx = target_idx
                         preview_selected_entry()
                         if state.selected_idx != prev_selected:
                             state.dirty = True
                     continue
                 if key == "DOWN" or key == "CTRL_J":
-                    if state.tree_entries:
+                    target_idx = next_file_entry_index(state.tree_entries, state.selected_idx, 1)
+                    if target_idx is not None:
                         prev_selected = state.selected_idx
-                        state.selected_idx = min(len(state.tree_entries) - 1, state.selected_idx + 1)
+                        state.selected_idx = target_idx
                         preview_selected_entry()
                         if state.selected_idx != prev_selected:
                             state.dirty = True
                     continue
                 if key == "BACKSPACE":
                     if state.tree_filter_query:
-                        apply_tree_filter_query(state.tree_filter_query[:-1], preview_selection=True)
+                        apply_tree_filter_query(
+                            state.tree_filter_query[:-1],
+                            preview_selection=True,
+                            select_first_file=True,
+                        )
                     continue
                 if key == "CTRL_U":
                     if state.tree_filter_query:
-                        apply_tree_filter_query("", preview_selection=True)
+                        apply_tree_filter_query(
+                            "",
+                            preview_selection=True,
+                            select_first_file=True,
+                        )
                     continue
                 if len(key) == 1 and key.isprintable():
-                    apply_tree_filter_query(state.tree_filter_query + key, preview_selection=True)
+                    apply_tree_filter_query(
+                        state.tree_filter_query + key,
+                        preview_selection=True,
+                        select_first_file=True,
+                    )
                     continue
                 continue
 
@@ -668,6 +747,9 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 if key == "TAB":
                     state.tree_filter_editing = True
                     state.dirty = True
+                    continue
+                if key == "ENTER":
+                    activate_tree_filter_selection()
                     continue
                 if key == "ESC":
                     close_tree_filter(clear_query=True)

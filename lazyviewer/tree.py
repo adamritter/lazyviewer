@@ -95,6 +95,22 @@ def filter_tree_entries_for_files(
     return filtered_entries, render_expanded
 
 
+def next_file_entry_index(
+    entries: list[TreeEntry],
+    selected_idx: int,
+    direction: int,
+) -> int | None:
+    if not entries or direction == 0:
+        return None
+    step = 1 if direction > 0 else -1
+    idx = selected_idx + step
+    while 0 <= idx < len(entries):
+        if not entries[idx].is_dir:
+            return idx
+        idx += step
+    return None
+
+
 def format_tree_entry(entry: TreeEntry, root: Path, expanded: set[Path]) -> str:
     indent = "  " * entry.depth
     if entry.path == root:

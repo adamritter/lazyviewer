@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lazyviewer.tree import filter_tree_entries_for_files
+from lazyviewer.tree import TreeEntry, filter_tree_entries_for_files, next_file_entry_index
 
 
 class TreeFilterBehaviorTests(unittest.TestCase):
@@ -82,6 +82,22 @@ class TreeFilterBehaviorTests(unittest.TestCase):
 
             self.assertEqual(len(entries), 1)
             self.assertEqual(entries[0].path.resolve(), root.resolve())
+
+    def test_next_file_entry_index_skips_directories(self) -> None:
+        entries = [
+            TreeEntry(path=Path("/tmp/root"), depth=0, is_dir=True),
+            TreeEntry(path=Path("/tmp/root/src"), depth=1, is_dir=True),
+            TreeEntry(path=Path("/tmp/root/src/main.py"), depth=2, is_dir=False),
+            TreeEntry(path=Path("/tmp/root/docs"), depth=1, is_dir=True),
+            TreeEntry(path=Path("/tmp/root/docs/readme.md"), depth=2, is_dir=False),
+        ]
+
+        self.assertEqual(next_file_entry_index(entries, selected_idx=0, direction=1), 2)
+        self.assertEqual(next_file_entry_index(entries, selected_idx=-1, direction=1), 2)
+        self.assertEqual(next_file_entry_index(entries, selected_idx=2, direction=1), 4)
+        self.assertEqual(next_file_entry_index(entries, selected_idx=4, direction=1), None)
+        self.assertEqual(next_file_entry_index(entries, selected_idx=4, direction=-1), 2)
+        self.assertEqual(next_file_entry_index(entries, selected_idx=2, direction=-1), None)
 
 
 if __name__ == "__main__":

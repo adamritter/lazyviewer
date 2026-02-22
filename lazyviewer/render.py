@@ -10,7 +10,7 @@ from .tree import TreeEntry, clamp_left_width, format_tree_entry
 HELP_PANEL_TREE_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mTREE\033[0m",
     "\033[2;38;5;250mnav:\033[0m \033[38;5;229mh/j/k/l\033[0m move  \033[38;5;229mEnter\033[0m toggle/open",
-    "\033[2;38;5;250mfilter:\033[0m \033[38;5;229mCtrl+P\033[0m open  \033[38;5;229mTab\033[0m edit  \033[38;5;229mEsc\033[0m clear",
+    "\033[2;38;5;250mfilter:\033[0m \033[38;5;229mCtrl+P\033[0m open  \033[38;5;229mEnter\033[0m open+exit  \033[38;5;229mTab\033[0m edit  \033[38;5;229mEsc\033[0m clear",
     "\033[2;38;5;250mlayout:\033[0m \033[38;5;229mShift+Left/Right\033[0m resize",
 )
 
@@ -81,6 +81,7 @@ def render_dual_page(
     tree_filter_active: bool = False,
     tree_filter_query: str = "",
     tree_filter_editing: bool = False,
+    tree_filter_cursor_visible: bool = False,
     tree_filter_match_count: int = 0,
     picker_active: bool = False,
     picker_mode: str = "symbols",
@@ -170,7 +171,11 @@ def render_dual_page(
                 else:
                     tree_text = ""
         elif tree_filter_row_visible and row == 0:
-            if tree_filter_query:
+            if tree_filter_editing:
+                base = f"p> {tree_filter_query}" if tree_filter_query else "p> "
+                cursor = "_" if tree_filter_cursor_visible else " "
+                query_text = f"\033[1;38;5;81m{base}{cursor}\033[0m"
+            elif tree_filter_query:
                 query_text = f"\033[1;38;5;81mp> {tree_filter_query}\033[0m"
             else:
                 query_text = "\033[2;38;5;250mp> type to filter files\033[0m"
