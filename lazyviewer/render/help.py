@@ -21,7 +21,7 @@ HELP_PANEL_TREE_LINES: tuple[str, ...] = (
 HELP_PANEL_TEXT_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mTEXT + EXTRAS\033[0m",
     "\033[38;5;229mUp/Down\033[0m line  \033[38;5;229md/u\033[0m half",
-    "\033[38;5;229mf/B\033[0m page  \033[38;5;229mg/G/10G\033[0m jump",
+    "\033[38;5;229mSpace/f/B\033[0m page  \033[38;5;229mg/G/10G\033[0m jump",
     "\033[38;5;229mLeft/Right\033[0m x-scroll",
     "\033[38;5;229mw\033[0m wrap  \033[38;5;229me\033[0m edit",
     "\033[38;5;229m:\033[0m commands  \033[38;5;229ms\033[0m symbols",
@@ -32,7 +32,7 @@ HELP_PANEL_TEXT_LINES: tuple[str, ...] = (
 
 HELP_PANEL_TEXT_ONLY_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mKEYS\033[0m",
-    "\033[38;5;229mUp/Down\033[0m  \033[38;5;229md/u\033[0m  \033[38;5;229mf/B\033[0m  \033[38;5;229mg/G/10G\033[0m",
+    "\033[38;5;229mUp/Down\033[0m  \033[38;5;229md/u\033[0m  \033[38;5;229mSpace/f/B\033[0m  \033[38;5;229mg/G/10G\033[0m",
     "\033[38;5;229mLeft/Right\033[0m x-scroll  \033[38;5;229mw\033[0m wrap",
     "\033[38;5;229mh/j/k/l\033[0m  \033[38;5;229mEnter\033[0m  \033[38;5;229mShift+Left/Right\033[0m",
     "\033[38;5;229mCtrl+P\033[0m jump file  \033[38;5;229m/\033[0m search all files",
@@ -94,7 +94,7 @@ def render_help_page(width: int, height: int) -> None:
         "  click select + preview   double-click toggle dir/open file",
         "",
         "\033[1;38;5;81mSource pane\033[0m",
-        "  \033[38;5;229mUp/Down\033[0m line   \033[38;5;229md/u\033[0m half-page   \033[38;5;229mf/B\033[0m page   \033[38;5;229mg/G\033[0m top/bottom   \033[38;5;229m10G\033[0m goto",
+        "  \033[38;5;229mUp/Down\033[0m line   \033[38;5;229md/u\033[0m half-page   \033[38;5;229mSpace/f/B\033[0m page   \033[38;5;229mg/G\033[0m top/bottom   \033[38;5;229m10G\033[0m goto",
         "  \033[38;5;229mw\033[0m toggle wrap   \033[38;5;229mLeft/Right\033[0m horizontal scroll (wrap off)   \033[38;5;229me\033[0m edit in $EDITOR",
         "  mouse wheel scrolls source",
         "",
