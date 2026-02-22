@@ -1,24 +1,91 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
+from .gitignore import get_gitignore_matcher
 
-def collect_project_files(root: Path, show_hidden: bool) -> list[Path]:
-    root = root.resolve()
+_PROJECT_FILES_CACHE: dict[tuple[Path, bool, bool], list[Path]] = {}
+
+
+def clear_project_files_cache() -> None:
+    _PROJECT_FILES_CACHE.clear()
+
+
+def _collect_project_files_walk(root: Path, show_hidden: bool, skip_gitignored: bool) -> list[Path]:
     files: list[Path] = []
+    ignore_matcher = get_gitignore_matcher(root) if skip_gitignored else None
     for dirpath, dirnames, filenames in os.walk(root):
+        base = Path(dirpath).resolve()
         if not show_hidden:
             dirnames[:] = [name for name in dirnames if not name.startswith(".")]
             filenames = [name for name in filenames if not name.startswith(".")]
+        if ignore_matcher is not None:
+            dirnames[:] = [name for name in dirnames if not ignore_matcher.is_ignored(base / name)]
+            filenames = [name for name in filenames if not ignore_matcher.is_ignored(base / name)]
         dirnames.sort(key=str.lower)
         filenames.sort(key=str.lower)
-        base = Path(dirpath)
         for filename in filenames:
             path = (base / filename).resolve()
             if path.is_file():
                 files.append(path)
     return files
+
+
+def _collect_project_files_rg(root: Path, show_hidden: bool, skip_gitignored: bool) -> list[Path] | None:
+    if shutil.which("rg") is None:
+        return None
+
+    cmd = ["rg", "--files"]
+    if not skip_gitignored:
+        cmd.append("--no-ignore")
+    if show_hidden:
+        cmd.append("--hidden")
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=True,
+        )
+    except Exception:
+        return None
+
+    files: list[Path] = []
+    for raw in proc.stdout.splitlines():
+        if not raw:
+            continue
+        path = (root / raw).resolve()
+        try:
+            relative_parts = path.relative_to(root).parts
+        except ValueError:
+            continue
+        if not show_hidden and any(part.startswith(".") for part in relative_parts):
+            continue
+        if path.is_file():
+            files.append(path)
+    return files
+
+
+def collect_project_files(root: Path, show_hidden: bool, skip_gitignored: bool = False) -> list[Path]:
+    root = root.resolve()
+    cache_key = (root, show_hidden, skip_gitignored)
+    cached = _PROJECT_FILES_CACHE.get(cache_key)
+    if cached is not None:
+        return list(cached)
+
+    files = _collect_project_files_rg(root, show_hidden, skip_gitignored)
+    if files is None:
+        files = _collect_project_files_walk(root, show_hidden, skip_gitignored)
+
+    files = sorted(files, key=lambda p: to_project_relative(p, root).casefold())
+    _PROJECT_FILES_CACHE[cache_key] = files
+    return list(files)
 
 
 def to_project_relative(path: Path, root: Path) -> str:

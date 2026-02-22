@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from lazyviewer.fuzzy import (
+    clear_project_files_cache,
     collect_project_files,
     fuzzy_match_labels,
     fuzzy_match_paths,
@@ -14,6 +16,12 @@ from lazyviewer.fuzzy import (
 
 
 class FuzzyBehaviorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        clear_project_files_cache()
+
+    def tearDown(self) -> None:
+        clear_project_files_cache()
+
     def test_collect_project_files_hides_hidden_when_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -121,6 +129,42 @@ class FuzzyBehaviorTests(unittest.TestCase):
         idx, label, _score = matches[0]
         self.assertEqual(idx, 0)
         self.assertEqual(label, "BetaThing")
+
+    def test_collect_project_files_prefers_rg_and_uses_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "main.py").write_text("print('hi')", encoding="utf-8")
+            (root / "a.txt").write_text("a", encoding="utf-8")
+
+            cp = mock.Mock(stdout="src/main.py\na.txt\n")
+            with mock.patch("lazyviewer.fuzzy.shutil.which", return_value="/usr/bin/rg"), mock.patch(
+                "lazyviewer.fuzzy.subprocess.run",
+                return_value=cp,
+            ) as run_mock:
+                first = collect_project_files(root, show_hidden=False)
+                second = collect_project_files(root, show_hidden=False)
+
+            labels = [to_project_relative(path, root) for path in first]
+            self.assertEqual(labels, ["a.txt", "src/main.py"])
+            self.assertEqual([to_project_relative(path, root) for path in second], labels)
+            self.assertEqual(run_mock.call_count, 1)
+
+    def test_collect_project_files_falls_back_when_rg_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "main.py").write_text("print('hi')", encoding="utf-8")
+            (root / "a.txt").write_text("a", encoding="utf-8")
+
+            with mock.patch("lazyviewer.fuzzy.shutil.which", return_value="/usr/bin/rg"), mock.patch(
+                "lazyviewer.fuzzy.subprocess.run",
+                side_effect=RuntimeError("rg failed"),
+            ):
+                files = collect_project_files(root, show_hidden=False)
+
+            labels = [to_project_relative(path, root) for path in files]
+            self.assertEqual(labels, ["a.txt", "src/main.py"])
 
 
 if __name__ == "__main__":
