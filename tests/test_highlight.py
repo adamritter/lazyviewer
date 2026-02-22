@@ -1,12 +1,17 @@
-"""Targeted tests for terminal-text sanitization.
+"""Targeted tests for text sanitization and fallback highlighting.
 
 Ensures control bytes are escaped while standard whitespace is preserved.
-Prevents preview rendering from emitting unsafe terminal effects.
+Also protects extensionless/plaintext spacing in fallback colorization paths.
 """
 
+import re
 import unittest
+from pathlib import Path
+from unittest import mock
 
-from lazyviewer.highlight import sanitize_terminal_text
+from lazyviewer.highlight import colorize_source, sanitize_terminal_text
+
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 
 class HighlightSanitizationTests(unittest.TestCase):
@@ -17,6 +22,15 @@ class HighlightSanitizationTests(unittest.TestCase):
         self.assertEqual(sanitized, "a\tb\nc\rd\\x07e\\x1bf")
         self.assertNotIn("\x07", sanitized)
         self.assertNotIn("\x1b", sanitized)
+
+    def test_fallback_colorize_keeps_spacing_for_extensionless_text(self) -> None:
+        source = "Permission  is  hereby granted, free of charge:\n"
+
+        with mock.patch("lazyviewer.highlight.pygments_highlight", return_value=None):
+            rendered = colorize_source(source, Path("LICENSE"))
+
+        plain = ANSI_RE.sub("", rendered)
+        self.assertEqual(plain, source)
 
 
 if __name__ == "__main__":

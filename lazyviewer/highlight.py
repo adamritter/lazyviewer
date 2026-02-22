@@ -83,10 +83,42 @@ def fallback_highlight(source: str) -> str:
                     return Style.MAGENTA
             return ""
 
-        out = []
-        for tok_type, value, _, _, _ in tokenize.generate_tokens(io.StringIO(source).readline):
-            style = style_for_token(tok_type, value)
-            out.append(style + value + Style.RESET if style else value)
+        line_offsets = [0]
+        for line in source.splitlines(keepends=True):
+            line_offsets.append(line_offsets[-1] + len(line))
+
+        def pos_to_offset(position: tuple[int, int]) -> int:
+            line_no, col_no = position
+            if line_no <= 0:
+                return 0
+            if (line_no - 1) >= len(line_offsets):
+                return len(source)
+            line_start = line_offsets[line_no - 1]
+            return max(0, min(len(source), line_start + col_no))
+
+        out: list[str] = []
+        cursor = 0
+        for token in tokenize.generate_tokens(io.StringIO(source).readline):
+            tok_type = token.type
+            if tok_type == tokenize.ENDMARKER:
+                break
+
+            start_offset = pos_to_offset(token.start)
+            end_offset = pos_to_offset(token.end)
+
+            if start_offset > cursor:
+                out.append(source[cursor:start_offset])
+
+            value = source[start_offset:end_offset]
+            style = style_for_token(tok_type, token.string)
+            if style and value:
+                out.append(style + value + Style.RESET)
+            else:
+                out.append(value)
+            cursor = max(cursor, end_offset)
+
+        if cursor < len(source):
+            out.append(source[cursor:])
         return "".join(out)
     except Exception:
         return source
