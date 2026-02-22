@@ -138,7 +138,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     stdout_fd = sys.stdout.fileno()
     terminal = TerminalController(stdin_fd, stdout_fd)
     kitty_graphics_supported = terminal.supports_kitty_graphics()
-    kitty_image_visible = False
+    kitty_image_state: tuple[str, int, int, int, int] | None = None
     tree_filter_cursor_visible = True
     index_warmup_lock = threading.Lock()
     index_warmup_pending: tuple[Path, bool] | None = None
@@ -993,9 +993,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 preview_image_path = current_preview_image_path()
                 render_lines = [""] if preview_image_path is not None else state.lines
                 render_start = 0 if preview_image_path is not None else state.start
-                if kitty_image_visible:
-                    terminal.kitty_clear_images()
-                    kitty_image_visible = False
                 render_dual_page(
                     render_lines,
                     render_start,
@@ -1064,16 +1061,28 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                         else 0
                     ),
                 )
+                desired_image_state: tuple[str, int, int, int, int] | None = None
                 if preview_image_path is not None:
                     image_col, image_row, image_width, image_height = current_preview_image_geometry(term.columns)
-                    terminal.kitty_draw_png(
-                        preview_image_path,
-                        col=image_col,
-                        row=image_row,
-                        width_cells=image_width,
-                        height_cells=image_height,
+                    desired_image_state = (
+                        str(preview_image_path),
+                        image_col,
+                        image_row,
+                        image_width,
+                        image_height,
                     )
-                    kitty_image_visible = True
+                if desired_image_state != kitty_image_state:
+                    if kitty_image_state is not None:
+                        terminal.kitty_clear_images()
+                    if desired_image_state is not None and preview_image_path is not None:
+                        terminal.kitty_draw_png(
+                            preview_image_path,
+                            col=desired_image_state[1],
+                            row=desired_image_state[2],
+                            width_cells=desired_image_state[3],
+                            height_cells=desired_image_state[4],
+                        )
+                    kitty_image_state = desired_image_state
                 state.dirty = False
 
             key = read_key(stdin_fd, timeout_ms=120)
