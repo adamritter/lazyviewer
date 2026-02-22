@@ -35,6 +35,7 @@ from .render import help_panel_row_count, render_dual_page
 from .state import AppState
 from .symbols import collect_symbols
 from .terminal import TerminalController
+from .watch import build_git_watch_signature, build_tree_watch_signature, resolve_git_paths
 from .tree import (
     build_tree_entries,
     clamp_left_width,
@@ -60,6 +61,8 @@ CONTENT_SEARCH_MATCH_LIMIT_3CHAR = 2_000
 CONTENT_SEARCH_MATCH_LIMIT_DEFAULT = 4_000
 CONTENT_SEARCH_FILE_LIMIT = 800
 GIT_STATUS_REFRESH_SECONDS = 2.0
+TREE_WATCH_POLL_SECONDS = 0.5
+GIT_WATCH_POLL_SECONDS = 0.5
 
 
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
@@ -136,6 +139,12 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     index_warmup_lock = threading.Lock()
     index_warmup_pending: tuple[Path, bool] | None = None
     index_warmup_running = False
+    tree_watch_last_poll = 0.0
+    tree_watch_signature: str | None = None
+    git_watch_last_poll = 0.0
+    git_watch_signature: str | None = None
+    git_watch_repo_root: Path | None = None
+    git_watch_dir: Path | None = None
 
     def index_warmup_worker() -> None:
         nonlocal index_warmup_pending, index_warmup_running
@@ -219,6 +228,69 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state.git_status_last_refresh = time.monotonic()
         if state.git_status_overlay != previous:
             state.dirty = True
+
+    def reset_git_watch_context() -> None:
+        nonlocal git_watch_last_poll, git_watch_signature, git_watch_repo_root, git_watch_dir
+        git_watch_repo_root, git_watch_dir = resolve_git_paths(state.tree_root)
+        git_watch_last_poll = 0.0
+        git_watch_signature = None
+
+    def maybe_refresh_tree_watch() -> None:
+        nonlocal tree_watch_last_poll, tree_watch_signature
+        now = time.monotonic()
+        if (now - tree_watch_last_poll) < TREE_WATCH_POLL_SECONDS:
+            return
+        tree_watch_last_poll = now
+
+        signature = build_tree_watch_signature(
+            state.tree_root,
+            state.expanded,
+            state.show_hidden,
+        )
+        if tree_watch_signature is None:
+            tree_watch_signature = signature
+            return
+        if signature == tree_watch_signature:
+            return
+
+        tree_watch_signature = signature
+        preferred_path = (
+            state.tree_entries[state.selected_idx].path.resolve()
+            if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries)
+            else state.current_path.resolve()
+        )
+        previous_current_path = state.current_path.resolve()
+        rebuild_tree_entries(preferred_path=preferred_path)
+        if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
+            selected_target = state.tree_entries[state.selected_idx].path.resolve()
+        else:
+            selected_target = state.tree_root.resolve()
+
+        if selected_target == previous_current_path:
+            refresh_rendered_for_current_path(reset_scroll=False, reset_dir_budget=False)
+        else:
+            state.current_path = selected_target
+            refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
+        schedule_tree_filter_index_warmup()
+        refresh_git_status_overlay(force=True)
+        state.dirty = True
+
+    def maybe_refresh_git_watch() -> None:
+        nonlocal git_watch_last_poll, git_watch_signature
+        now = time.monotonic()
+        if (now - git_watch_last_poll) < GIT_WATCH_POLL_SECONDS:
+            return
+        git_watch_last_poll = now
+
+        signature = build_git_watch_signature(git_watch_dir)
+        if git_watch_signature is None:
+            git_watch_signature = signature
+            return
+        if signature == git_watch_signature:
+            return
+
+        git_watch_signature = signature
+        refresh_git_status_overlay(force=True)
 
     def refresh_rendered_for_current_path(
         reset_scroll: bool = True,
@@ -426,6 +498,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         return True
 
     def handle_tree_mouse_click(mouse_key: str) -> bool:
+        nonlocal tree_watch_signature
         if not mouse_key.startswith("MOUSE_LEFT_DOWN:"):
             return False
 
@@ -475,6 +548,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             else:
                 state.expanded.add(resolved)
             rebuild_tree_entries(preferred_path=resolved)
+            tree_watch_signature = None
             state.dirty = True
             return True
 
@@ -485,6 +559,25 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
     def first_tree_filter_result_index() -> int | None:
         return next_tree_filter_result_entry_index(-1, 1)
+
+    def jump_to_next_content_hit(direction: int) -> bool:
+        if direction == 0:
+            return False
+        if direction > 0:
+            target_idx = next_content_hit_entry_index(state.selected_idx, 1)
+            if target_idx is None:
+                target_idx = next_content_hit_entry_index(-1, 1)
+        else:
+            target_idx = next_content_hit_entry_index(state.selected_idx, -1)
+            if target_idx is None:
+                target_idx = next_content_hit_entry_index(len(state.tree_entries), -1)
+
+        if target_idx is None or target_idx == state.selected_idx:
+            return False
+
+        state.selected_idx = target_idx
+        preview_selected_entry()
+        return True
 
     def rebuild_tree_entries(
         preferred_path: Path | None = None,
@@ -628,7 +721,11 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
     def activate_tree_filter_selection() -> None:
         if not state.tree_entries:
-            close_tree_filter(clear_query=True)
+            if state.tree_filter_mode == "content":
+                state.tree_filter_editing = False
+                state.dirty = True
+            else:
+                close_tree_filter(clear_query=True)
             return
 
         entry = state.tree_entries[state.selected_idx]
@@ -644,6 +741,13 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
         selected_path = entry.path.resolve()
         selected_line = entry.line if entry.kind == "search_hit" else None
+        if state.tree_filter_mode == "content":
+            # Keep content-search mode active after Enter/double-click; Esc exits.
+            state.tree_filter_editing = False
+            preview_selected_entry(force=True)
+            state.dirty = True
+            return
+
         close_tree_filter(clear_query=True)
         jump_to_path(selected_path)
         if selected_line is not None:
@@ -757,6 +861,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             jump_to_line(selected_line)
 
     def reveal_path_in_tree(target: Path) -> None:
+        nonlocal tree_watch_signature
         target = target.resolve()
         if target != state.tree_root:
             parent = target.parent
@@ -770,6 +875,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 parent = resolved.parent
         state.expanded.add(state.tree_root)
         rebuild_tree_entries(preferred_path=target, center_selection=True)
+        tree_watch_signature = None
 
     def jump_to_path(target: Path) -> None:
         target = target.resolve()
@@ -785,6 +891,15 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state.text_x = 0
 
     schedule_tree_filter_index_warmup()
+    tree_watch_signature = build_tree_watch_signature(
+        state.tree_root,
+        state.expanded,
+        state.show_hidden,
+    )
+    tree_watch_last_poll = time.monotonic()
+    reset_git_watch_context()
+    git_watch_signature = build_git_watch_signature(git_watch_dir)
+    git_watch_last_poll = time.monotonic()
     refresh_git_status_overlay(force=True)
 
     with terminal.raw_mode():
@@ -839,6 +954,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 tree_filter_cursor_visible = True
                 state.dirty = True
 
+            maybe_refresh_tree_watch()
+            maybe_refresh_git_watch()
             refresh_git_status_overlay()
 
             if state.dirty:
@@ -884,6 +1001,30 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                         state.tree_filter_query
                         if state.tree_filter_active and state.tree_filter_mode == "content"
                         else ""
+                    ),
+                    text_search_current_line=(
+                        state.tree_entries[state.selected_idx].line or 0
+                        if (
+                            state.tree_filter_active
+                            and state.tree_filter_mode == "content"
+                            and state.tree_filter_query
+                            and 0 <= state.selected_idx < len(state.tree_entries)
+                            and state.tree_entries[state.selected_idx].kind == "search_hit"
+                            and state.tree_entries[state.selected_idx].line is not None
+                        )
+                        else 0
+                    ),
+                    text_search_current_column=(
+                        state.tree_entries[state.selected_idx].column or 0
+                        if (
+                            state.tree_filter_active
+                            and state.tree_filter_mode == "content"
+                            and state.tree_filter_query
+                            and 0 <= state.selected_idx < len(state.tree_entries)
+                            and state.tree_entries[state.selected_idx].kind == "search_hit"
+                            and state.tree_entries[state.selected_idx].column is not None
+                        )
+                        else 0
                     ),
                 )
                 state.dirty = False
@@ -1121,6 +1262,15 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 if key == "ESC":
                     close_tree_filter(clear_query=True)
                     continue
+                if state.tree_filter_mode == "content":
+                    if key == "n":
+                        if jump_to_next_content_hit(1):
+                            state.dirty = True
+                        continue
+                    if key == "N":
+                        if jump_to_next_content_hit(-1):
+                            state.dirty = True
+                        continue
 
             if key.lower() == "s" and not state.picker_active:
                 state.count_buffer = ""
@@ -1209,6 +1359,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     rebuild_tree_entries(preferred_path=old_root, center_selection=True)
                     preview_selected_entry(force=True)
                     schedule_tree_filter_index_warmup()
+                    tree_watch_signature = None
+                    reset_git_watch_context()
                     refresh_git_status_overlay(force=True)
                     state.dirty = True
                 continue
@@ -1232,6 +1384,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     rebuild_tree_entries(preferred_path=selected_target, center_selection=True)
                     preview_selected_entry(force=True)
                     schedule_tree_filter_index_warmup()
+                    tree_watch_signature = None
+                    reset_git_watch_context()
                     refresh_git_status_overlay(force=True)
                     state.dirty = True
                 continue
@@ -1244,6 +1398,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 rebuild_tree_entries(preferred_path=selected_path)
                 preview_selected_entry(force=True)
                 schedule_tree_filter_index_warmup()
+                tree_watch_signature = None
                 state.dirty = True
                 continue
             if key.lower() == "t":
@@ -1308,6 +1463,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     if resolved not in state.expanded:
                         state.expanded.add(resolved)
                         rebuild_tree_entries(preferred_path=resolved)
+                        tree_watch_signature = None
                         preview_selected_entry()
                         state.dirty = True
                     else:
@@ -1330,6 +1486,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 ):
                     state.expanded.remove(entry.path.resolve())
                     rebuild_tree_entries(preferred_path=entry.path.resolve())
+                    tree_watch_signature = None
                     preview_selected_entry()
                     state.dirty = True
                 elif entry.path.resolve() != state.tree_root:
@@ -1351,6 +1508,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     else:
                         state.expanded.add(resolved)
                     rebuild_tree_entries(preferred_path=resolved)
+                    tree_watch_signature = None
                     preview_selected_entry()
                     state.dirty = True
                     continue
