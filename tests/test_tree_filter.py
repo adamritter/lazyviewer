@@ -373,7 +373,7 @@ class TreeFilterBehaviorTests(unittest.TestCase):
         self.assertEqual(find_content_hit_index(entries, file_path, preferred_line=100, preferred_column=100), 2)
         self.assertEqual(find_content_hit_index(entries, root / "missing.py"), None)
 
-    def test_format_tree_entry_search_hit_keeps_indentation_and_hides_line_column(self) -> None:
+    def test_format_tree_entry_search_hit_indents_marker_only_and_hides_line_column(self) -> None:
         root = Path("/tmp/project").resolve()
         file_path = root / "src" / "main.py"
         entry = TreeEntry(
@@ -394,7 +394,8 @@ class TreeFilterBehaviorTests(unittest.TestCase):
         )
 
         self.assertTrue(rendered.startswith("      \033[38;5;44m· "))
-        self.assertIn("      hello world", rendered)
+        self.assertIn("hello world", rendered)
+        self.assertNotIn("      hello world", rendered)
         self.assertNotIn("L9:3", rendered)
 
     def test_format_tree_entry_highlights_search_hit_substring(self) -> None:

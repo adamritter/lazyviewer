@@ -341,7 +341,7 @@ def format_tree_entry(
         marker_color = "\033[38;5;44m"
         text_color = "\033[38;5;250m"
         reset = "\033[0m"
-        content = _highlight_substring(entry.display or "", search_query)
+        content = _highlight_substring((entry.display or "").lstrip(), search_query)
         return f"{indent}{marker_color}· {reset}{text_color}{content}{reset}"
 
     indent = "  " * entry.depth
