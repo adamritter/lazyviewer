@@ -43,6 +43,7 @@ GIT_STATUS_REFRESH_SECONDS = 2.0
 TREE_WATCH_POLL_SECONDS = 0.5
 GIT_WATCH_POLL_SECONDS = 0.5
 GIT_FEATURES_DEFAULT_ENABLED = True
+SKIP_GITIGNORED_ENTRIES = True
 
 COMMAND_PALETTE_ITEMS: tuple[tuple[str, str], ...] = (
     ("filter_files", "Filter files (Ctrl+P)"),
@@ -114,7 +115,12 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     expanded: set[Path] = {tree_root.resolve()}
     show_hidden = load_show_hidden()
 
-    tree_entries = build_tree_entries(tree_root, expanded, show_hidden, skip_gitignored=show_hidden)
+    tree_entries = build_tree_entries(
+        tree_root,
+        expanded,
+        show_hidden,
+        skip_gitignored=SKIP_GITIGNORED_ENTRIES,
+    )
     selected_path = current_path if current_path.exists() else tree_root
     selected_idx = 0
     for idx, entry in enumerate(tree_entries):
@@ -137,7 +143,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         style,
         no_color,
         dir_max_entries=DIR_PREVIEW_INITIAL_MAX_ENTRIES,
-        dir_skip_gitignored=show_hidden,
+        dir_skip_gitignored=SKIP_GITIGNORED_ENTRIES,
         prefer_git_diff=GIT_FEATURES_DEFAULT_ENABLED,
     )
     rendered = initial_render.text
@@ -205,7 +211,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 collect_project_file_labels(
                     root,
                     show_hidden_value,
-                    skip_gitignored=show_hidden_value,
+                    skip_gitignored=SKIP_GITIGNORED_ENTRIES,
                 )
             except Exception:
                 # Warming is best-effort; foreground path still loads synchronously if needed.
@@ -435,7 +441,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             style,
             no_color,
             dir_max_entries=dir_limit,
-            dir_skip_gitignored=state.show_hidden,
+            dir_skip_gitignored=SKIP_GITIGNORED_ENTRIES,
             prefer_git_diff=prefer_git_diff,
         )
         state.rendered = rendered_for_path.text

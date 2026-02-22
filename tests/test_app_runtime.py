@@ -186,6 +186,67 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertIn("- b = 2", snapshots["before_commit"])
             self.assertEqual(snapshots["after_commit"], "a = 1\nb = 22\n")
 
+    @unittest.skipIf(shutil.which("git") is None, "git is required for hidden-toggle integration test")
+    def test_hidden_toggle_does_not_flip_gitignore_filtering(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "tests@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Tests"], cwd=root, check=True)
+
+            (root / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
+            pycache = root / "__pycache__"
+            pycache.mkdir()
+            (pycache / "demo.cpython-313.pyc").write_bytes(b"pyc")
+            (root / "visible.txt").write_text("ok\n", encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=root, check=True)
+
+            snapshots: dict[str, set[str]] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_normal_key = kwargs["handle_normal_key"]
+
+                def current_labels() -> set[str]:
+                    labels: set[str] = set()
+                    for entry in state.tree_entries:
+                        resolved = entry.path.resolve()
+                        if resolved == root:
+                            labels.add(".")
+                        else:
+                            labels.add(resolved.relative_to(root).as_posix())
+                    return labels
+
+                snapshots["before"] = current_labels()
+                handle_normal_key(".", 120)
+                snapshots["after"] = current_labels()
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch("lazyviewer.app_runtime.sys.stdin.fileno", return_value=0), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch("lazyviewer.app_runtime.load_show_hidden", return_value=False), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            self.assertNotIn(".git", snapshots["before"])
+            self.assertNotIn(".gitignore", snapshots["before"])
+            self.assertIn(".git", snapshots["after"])
+            self.assertIn(".gitignore", snapshots["after"])
+            self.assertEqual("__pycache__" in snapshots["before"], "__pycache__" in snapshots["after"])
+
 
 if __name__ == "__main__":
     unittest.main()

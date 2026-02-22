@@ -25,6 +25,7 @@ CONTENT_SEARCH_MATCH_LIMIT_2CHAR = 1_000
 CONTENT_SEARCH_MATCH_LIMIT_3CHAR = 2_000
 CONTENT_SEARCH_MATCH_LIMIT_DEFAULT = 4_000
 CONTENT_SEARCH_FILE_LIMIT = 800
+SKIP_GITIGNORED_ENTRIES = True
 
 
 class TreeFilterOps:
@@ -62,7 +63,7 @@ class TreeFilterOps:
         self.state.picker_file_labels = collect_project_file_labels(
             root,
             self.state.show_hidden,
-            skip_gitignored=self.state.show_hidden,
+            skip_gitignored=SKIP_GITIGNORED_ENTRIES,
         )
         self.state.picker_file_labels_folded = []
         self.state.picker_files_root = root
@@ -219,7 +220,7 @@ class TreeFilterOps:
                     self.state.tree_root,
                     self.state.tree_filter_query,
                     self.state.show_hidden,
-                    skip_gitignored=self.state.show_hidden,
+                    skip_gitignored=SKIP_GITIGNORED_ENTRIES,
                     max_matches=max(1, match_limit),
                     max_files=CONTENT_SEARCH_FILE_LIMIT,
                 )
@@ -254,7 +255,7 @@ class TreeFilterOps:
                     self.state.expanded,
                     self.state.show_hidden,
                     matched_paths,
-                    skip_gitignored=self.state.show_hidden,
+                    skip_gitignored=SKIP_GITIGNORED_ENTRIES,
                 )
         else:
             self.state.tree_filter_match_count = 0
@@ -264,7 +265,7 @@ class TreeFilterOps:
                 self.state.tree_root,
                 self.state.expanded,
                 self.state.show_hidden,
-                skip_gitignored=self.state.show_hidden,
+                skip_gitignored=SKIP_GITIGNORED_ENTRIES,
             )
 
         if force_first_file:
