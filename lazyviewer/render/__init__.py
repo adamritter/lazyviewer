@@ -7,9 +7,7 @@ from pathlib import Path
 
 from ..ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line, slice_ansi_line
 from .help import (
-    HELP_PANEL_TEXT_LINES,
-    HELP_PANEL_TEXT_ONLY_LINES,
-    HELP_PANEL_TREE_LINES,
+    help_panel_lines,
     help_panel_row_count,
     render_help_page,
 )
@@ -37,6 +35,7 @@ class RenderContext:
     show_hidden: bool
     show_help: bool = False
     tree_filter_active: bool = False
+    tree_filter_mode: str = "files"
     tree_filter_query: str = ""
     tree_filter_editing: bool = False
     tree_filter_cursor_visible: bool = False
@@ -80,6 +79,7 @@ def render_dual_page_context(context: RenderContext) -> None:
         context.show_hidden,
         show_help=context.show_help,
         tree_filter_active=context.tree_filter_active,
+        tree_filter_mode=context.tree_filter_mode,
         tree_filter_query=context.tree_filter_query,
         tree_filter_editing=context.tree_filter_editing,
         tree_filter_cursor_visible=context.tree_filter_cursor_visible,
@@ -320,6 +320,7 @@ def render_dual_page(
     show_hidden: bool,
     show_help: bool = False,
     tree_filter_active: bool = False,
+    tree_filter_mode: str = "files",
     tree_filter_query: str = "",
     tree_filter_editing: bool = False,
     tree_filter_cursor_visible: bool = False,
@@ -345,7 +346,18 @@ def render_dual_page(
 ) -> None:
     out: list[str] = []
     out.append("\033[H\033[J")
-    help_rows = help_panel_row_count(max_lines, show_help)
+    tree_help_lines, text_help_lines, text_only_help_lines = help_panel_lines(
+        tree_filter_active=tree_filter_active,
+        tree_filter_mode=tree_filter_mode,
+        tree_filter_editing=tree_filter_editing,
+    )
+    help_rows = help_panel_row_count(
+        max_lines,
+        show_help,
+        tree_filter_active=tree_filter_active,
+        tree_filter_mode=tree_filter_mode,
+        tree_filter_editing=tree_filter_editing,
+    )
     content_rows = max(1, max_lines - help_rows)
     has_current_text_hit = text_search_current_line > 0 and text_search_current_column > 0
 
@@ -378,7 +390,7 @@ def render_dual_page(
                     out.append("\033[0m")
             out.append("\r\n")
         for row in range(help_rows):
-            help_text = clip_ansi_line(_help_line(HELP_PANEL_TEXT_ONLY_LINES, row), line_width)
+            help_text = clip_ansi_line(_help_line(text_only_help_lines, row), line_width)
             out.append(help_text)
             if "\033" in help_text:
                 out.append("\033[0m")
@@ -509,7 +521,7 @@ def render_dual_page(
         out.append("\r\n")
 
     for row in range(help_rows):
-        left_help = clip_ansi_line(_help_line(HELP_PANEL_TREE_LINES, row), left_width)
+        left_help = clip_ansi_line(_help_line(tree_help_lines, row), left_width)
         out.append(left_help)
         left_plain = ANSI_ESCAPE_RE.sub("", left_help)
         left_len = sum(char_display_width(ch, 0) for ch in left_plain)
@@ -517,7 +529,7 @@ def render_dual_page(
             out.append(" " * (left_width - left_len))
         out.append("\033[2m│\033[0m")
 
-        right_help = clip_ansi_line(_help_line(HELP_PANEL_TEXT_LINES, row), right_width)
+        right_help = clip_ansi_line(_help_line(text_help_lines, row), right_width)
         out.append(right_help)
         if "\033" in right_help:
             out.append("\033[0m")

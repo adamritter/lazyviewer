@@ -84,6 +84,77 @@ class RenderStatusTests(unittest.TestCase):
         self.assertIn("Ctrl+P", rendered)
         self.assertIn("\033[38;5;229mCtrl+P\033[0m", rendered)
 
+    def test_bottom_help_panel_uses_left_only_query_context_while_editing(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            render_dual_page(
+                text_lines=["line 1", "line 2", "line 3", "line 4"],
+                text_start=0,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=12,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=120,
+                left_width=40,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=True,
+                show_hidden=False,
+                show_help=True,
+                tree_filter_active=True,
+                tree_filter_mode="content",
+                tree_filter_editing=True,
+            )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertIn("SEARCH QUERY", rendered)
+        self.assertIn("Ctrl+J/K", rendered)
+        self.assertNotIn("SEARCH HITS + TEXT", rendered)
+
+    def test_bottom_help_panel_uses_search_hits_context_after_enter(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            render_dual_page(
+                text_lines=["line 1", "line 2", "line 3", "line 4"],
+                text_start=0,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=12,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=120,
+                left_width=40,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=True,
+                show_hidden=False,
+                show_help=True,
+                tree_filter_active=True,
+                tree_filter_mode="content",
+                tree_filter_editing=False,
+            )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertIn("SEARCH HITS + TEXT", rendered)
+        self.assertIn("Ctrl+P", rendered)
+        self.assertIn("n/N", rendered)
+        self.assertNotIn("SEARCH QUERY", rendered)
+
     def test_bottom_help_panel_handles_mismatched_line_counts(self) -> None:
         writes: list[bytes] = []
 
@@ -96,9 +167,6 @@ class RenderStatusTests(unittest.TestCase):
         text_only_help = ("TEXT-ONLY",)
 
         with (
-            mock.patch("lazyviewer.render.HELP_PANEL_TREE_LINES", tree_help),
-            mock.patch("lazyviewer.render.HELP_PANEL_TEXT_LINES", text_help),
-            mock.patch("lazyviewer.render.HELP_PANEL_TEXT_ONLY_LINES", text_only_help),
             mock.patch("lazyviewer.render.help.HELP_PANEL_TREE_LINES", tree_help),
             mock.patch("lazyviewer.render.help.HELP_PANEL_TEXT_LINES", text_help),
             mock.patch("lazyviewer.render.help.HELP_PANEL_TEXT_ONLY_LINES", text_only_help),

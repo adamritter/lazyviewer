@@ -43,15 +43,94 @@ HELP_PANEL_TEXT_ONLY_LINES: tuple[str, ...] = (
 )
 
 
-def help_panel_row_count(max_lines: int, show_help: bool) -> int:
+HELP_PANEL_SEARCH_EDIT_TREE_LINES: tuple[str, ...] = (
+    "\033[1;38;5;81mSEARCH QUERY\033[0m",
+    "\033[38;5;229mType/Backspace\033[0m edit query",
+    "\033[38;5;229mCtrl+U\033[0m clear query",
+    "\033[38;5;229mUp/Down\033[0m or \033[38;5;229mCtrl+J/K\033[0m move hit",
+    "\033[38;5;229mEnter\033[0m open selected hit",
+    "\033[38;5;229mTab\033[0m switch to hit mode",
+    "\033[38;5;229mEsc\033[0m close search",
+    "\033[38;5;229mCtrl+?\033[0m help",
+)
+
+HELP_PANEL_SEARCH_HITS_TREE_LINES: tuple[str, ...] = (
+    "\033[1;38;5;81mSEARCH HITS\033[0m",
+    "\033[38;5;229mn/N\033[0m next/prev hit",
+    "\033[38;5;229mj/k\033[0m move hits (tree shown)",
+    "\033[38;5;229mEnter\033[0m open selected hit",
+    "\033[38;5;229m/\033[0m or \033[38;5;229mTab\033[0m edit query",
+    "\033[38;5;229mEsc\033[0m close search",
+    "\033[38;5;229mCtrl+P\033[0m switch to file filter",
+    "\033[38;5;229mAlt+Left/Right\033[0m history",
+)
+
+HELP_PANEL_SEARCH_HITS_TEXT_LINES: tuple[str, ...] = (
+    "\033[1;38;5;81mSEARCH HITS + TEXT\033[0m",
+    "\033[38;5;229mn/N\033[0m next/prev hit  \033[38;5;229mj/k\033[0m hit nav (tree)",
+    "\033[38;5;229mSpace/f/B\033[0m page  \033[38;5;229mg/G/10G\033[0m jump",
+    "\033[38;5;229mUp/Down\033[0m line  \033[38;5;229md/u\033[0m half",
+    "\033[38;5;229mLeft/Right\033[0m x-scroll  \033[38;5;229mw\033[0m wrap",
+    "\033[38;5;229m/\033[0m or \033[38;5;229mTab\033[0m edit query  \033[38;5;229mEnter\033[0m open hit",
+    "\033[38;5;229mEsc\033[0m close search  \033[38;5;229mCtrl+P\033[0m file filter",
+    "\033[38;5;229m.\033[0m hidden+ignored  \033[38;5;229mAlt+Left/Right\033[0m history",
+    "\033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
+)
+
+HELP_PANEL_SEARCH_HITS_TEXT_ONLY_LINES: tuple[str, ...] = (
+    "\033[1;38;5;81mSEARCH HITS\033[0m",
+    "\033[38;5;229mn/N\033[0m next/prev  \033[38;5;229mj/k\033[0m hits (tree)",
+    "\033[38;5;229mSpace/f/B\033[0m  \033[38;5;229md/u\033[0m  \033[38;5;229mg/G/10G\033[0m",
+    "\033[38;5;229mUp/Down\033[0m line  \033[38;5;229mLeft/Right\033[0m x-scroll",
+    "\033[38;5;229m/\033[0m/\033[38;5;229mTab\033[0m edit query  \033[38;5;229mEnter\033[0m open hit",
+    "\033[38;5;229mEsc\033[0m close search  \033[38;5;229mCtrl+P\033[0m files",
+    "\033[38;5;229m.\033[0m hidden+ignored  \033[38;5;229mAlt+Left/Right\033[0m history",
+    "\033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
+)
+
+
+def help_panel_lines(
+    *,
+    tree_filter_active: bool = False,
+    tree_filter_mode: str = "files",
+    tree_filter_editing: bool = False,
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    if tree_filter_active and tree_filter_mode == "content":
+        if tree_filter_editing:
+            return (
+                HELP_PANEL_SEARCH_EDIT_TREE_LINES,
+                (),
+                HELP_PANEL_SEARCH_HITS_TEXT_ONLY_LINES,
+            )
+        return (
+            HELP_PANEL_SEARCH_HITS_TREE_LINES,
+            HELP_PANEL_SEARCH_HITS_TEXT_LINES,
+            HELP_PANEL_SEARCH_HITS_TEXT_ONLY_LINES,
+        )
+    return HELP_PANEL_TREE_LINES, HELP_PANEL_TEXT_LINES, HELP_PANEL_TEXT_ONLY_LINES
+
+
+def help_panel_row_count(
+    max_lines: int,
+    show_help: bool,
+    *,
+    tree_filter_active: bool = False,
+    tree_filter_mode: str = "files",
+    tree_filter_editing: bool = False,
+) -> int:
     if not show_help:
         return 0
     if max_lines <= 1:
         return 0
+    tree_help_lines, text_help_lines, text_only_help_lines = help_panel_lines(
+        tree_filter_active=tree_filter_active,
+        tree_filter_mode=tree_filter_mode,
+        tree_filter_editing=tree_filter_editing,
+    )
     required_rows = max(
-        len(HELP_PANEL_TREE_LINES),
-        len(HELP_PANEL_TEXT_LINES),
-        len(HELP_PANEL_TEXT_ONLY_LINES),
+        len(tree_help_lines),
+        len(text_help_lines),
+        len(text_only_help_lines),
     )
     return min(required_rows, max_lines - 1)
 

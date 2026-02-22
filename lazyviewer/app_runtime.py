@@ -253,7 +253,13 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         return max(1, columns - 1)
 
     def visible_content_rows() -> int:
-        help_rows = help_panel_row_count(state.usable, state.show_help)
+        help_rows = help_panel_row_count(
+            state.usable,
+            state.show_help,
+            tree_filter_active=state.tree_filter_active,
+            tree_filter_mode=state.tree_filter_mode,
+            tree_filter_editing=state.tree_filter_editing,
+        )
         return max(1, state.usable - help_rows)
 
     def rebuild_screen_lines(

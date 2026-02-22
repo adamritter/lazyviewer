@@ -150,6 +150,7 @@ def run_main_loop(
                     show_hidden=state.show_hidden,
                     show_help=state.show_help,
                     tree_filter_active=state.tree_filter_active,
+                    tree_filter_mode=state.tree_filter_mode,
                     tree_filter_query=state.tree_filter_query,
                     tree_filter_editing=state.tree_filter_editing,
                     tree_filter_cursor_visible=tree_filter_cursor_visible,
