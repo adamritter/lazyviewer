@@ -1,3 +1,9 @@
+"""Targeted tests for terminal-text sanitization.
+
+Ensures control bytes are escaped while standard whitespace is preserved.
+Prevents preview rendering from emitting unsafe terminal effects.
+"""
+
 import unittest
 
 from lazyviewer.highlight import sanitize_terminal_text

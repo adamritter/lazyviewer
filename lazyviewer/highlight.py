@@ -1,3 +1,9 @@
+"""Source loading, sanitization, and syntax highlighting.
+
+Tries Pygments first, then a lightweight tokenizer fallback.
+Also neutralizes terminal control bytes to avoid unsafe preview side effects.
+"""
+
 from __future__ import annotations
 
 import re

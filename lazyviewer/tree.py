@@ -1,3 +1,9 @@
+"""Tree-model creation, filtering, navigation, and row formatting.
+
+Defines ``TreeEntry`` and helpers for directory/file projection views.
+Also formats rows with search-hit text and git status badges.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable

@@ -1,3 +1,9 @@
+"""Navigation primitives: jump locations, history, and mark-key validation.
+
+This module intentionally has no UI concerns.
+It provides normalized location objects used across runtime handlers.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

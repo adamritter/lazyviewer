@@ -1,3 +1,9 @@
+"""Navigation and picker operations bound to ``AppState``.
+
+Encapsulates command picker, symbol picker, history jumps, and mark handling.
+Runtime wiring injects callbacks so these ops stay testable and decoupled.
+"""
+
 from __future__ import annotations
 
 import shutil

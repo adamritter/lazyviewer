@@ -1,3 +1,9 @@
+"""Runtime composition layer for lazyviewer.
+
+Builds initial state, wires callbacks across runtime modules, and starts the loop.
+This is the highest-level module where rendering, navigation, search, and git meet.
+"""
+
 from __future__ import annotations
 
 import os
@@ -192,6 +198,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         dir_preview_path=current_path if initial_render.is_directory else None,
         preview_image_path=initial_render.image_path,
         preview_image_format=initial_render.image_format,
+        preview_is_git_diff=initial_render.is_git_diff_preview,
         git_features_enabled=GIT_FEATURES_DEFAULT_ENABLED,
         named_marks=named_marks,
     )
@@ -536,6 +543,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state.dir_preview_path = resolved_target if rendered_for_path.is_directory else None
         state.preview_image_path = rendered_for_path.image_path
         state.preview_image_format = rendered_for_path.image_format
+        state.preview_is_git_diff = rendered_for_path.is_git_diff_preview
         if reset_scroll:
             state.text_x = 0
 

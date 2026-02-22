@@ -1,3 +1,9 @@
+"""Symbol extraction tests with Tree-sitter fakes.
+
+Covers parser loading failures, unsupported extensions, and symbol ordering.
+Also verifies max-symbol truncation behavior.
+"""
+
 from __future__ import annotations
 
 import tempfile
@@ -69,11 +75,30 @@ class SymbolsBehaviorTests(unittest.TestCase):
     def test_collect_symbols_surfaces_parser_load_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sample.py"
-            path.write_text("def f():\n    return 1\n", encoding="utf-8")
+            path.write_text("x = 1\ny = 2\n", encoding="utf-8")
             with mock.patch("lazyviewer.symbols._load_parser", return_value=(None, "boom")):
                 out, error = symbols.collect_symbols(path)
         self.assertEqual(out, [])
         self.assertEqual(error, "boom")
+
+    def test_collect_symbols_falls_back_when_parser_load_is_incompatible(self) -> None:
+        source = (
+            "class Demo:\n"
+            "    pass\n"
+            "\n"
+            "def run():\n"
+            "    return 1\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.py"
+            path.write_text(source, encoding="utf-8")
+            parser_error = "Failed to load Tree-sitter parser for python: __init__() takes exactly 1 argument (2 given)"
+            with mock.patch("lazyviewer.symbols._load_parser", return_value=(None, parser_error)):
+                out, error = symbols.collect_symbols(path)
+
+        self.assertIsNone(error)
+        self.assertEqual([entry.kind for entry in out], ["class", "fn"])
+        self.assertEqual([entry.name for entry in out], ["Demo", "run"])
 
     def test_collect_symbols_extracts_and_sorts_symbols(self) -> None:
         source = (
@@ -249,6 +274,43 @@ class SymbolsBehaviorTests(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(len(out), 2)
         self.assertEqual([entry.name for entry in out], ["import os", "A"])
+
+    def test_collect_symbols_falls_back_to_regex_when_parser_package_missing(self) -> None:
+        source = (
+            "class Demo:\n"
+            "    pass\n"
+            "\n"
+            "def run():\n"
+            "    return 1\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.py"
+            path.write_text(source, encoding="utf-8")
+            with mock.patch("lazyviewer.symbols._load_parser", return_value=(None, symbols.MISSING_PARSER_ERROR)):
+                out, error = symbols.collect_symbols(path)
+
+        self.assertIsNone(error)
+        self.assertEqual([entry.kind for entry in out], ["class", "fn"])
+        self.assertEqual([entry.name for entry in out], ["Demo", "run"])
+
+    def test_collect_sticky_symbol_headers_returns_recent_hidden_headers(self) -> None:
+        source = (
+            "class Box {\n"
+            "  constructor() {}\n"
+            "}\n"
+            "\n"
+            "function boot() {\n"
+            "  return 2;\n"
+            "}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.js"
+            path.write_text(source, encoding="utf-8")
+            symbols.clear_symbol_context_cache()
+            with mock.patch("lazyviewer.symbols._load_parser", return_value=(None, symbols.MISSING_PARSER_ERROR)):
+                headers = symbols.collect_sticky_symbol_headers(path, visible_start_line=6, max_headers=2)
+
+        self.assertEqual(headers, ["class Box", "fn boot"])
 
 
 if __name__ == "__main__":

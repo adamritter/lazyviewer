@@ -1,3 +1,9 @@
+"""Search package exports and compatibility aliases.
+
+Combines content-search and fuzzy-index functionality in one import surface.
+Also re-exports modules for existing tests that patch ``shutil``/``subprocess``.
+"""
+
 from __future__ import annotations
 
 from . import content as _content

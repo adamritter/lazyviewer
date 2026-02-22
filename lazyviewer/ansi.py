@@ -1,3 +1,9 @@
+"""ANSI-aware text measurement and line shaping utilities.
+
+Provides clipping, slicing, and wrapping that preserve escape sequences.
+These helpers keep rendering aligned when color codes and wide chars are present.
+"""
+
 from __future__ import annotations
 
 import re

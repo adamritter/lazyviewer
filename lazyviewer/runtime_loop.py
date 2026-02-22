@@ -1,3 +1,9 @@
+"""Main interactive event loop for the terminal UI.
+
+Coordinates periodic refreshes, rendering, and all input dispatch.
+This loop is intentionally wiring-heavy; feature logic lives in callbacks.
+"""
+
 from __future__ import annotations
 
 import shutil
@@ -203,6 +209,7 @@ def run_main_loop(
                         )
                         else 0
                     ),
+                    preview_is_git_diff=state.preview_is_git_diff,
                 )
                 render_dual_page_context(render_context)
                 desired_image_state: tuple[str, int, int, int, int] | None = None

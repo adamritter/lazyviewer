@@ -1,3 +1,9 @@
+"""Command-line front door for lazyviewer.
+
+Parses CLI options, resolves the target path, and loads source text.
+Then dispatches into the interactive pager runtime.
+"""
+
 from __future__ import annotations
 
 import argparse

@@ -1,3 +1,9 @@
+"""Unit tests for key-handler dispatch behavior.
+
+Verifies mode-aware handling for git/search/help/editor actions.
+Keeps keybinding regressions isolated from full runtime integration tests.
+"""
+
 from __future__ import annotations
 
 import unittest

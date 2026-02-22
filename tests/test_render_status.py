@@ -1,6 +1,13 @@
+"""Rendering/status-line regression tests.
+
+Validates help-panel row allocation and bottom status composition.
+Also checks search-mode help context and modal-help rendering behavior.
+"""
+
 from __future__ import annotations
 
 import re
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -708,6 +715,102 @@ class RenderStatusTests(unittest.TestCase):
         self.assertIn("Ctrl+D", rendered)
         self.assertIn("tree root -> parent directory", rendered)
         self.assertIn("tree root -> selected directory", rendered)
+
+    def test_render_shows_sticky_symbol_headers_with_separator_lines(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        source = (
+            "class Demo:\n"
+            "    def run(self):\n"
+            "        x = 1\n"
+            "        y = 2\n"
+            "        return x + y\n"
+        )
+        text_lines = source.splitlines()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "demo.py"
+            path.write_text(source, encoding="utf-8")
+            with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+                render_dual_page(
+                    text_lines=text_lines,
+                    text_start=3,
+                    tree_entries=[],
+                    tree_start=0,
+                    tree_selected=0,
+                    max_lines=5,
+                    current_path=path,
+                    tree_root=path.parent,
+                    expanded=set(),
+                    width=100,
+                    left_width=30,
+                    text_x=0,
+                    wrap_text=False,
+                    browser_visible=False,
+                    show_hidden=False,
+                )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertIn("class Demo", rendered)
+        self.assertIn("fn run", rendered)
+        self.assertIn("─", rendered)
+        self.assertIn("y = 2", rendered)
+
+    def test_render_sticky_headers_work_for_javascript_without_tree_sitter(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        source = (
+            "class Box {\n"
+            "  constructor() {}\n"
+            "}\n"
+            "\n"
+            "function boot() {\n"
+            "  const value = 3;\n"
+            "  return value;\n"
+            "}\n"
+        )
+        text_lines = source.splitlines()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.js"
+            path.write_text(source, encoding="utf-8")
+            with (
+                mock.patch(
+                    "lazyviewer.symbols._load_parser",
+                    return_value=(None, "Tree-sitter parser package not found. Install tree-sitter-languages."),
+                ),
+                mock.patch("lazyviewer.render.os.write", side_effect=capture),
+            ):
+                render_dual_page(
+                    text_lines=text_lines,
+                    text_start=5,
+                    tree_entries=[],
+                    tree_start=0,
+                    tree_selected=0,
+                    max_lines=6,
+                    current_path=path,
+                    tree_root=path.parent,
+                    expanded=set(),
+                    width=100,
+                    left_width=30,
+                    text_x=0,
+                    wrap_text=False,
+                    browser_visible=False,
+                    show_hidden=False,
+                )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        self.assertIn("class Box", rendered)
+        self.assertIn("fn boot", rendered)
+        self.assertIn("return value;", rendered)
 
 
 if __name__ == "__main__":

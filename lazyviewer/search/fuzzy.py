@@ -1,3 +1,9 @@
+"""File indexing and fuzzy/substring matching for picker and filters.
+
+Maintains cached project file lists/labels and supports rg or walk backends.
+Scoring helpers favor contiguous matches and support strict substring mode.
+"""
+
 from __future__ import annotations
 
 import heapq

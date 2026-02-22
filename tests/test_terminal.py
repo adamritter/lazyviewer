@@ -1,3 +1,9 @@
+"""Tests for terminal mode and Kitty graphics control sequences.
+
+Verifies raw-mode lifecycle safety and expected escape-command payloads.
+These guard the low-level terminal contract used by the runtime loop.
+"""
+
 from __future__ import annotations
 
 import base64

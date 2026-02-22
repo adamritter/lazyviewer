@@ -1,3 +1,9 @@
+"""Tests for git overlay flags and diff-contrast rendering.
+
+Includes real-repo scenarios for changed/untracked propagation.
+Also validates readable foreground contrast on colored diff backgrounds.
+"""
+
 from __future__ import annotations
 
 import shutil

@@ -1,3 +1,9 @@
+"""Scale-oriented Ctrl+P integration tests.
+
+Exercises large-index matching limits and projected tree size constraints.
+These guardrails keep file-filter performance predictable at high cardinality.
+"""
+
 from __future__ import annotations
 
 import unittest

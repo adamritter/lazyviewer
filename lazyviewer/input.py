@@ -1,3 +1,9 @@
+"""Low-level terminal input decoding.
+
+Reads raw bytes from stdin and translates them into normalized key tokens.
+Handles ESC-sequence timing, modifier combos, and SGR mouse events.
+"""
+
 from __future__ import annotations
 
 import os

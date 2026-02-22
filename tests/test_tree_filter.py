@@ -1,3 +1,9 @@
+"""Tests for tree projection and navigation helpers.
+
+Covers file/content filter expansion, hit indexing, and traversal utilities.
+Also validates search-hit row formatting details.
+"""
+
 from __future__ import annotations
 
 import tempfile

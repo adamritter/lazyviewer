@@ -1,3 +1,9 @@
+"""Terminal control helpers for the TUI session.
+
+Owns raw-mode lifecycle, alternate-screen switching, and mouse toggles.
+Also wraps Kitty graphics protocol calls used for inline image previews.
+"""
+
 from __future__ import annotations
 
 import base64

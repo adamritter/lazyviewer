@@ -1,3 +1,9 @@
+"""Persistent JSON config helpers.
+
+Stores pane-width presets, hidden-file preference, and named marks.
+All access is defensive: malformed or missing config falls back safely.
+"""
+
 from __future__ import annotations
 
 import json

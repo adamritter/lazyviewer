@@ -1,3 +1,9 @@
+"""Shared mutable runtime state for the TUI.
+
+``AppState`` is the single source of truth used by render and handlers.
+Most behavior in runtime modules mutates this dataclass in-place.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -68,6 +74,7 @@ class AppState:
     dir_preview_path: Path | None = None
     preview_image_path: Path | None = None
     preview_image_format: str | None = None
+    preview_is_git_diff: bool = False
     git_status_overlay: dict[Path, int] = field(default_factory=dict)
     git_status_last_refresh: float = 0.0
     jump_history: JumpHistory = field(default_factory=JumpHistory)

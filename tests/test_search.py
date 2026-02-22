@@ -1,3 +1,9 @@
+"""Tests for ripgrep JSON search parsing and error handling.
+
+Uses a fake ``Popen`` stream to verify match extraction and ordering.
+Also validates missing-rg and nonzero-exit failure reporting.
+"""
+
 from __future__ import annotations
 
 import json

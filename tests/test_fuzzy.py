@@ -1,3 +1,9 @@
+"""Behavior tests for fuzzy indexing and matching.
+
+Covers scoring, strict substring mode, rg/walk collection paths, and caching.
+These cases defend picker/filter correctness and large-list performance.
+"""
+
 from __future__ import annotations
 
 import tempfile

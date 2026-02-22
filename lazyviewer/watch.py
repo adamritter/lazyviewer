@@ -1,3 +1,9 @@
+"""Filesystem and git-change watch signatures.
+
+Computes cheap hashes over relevant tree/git metadata for poll-based refreshes.
+Runtime code compares these signatures to detect when to rebuild view state.
+"""
+
 from __future__ import annotations
 
 import hashlib

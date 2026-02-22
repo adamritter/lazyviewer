@@ -1,3 +1,9 @@
+"""Tests for tree-filter runtime behavior.
+
+Currently targets cached content-search reuse while editing queries.
+Protects the no-recompute-on-backspace optimization path.
+"""
+
 from __future__ import annotations
 
 import tempfile

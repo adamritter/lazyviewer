@@ -1,3 +1,9 @@
+"""CLI argument and default-path behavior tests.
+
+Verifies how ``lazyviewer.cli.main`` chooses target paths and source text.
+Prevents regressions in command-line entrypoint ergonomics.
+"""
+
 from __future__ import annotations
 
 import os

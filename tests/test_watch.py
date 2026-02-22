@@ -1,3 +1,9 @@
+"""Tests for tree/git watch signature helpers.
+
+Ensures signatures change for relevant mutations and ignore irrelevant ones.
+Also validates git root/git-dir discovery from nested paths.
+"""
+
 from __future__ import annotations
 
 import shutil

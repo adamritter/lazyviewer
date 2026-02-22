@@ -1,3 +1,9 @@
+"""Help panel content and full-screen help modal rendering.
+
+Stores contextual keybinding text for normal and search modes.
+Rendering helpers here are presentation-only and side-effect free.
+"""
+
 from __future__ import annotations
 
 import os

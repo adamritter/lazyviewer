@@ -1,3 +1,9 @@
+"""Tests for runtime navigation helpers.
+
+Focuses on wrap/unwrapped line mapping and top-line preservation.
+Also validates named-mark persistence hooks.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

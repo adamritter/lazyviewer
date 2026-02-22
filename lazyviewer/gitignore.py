@@ -1,3 +1,9 @@
+"""Gitignore-aware path filtering utilities.
+
+Builds a matcher by querying git for ignored files and directories.
+Tree/index builders use this to optionally hide ignored content.
+"""
+
 from __future__ import annotations
 
 import shutil

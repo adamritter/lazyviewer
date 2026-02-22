@@ -1,3 +1,9 @@
+"""Regression tests for ANSI line-building primitives.
+
+Focuses on wrapped vs. unwrapped ``build_screen_lines`` behavior.
+These cases protect status and viewport math from line-shaping regressions.
+"""
+
 import unittest
 
 from lazyviewer import ansi as ansi_mod

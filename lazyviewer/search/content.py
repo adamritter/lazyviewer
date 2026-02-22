@@ -1,3 +1,9 @@
+"""Project-wide content search via ripgrep JSON output.
+
+Runs ``rg`` with bounded limits, parses match events, and normalizes paths.
+Returns grouped/sorted matches plus truncation and error metadata.
+"""
+
 from __future__ import annotations
 
 import json

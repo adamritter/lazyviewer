@@ -1,3 +1,9 @@
+"""Integration tests for gitignore-aware filtering.
+
+Validates hidden/ignored behavior across file indexing, tree building, and previews.
+Also checks newly created ignored paths are filtered without manual cache resets.
+"""
+
 from __future__ import annotations
 
 import re

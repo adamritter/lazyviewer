@@ -1,3 +1,9 @@
+"""Key-event handlers for picker, filter, and normal modes.
+
+These functions convert normalized key tokens into state transitions.
+They are kept mostly side-effect-free via injected callback operations.
+"""
+
 from __future__ import annotations
 
 import time
@@ -485,6 +491,7 @@ def handle_normal_key(
             state.dir_preview_truncated = False
             state.preview_image_path = None
             state.preview_image_format = None
+            state.preview_is_git_diff = False
         state.dirty = True
         return False
     if key.lower() == "q" or key == "\x03":

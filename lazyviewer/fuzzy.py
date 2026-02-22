@@ -1,3 +1,9 @@
+"""Compatibility shim re-exporting fuzzy-search helpers.
+
+The implementation moved to ``lazyviewer.search.fuzzy``.
+This module preserves old import paths and patch points used by tests.
+"""
+
 from __future__ import annotations
 
 from .search import fuzzy as _fuzzy

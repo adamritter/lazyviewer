@@ -1,3 +1,9 @@
+"""Tests for jump-history semantics and mark-key validation.
+
+Confirms deduping, back/forward behavior, and max-history limits.
+Also checks which single-character keys are valid named marks.
+"""
+
 from __future__ import annotations
 
 import unittest

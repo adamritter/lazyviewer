@@ -1,3 +1,9 @@
+"""Preview builders for files, directories, images, and git diffs.
+
+Produces render-ready text plus metadata (truncation, image format, diff mode).
+Caches expensive directory previews and sanitizes unsafe terminal content.
+"""
+
 from __future__ import annotations
 
 from collections import OrderedDict

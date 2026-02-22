@@ -1,3 +1,9 @@
+"""Git status overlay and diff-preview rendering.
+
+Collects changed/untracked flags for tree badges and directory ancestors.
+Builds colorized annotated source previews from unified diff hunks with caching.
+"""
+
 from __future__ import annotations
 
 from collections import OrderedDict

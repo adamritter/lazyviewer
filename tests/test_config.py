@@ -1,3 +1,9 @@
+"""Tests for config persistence and input sanitization.
+
+Validates pane-width keys and named-mark round-tripping.
+Ensures malformed config data is safely normalized on load.
+"""
+
 from __future__ import annotations
 
 import tempfile

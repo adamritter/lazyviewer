@@ -1,3 +1,9 @@
+"""Rendering engine for the split tree/text terminal view.
+
+Defines render context data and writes fully composed ANSI frames.
+Also computes status/help/search overlays without mutating runtime state.
+"""
+
 from __future__ import annotations
 
 import os
@@ -6,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line, slice_ansi_line
+from ..symbols import collect_sticky_symbol_headers
 from .help import (
     help_panel_lines,
     help_panel_row_count,
@@ -58,6 +65,7 @@ class RenderContext:
     text_search_query: str = ""
     text_search_current_line: int = 0
     text_search_current_column: int = 0
+    preview_is_git_diff: bool = False
 
 
 def render_dual_page_context(context: RenderContext) -> None:
@@ -102,6 +110,7 @@ def render_dual_page_context(context: RenderContext) -> None:
         text_search_query=context.text_search_query,
         text_search_current_line=context.text_search_current_line,
         text_search_current_column=context.text_search_current_column,
+        preview_is_git_diff=context.preview_is_git_diff,
     )
 
 
@@ -120,6 +129,10 @@ def _help_line(lines: tuple[str, ...], row: int) -> str:
     return ""
 
 
+def _plain_display_width(text: str) -> int:
+    return sum(char_display_width(ch, 0) for ch in text)
+
+
 def build_status_line(left_text: str, width: int, right_text: str = "│ ? Help") -> str:
     usable = max(1, width - 1)
     if usable <= len(right_text):
@@ -128,6 +141,22 @@ def build_status_line(left_text: str, width: int, right_text: str = "│ ? Help"
     left = left_text[:left_limit]
     gap = " " * (usable - len(left) - len(right_text))
     return f"{left}{gap}{right_text}"
+
+
+def _format_sticky_header_line(label: str, width: int) -> str:
+    if width <= 0:
+        return ""
+
+    plain_label = f" {label} "
+    label_width = _plain_display_width(plain_label)
+    if label_width >= width:
+        return clip_ansi_line(f"\033[4;38;5;117m{plain_label}\033[0m", width)
+
+    separator = "─" * (width - label_width)
+    return (
+        f"\033[4;38;5;117m{plain_label}\033[0m"
+        f"\033[2;38;5;245m{separator}\033[0m"
+    )
 
 
 def _scroll_percent(text_start: int, total_lines: int, visible_rows: int) -> float:
@@ -343,6 +372,7 @@ def render_dual_page(
     text_search_query: str = "",
     text_search_current_line: int = 0,
     text_search_current_column: int = 0,
+    preview_is_git_diff: bool = False,
 ) -> None:
     out: list[str] = []
     out.append("\033[H\033[J")
@@ -362,17 +392,38 @@ def render_dual_page(
     content_rows = max(1, max_lines - help_rows)
     has_current_text_hit = text_search_current_line > 0 and text_search_current_column > 0
 
+    sticky_headers: list[str] = []
+    if not preview_is_git_diff and current_path.is_file():
+        start_source, _, _ = _status_line_range(text_lines, text_start, 1, wrap_text)
+        max_sticky_headers = max(0, min(3, content_rows - 1))
+        if max_sticky_headers > 0:
+            sticky_headers = collect_sticky_symbol_headers(
+                current_path,
+                start_source,
+                max_headers=max_sticky_headers,
+            )
+    sticky_header_rows = len(sticky_headers)
+    text_content_rows = max(1, content_rows - sticky_header_rows)
+
     if not browser_visible:
         line_width = max(1, width - 1)
-        text_percent = _scroll_percent(text_start, len(text_lines), content_rows)
+        text_percent = _scroll_percent(text_start, len(text_lines), text_content_rows)
         status_start, status_end, status_total = _status_line_range(
             text_lines,
             text_start,
-            content_rows,
+            text_content_rows,
             wrap_text,
         )
         for row in range(content_rows):
-            text_idx = text_start + row
+            if row < sticky_header_rows:
+                sticky_text = _format_sticky_header_line(sticky_headers[row], line_width)
+                out.append(sticky_text)
+                if "\033" in sticky_text:
+                    out.append("\033[0m")
+                out.append("\r\n")
+                continue
+
+            text_idx = text_start + row - sticky_header_rows
             if text_idx < len(text_lines):
                 text_raw = text_lines[text_idx].rstrip("\r\n")
                 if wrap_text:
@@ -408,11 +459,11 @@ def render_dual_page(
     divider_width = 1
     right_width = max(1, width - left_width - divider_width - 1)
 
-    text_percent = _scroll_percent(text_start, len(text_lines), content_rows)
+    text_percent = _scroll_percent(text_start, len(text_lines), text_content_rows)
     status_start, status_end, status_total = _status_line_range(
         text_lines,
         text_start,
-        content_rows,
+        text_content_rows,
         wrap_text,
     )
     picker_overlay_active = picker_active and picker_mode in {"symbols", "commands"}
@@ -500,25 +551,31 @@ def render_dual_page(
 
         out.append("\033[2m│\033[0m")
 
-        text_idx = text_start + row
-        if text_idx < len(text_lines):
-            text_raw = text_lines[text_idx].rstrip("\r\n")
-            if wrap_text:
-                text_raw = clip_ansi_line(text_raw, right_width)
-            else:
-                text_raw = slice_ansi_line(text_raw, text_x, right_width)
-            current_col = text_search_current_column if text_idx + 1 == text_search_current_line else None
-            text_raw = _highlight_ansi_substrings(
-                text_raw,
-                text_search_query,
-                current_column=current_col,
-                has_current_target=has_current_text_hit,
-            )
-            out.append(text_raw)
-            if "\033" in text_raw:
+        if row < sticky_header_rows:
+            sticky_text = _format_sticky_header_line(sticky_headers[row], right_width)
+            out.append(sticky_text)
+            if "\033" in sticky_text:
                 out.append("\033[0m")
         else:
-            out.append("")
+            text_idx = text_start + row - sticky_header_rows
+            if text_idx < len(text_lines):
+                text_raw = text_lines[text_idx].rstrip("\r\n")
+                if wrap_text:
+                    text_raw = clip_ansi_line(text_raw, right_width)
+                else:
+                    text_raw = slice_ansi_line(text_raw, text_x, right_width)
+                current_col = text_search_current_column if text_idx + 1 == text_search_current_line else None
+                text_raw = _highlight_ansi_substrings(
+                    text_raw,
+                    text_search_query,
+                    current_column=current_col,
+                    has_current_target=has_current_text_hit,
+                )
+                out.append(text_raw)
+                if "\033" in text_raw:
+                    out.append("\033[0m")
+            else:
+                out.append("")
         out.append("\r\n")
 
     for row in range(help_rows):

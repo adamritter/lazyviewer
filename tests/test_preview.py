@@ -1,3 +1,9 @@
+"""Tests for preview generation across path types.
+
+Covers directory truncation/caching, text sanitization, binary/image handling,
+and git diff preview integration boundaries.
+"""
+
 from __future__ import annotations
 
 import re

@@ -1,3 +1,9 @@
+"""Regression tests for raw-key decoding.
+
+Covers ESC timing, arrow/meta sequences, and control-key token mapping.
+These tests protect interactive input handling in raw terminal mode.
+"""
+
 import os
 import time
 import unittest

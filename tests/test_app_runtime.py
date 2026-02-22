@@ -1,3 +1,9 @@
+"""Integration-heavy tests for ``lazyviewer.app_runtime`` wiring.
+
+Covers git/watch refresh behavior, key-driven state transitions, and search flows.
+These tests ensure runtime callbacks and state orchestration stay coherent.
+"""
+
 from __future__ import annotations
 
 import os

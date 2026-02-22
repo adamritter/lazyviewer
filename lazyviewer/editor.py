@@ -1,3 +1,9 @@
+"""Editor launch helper for external file or directory edits.
+
+Runs ``$EDITOR`` while temporarily leaving raw/alternate-screen TUI mode.
+Returns an error message string instead of raising for UI-friendly handling.
+"""
+
 from __future__ import annotations
 
 import os

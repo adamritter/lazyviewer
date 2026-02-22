@@ -1,3 +1,9 @@
+"""Tree filter and content-search orchestration.
+
+Handles file-filter and content-search modes, selection coercion, and previews.
+Includes cached ripgrep result reuse to keep query editing responsive.
+"""
+
 from __future__ import annotations
 
 import time
