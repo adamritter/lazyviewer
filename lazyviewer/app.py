@@ -355,10 +355,136 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             idx += step
         return None
 
-    def first_tree_filter_result_index() -> int | None:
+    def next_tree_filter_result_entry_index(selected_idx: int, direction: int) -> int | None:
         if state.tree_filter_mode == "content":
-            return next_content_hit_entry_index(-1, 1)
-        return next_file_entry_index(state.tree_entries, -1, 1)
+            return next_content_hit_entry_index(selected_idx, direction)
+        return next_file_entry_index(state.tree_entries, selected_idx, direction)
+
+    def coerce_tree_filter_result_index(idx: int) -> int | None:
+        if not (0 <= idx < len(state.tree_entries)):
+            return None
+        if not (state.tree_filter_active and state.tree_filter_query):
+            return idx
+
+        entry = state.tree_entries[idx]
+        if state.tree_filter_mode == "content":
+            if entry.kind == "search_hit":
+                return idx
+        elif not entry.is_dir:
+            return idx
+
+        candidate_idx = next_tree_filter_result_entry_index(idx, 1)
+        if candidate_idx is None:
+            candidate_idx = next_tree_filter_result_entry_index(idx, -1)
+        return candidate_idx
+
+    def move_tree_selection(direction: int) -> bool:
+        if not state.tree_entries or direction == 0:
+            return False
+
+        if state.tree_filter_active and state.tree_filter_query:
+            target_idx = next_tree_filter_result_entry_index(state.selected_idx, direction)
+            if target_idx is None:
+                return False
+        else:
+            step = 1 if direction > 0 else -1
+            target_idx = max(0, min(len(state.tree_entries) - 1, state.selected_idx + step))
+
+        if target_idx == state.selected_idx:
+            return False
+
+        state.selected_idx = target_idx
+        preview_selected_entry()
+        return True
+
+    def parse_mouse_col_row(mouse_key: str) -> tuple[int | None, int | None]:
+        parts = mouse_key.split(":")
+        if len(parts) < 3:
+            return None, None
+        try:
+            return int(parts[1]), int(parts[2])
+        except Exception:
+            return None, None
+
+    def handle_tree_mouse_wheel(mouse_key: str) -> bool:
+        if not (mouse_key.startswith("MOUSE_WHEEL_UP:") or mouse_key.startswith("MOUSE_WHEEL_DOWN:")):
+            return False
+
+        direction = -1 if mouse_key.startswith("MOUSE_WHEEL_UP:") else 1
+        col, _row = parse_mouse_col_row(mouse_key)
+        if state.browser_visible and col is not None and col <= state.left_width:
+            if move_tree_selection(direction):
+                state.dirty = True
+            return True
+
+        prev_start = state.start
+        state.start += direction * 3
+        state.start = max(0, min(state.start, state.max_start))
+        grew_preview = direction > 0 and maybe_grow_directory_preview()
+        if state.start != prev_start or grew_preview:
+            state.dirty = True
+        return True
+
+    def handle_tree_mouse_click(mouse_key: str) -> bool:
+        if not mouse_key.startswith("MOUSE_LEFT_DOWN:"):
+            return False
+
+        col, row = parse_mouse_col_row(mouse_key)
+        if not (
+            state.browser_visible
+            and col is not None
+            and row is not None
+            and 1 <= row <= visible_content_rows()
+            and col <= state.left_width
+        ):
+            return True
+
+        query_row_visible = state.tree_filter_active
+        if query_row_visible and row == 1:
+            state.tree_filter_editing = True
+            state.dirty = True
+            return True
+
+        clicked_idx = state.tree_start + (row - 1 - (1 if query_row_visible else 0))
+        clicked_idx = coerce_tree_filter_result_index(clicked_idx)
+        if clicked_idx is None:
+            return True
+
+        prev_selected = state.selected_idx
+        state.selected_idx = clicked_idx
+        preview_selected_entry()
+        if state.selected_idx != prev_selected:
+            state.dirty = True
+
+        now = time.monotonic()
+        is_double = clicked_idx == state.last_click_idx and (now - state.last_click_time) <= DOUBLE_CLICK_SECONDS
+        state.last_click_idx = clicked_idx
+        state.last_click_time = now
+        if not is_double:
+            return True
+
+        if state.tree_filter_active and state.tree_filter_query:
+            activate_tree_filter_selection()
+            return True
+
+        entry = state.tree_entries[state.selected_idx]
+        if entry.is_dir:
+            resolved = entry.path.resolve()
+            if resolved in state.expanded:
+                state.expanded.remove(resolved)
+            else:
+                state.expanded.add(resolved)
+            rebuild_tree_entries(preferred_path=resolved)
+            state.dirty = True
+            return True
+
+        state.current_path = entry.path.resolve()
+        refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
+        state.dirty = True
+        return True
+
+    def first_tree_filter_result_index() -> int | None:
+        return next_tree_filter_result_entry_index(-1, 1)
 
     def rebuild_tree_entries(
         preferred_path: Path | None = None,
@@ -507,15 +633,9 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
         entry = state.tree_entries[state.selected_idx]
         if entry.is_dir:
-            if state.tree_filter_mode == "content":
-                candidate_idx = next_content_hit_entry_index(state.selected_idx, 1)
-            else:
-                candidate_idx = next_file_entry_index(state.tree_entries, state.selected_idx, 1)
+            candidate_idx = next_tree_filter_result_entry_index(state.selected_idx, 1)
             if candidate_idx is None:
-                if state.tree_filter_mode == "content":
-                    candidate_idx = next_content_hit_entry_index(state.selected_idx, -1)
-                else:
-                    candidate_idx = next_file_entry_index(state.tree_entries, state.selected_idx, -1)
+                candidate_idx = next_tree_filter_result_entry_index(state.selected_idx, -1)
             if candidate_idx is None:
                 close_tree_filter(clear_query=True)
                 return
@@ -943,6 +1063,10 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 continue
 
             if state.tree_filter_active and state.tree_filter_editing:
+                if handle_tree_mouse_wheel(key):
+                    continue
+                if handle_tree_mouse_click(key):
+                    continue
                 if key == "ESC":
                     close_tree_filter(clear_query=True)
                     continue
@@ -954,28 +1078,12 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     state.dirty = True
                     continue
                 if key == "UP" or key == "CTRL_K":
-                    if state.tree_filter_mode == "content":
-                        target_idx = next_content_hit_entry_index(state.selected_idx, -1)
-                    else:
-                        target_idx = next_file_entry_index(state.tree_entries, state.selected_idx, -1)
-                    if target_idx is not None:
-                        prev_selected = state.selected_idx
-                        state.selected_idx = target_idx
-                        preview_selected_entry()
-                        if state.selected_idx != prev_selected:
-                            state.dirty = True
+                    if move_tree_selection(-1):
+                        state.dirty = True
                     continue
                 if key == "DOWN" or key == "CTRL_J":
-                    if state.tree_filter_mode == "content":
-                        target_idx = next_content_hit_entry_index(state.selected_idx, 1)
-                    else:
-                        target_idx = next_file_entry_index(state.tree_entries, state.selected_idx, 1)
-                    if target_idx is not None:
-                        prev_selected = state.selected_idx
-                        state.selected_idx = target_idx
-                        preview_selected_entry()
-                        if state.selected_idx != prev_selected:
-                            state.dirty = True
+                    if move_tree_selection(1):
+                        state.dirty = True
                     continue
                 if key == "BACKSPACE":
                     if state.tree_filter_query:
@@ -1181,92 +1289,16 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 continue
             if key.lower() == "q" or key == "\x03":
                 break
-            if key.startswith("MOUSE_WHEEL_UP:") or key.startswith("MOUSE_WHEEL_DOWN:"):
-                direction = -1 if key.startswith("MOUSE_WHEEL_UP:") else 1
-                parts = key.split(":")
-                col: int | None = None
-                if len(parts) >= 3:
-                    try:
-                        col = int(parts[1])
-                    except Exception:
-                        col = None
-                if state.browser_visible and col is not None and col <= state.left_width:
-                    prev_selected = state.selected_idx
-                    state.selected_idx = max(0, min(len(state.tree_entries) - 1, state.selected_idx + direction))
-                    preview_selected_entry()
-                    if state.selected_idx != prev_selected:
-                        state.dirty = True
-                else:
-                    prev_start = state.start
-                    state.start += direction * 3
-                    state.start = max(0, min(state.start, state.max_start))
-                    grew_preview = direction > 0 and maybe_grow_directory_preview()
-                    if state.start != prev_start or grew_preview:
-                        state.dirty = True
+            if handle_tree_mouse_wheel(key):
                 continue
-            if key.startswith("MOUSE_LEFT_DOWN:"):
-                parts = key.split(":")
-                if len(parts) >= 3:
-                    try:
-                        col = int(parts[1])
-                        row = int(parts[2])
-                    except Exception:
-                        col = None
-                        row = None
-                    if (
-                        state.browser_visible
-                        and col is not None
-                        and row is not None
-                        and 1 <= row <= visible_content_rows()
-                        and col <= state.left_width
-                    ):
-                        query_row_visible = state.tree_filter_active
-                        if query_row_visible and row == 1:
-                            state.tree_filter_editing = True
-                            state.dirty = True
-                            continue
-
-                        clicked_idx = state.tree_start + (row - 1 - (1 if query_row_visible else 0))
-                        if 0 <= clicked_idx < len(state.tree_entries):
-                            prev_selected = state.selected_idx
-                            state.selected_idx = clicked_idx
-                            preview_selected_entry()
-                            if state.selected_idx != prev_selected:
-                                state.dirty = True
-                            now = time.monotonic()
-                            is_double = (
-                                clicked_idx == state.last_click_idx
-                                and (now - state.last_click_time) <= DOUBLE_CLICK_SECONDS
-                            )
-                            state.last_click_idx = clicked_idx
-                            state.last_click_time = now
-                            if is_double:
-                                entry = state.tree_entries[state.selected_idx]
-                                if entry.is_dir:
-                                    resolved = entry.path.resolve()
-                                    if resolved in state.expanded:
-                                        state.expanded.remove(resolved)
-                                    else:
-                                        state.expanded.add(resolved)
-                                    rebuild_tree_entries(preferred_path=resolved)
-                                    state.dirty = True
-                                else:
-                                    state.current_path = entry.path.resolve()
-                                    refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
-                                    state.dirty = True
+            if handle_tree_mouse_click(key):
                 continue
             if state.browser_visible and key.lower() == "j":
-                prev_selected = state.selected_idx
-                state.selected_idx = min(len(state.tree_entries) - 1, state.selected_idx + 1)
-                preview_selected_entry()
-                if state.selected_idx != prev_selected:
+                if move_tree_selection(1):
                     state.dirty = True
                 continue
             if state.browser_visible and key.lower() == "k":
-                prev_selected = state.selected_idx
-                state.selected_idx = max(0, state.selected_idx - 1)
-                preview_selected_entry()
-                if state.selected_idx != prev_selected:
+                if move_tree_selection(-1):
                     state.dirty = True
                 continue
             if state.browser_visible and key.lower() == "l":
