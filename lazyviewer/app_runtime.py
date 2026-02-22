@@ -80,6 +80,26 @@ def _centered_scroll_start(target_line: int, max_start: int, visible_rows: int) 
     return max(0, min(centered, max_start))
 
 
+def _tree_order_key_for_relative_path(
+    relative_path: Path,
+    *,
+    is_dir: bool = False,
+) -> tuple[tuple[int, str, str], ...]:
+    parts = relative_path.parts
+    if not parts:
+        return tuple()
+
+    out: list[tuple[int, str, str]] = []
+    last_index = len(parts) - 1
+    for idx, part in enumerate(parts):
+        if idx < last_index:
+            node_kind = 0
+        else:
+            node_kind = 0 if is_dir else 1
+        out.append((node_kind, part.casefold(), part))
+    return tuple(out)
+
+
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
     if nopager or not os.isatty(sys.stdin.fileno()):
         rendered = content
@@ -369,7 +389,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             return []
 
         root = state.tree_root.resolve()
-        rel_to_path: dict[str, Path] = {}
+        rel_to_path: dict[Path, Path] = {}
         for raw_path, flags in state.git_status_overlay.items():
             if flags == 0:
                 continue
@@ -384,12 +404,11 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 continue
             if not state.show_hidden and any(part.startswith(".") for part in rel.parts):
                 continue
-            rel_text = str(rel)
-            rel_to_path[rel_text] = path
+            rel_to_path[rel] = path
 
         if not rel_to_path:
             return []
-        ordered_rel = sorted(rel_to_path, key=lambda item: (item.casefold(), item))
+        ordered_rel = sorted(rel_to_path, key=_tree_order_key_for_relative_path)
         return [rel_to_path[rel] for rel in ordered_rel]
 
     def refresh_rendered_for_current_path(
@@ -653,14 +672,17 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         else:
             anchor_path = state.current_path.resolve()
 
-        ordered_items: list[tuple[tuple[str, str], Path]] = []
+        ordered_items: list[tuple[tuple[tuple[int, str, str], ...], Path]] = []
         for path in modified_paths:
-            rel_text = str(path.relative_to(root))
-            ordered_items.append(((rel_text.casefold(), rel_text), path))
+            rel_path = path.relative_to(root)
+            ordered_items.append((_tree_order_key_for_relative_path(rel_path), path))
 
         try:
-            anchor_rel_text = str(anchor_path.relative_to(root))
-            anchor_key: tuple[str, str] | None = (anchor_rel_text.casefold(), anchor_rel_text)
+            anchor_rel_path = anchor_path.relative_to(root)
+            anchor_key: tuple[tuple[int, str, str], ...] | None = _tree_order_key_for_relative_path(
+                anchor_rel_path,
+                is_dir=anchor_path.is_dir(),
+            )
         except Exception:
             anchor_key = None
 
