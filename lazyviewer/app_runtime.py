@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 from .ansi import ANSI_ESCAPE_RE, build_screen_lines, char_display_width
@@ -289,6 +290,280 @@ def _set_status_message(state: AppState, message: str) -> None:
     state.status_message_until = time.monotonic() + WRAP_STATUS_SECONDS
 
 
+class _TreeFilterIndexWarmupScheduler:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._pending: tuple[Path, bool] | None = None
+        self._running = False
+
+    def _worker(self) -> None:
+        while True:
+            with self._lock:
+                pending = self._pending
+                self._pending = None
+                if pending is None:
+                    self._running = False
+                    return
+
+            root, show_hidden = pending
+            try:
+                collect_project_file_labels(
+                    root,
+                    show_hidden,
+                    skip_gitignored=_skip_gitignored_for_hidden_mode(show_hidden),
+                )
+            except Exception:
+                # Warming is best-effort; foreground path still loads synchronously if needed.
+                pass
+
+    def schedule(self, root: Path, show_hidden: bool) -> None:
+        with self._lock:
+            self._pending = (root.resolve(), show_hidden)
+            if self._running:
+                return
+            self._running = True
+
+        worker = threading.Thread(
+            target=self._worker,
+            name="lazyviewer-file-index",
+            daemon=True,
+        )
+        worker.start()
+
+    def schedule_for_state(
+        self,
+        state: AppState,
+        root: Path | None = None,
+        show_hidden_value: bool | None = None,
+    ) -> None:
+        target_root = state.tree_root if root is None else root
+        target_show_hidden = state.show_hidden if show_hidden_value is None else show_hidden_value
+        self.schedule(target_root, target_show_hidden)
+
+
+class _PagerLayoutOps:
+    def __init__(
+        self,
+        *,
+        state: AppState,
+        kitty_graphics_supported: bool,
+    ) -> None:
+        self.state = state
+        self.kitty_graphics_supported = kitty_graphics_supported
+        self.content_mode_left_width_active = self.content_search_match_view_active()
+
+    def effective_text_width(self, columns: int | None = None) -> int:
+        if columns is None:
+            columns = shutil.get_terminal_size((80, 24)).columns
+        if self.state.browser_visible:
+            return max(1, columns - self.state.left_width - 2)
+        return max(1, columns - 1)
+
+    def visible_content_rows(self) -> int:
+        help_rows = help_panel_row_count(
+            self.state.usable,
+            self.state.show_help,
+            browser_visible=self.state.browser_visible,
+            tree_filter_active=self.state.tree_filter_active,
+            tree_filter_mode=self.state.tree_filter_mode,
+            tree_filter_editing=self.state.tree_filter_editing,
+        )
+        return max(1, self.state.usable - help_rows)
+
+    def content_search_match_view_active(self) -> bool:
+        return (
+            self.state.tree_filter_active
+            and self.state.tree_filter_mode == "content"
+            and bool(self.state.tree_filter_query)
+        )
+
+    def rebuild_screen_lines(
+        self,
+        columns: int | None = None,
+        preserve_scroll: bool = True,
+    ) -> None:
+        self.state.lines = build_screen_lines(
+            self.state.rendered,
+            self.effective_text_width(columns),
+            wrap=self.state.wrap_text,
+        )
+        self.state.max_start = max(0, len(self.state.lines) - self.visible_content_rows())
+        if preserve_scroll:
+            self.state.start = max(0, min(self.state.start, self.state.max_start))
+        else:
+            self.state.start = 0
+        if self.state.wrap_text:
+            self.state.text_x = 0
+
+    def sync_left_width_for_tree_filter_mode(self, force: bool = False) -> None:
+        use_content_mode_width = self.content_search_match_view_active()
+        if not force and use_content_mode_width == self.content_mode_left_width_active:
+            return
+        self.content_mode_left_width_active = use_content_mode_width
+
+        columns = shutil.get_terminal_size((80, 24)).columns
+        if use_content_mode_width:
+            saved_percent = load_content_search_left_pane_percent()
+            if saved_percent is None:
+                current_percent = (self.state.left_width / max(1, columns)) * 100.0
+                saved_percent = min(
+                    99.0,
+                    max(
+                        CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT,
+                        current_percent + CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT,
+                    ),
+                )
+        else:
+            saved_percent = load_left_pane_percent()
+
+        if saved_percent is None:
+            desired_left = compute_left_width(columns)
+        else:
+            desired_left = int((saved_percent / 100.0) * columns)
+        desired_left = clamp_left_width(columns, desired_left)
+        if desired_left == self.state.left_width:
+            return
+
+        self.state.left_width = desired_left
+        self.state.right_width = max(1, columns - self.state.left_width - 2)
+        if self.state.right_width != self.state.last_right_width:
+            self.state.last_right_width = self.state.right_width
+            self.rebuild_screen_lines(columns=columns)
+        self.state.dirty = True
+
+    def save_left_pane_width_for_mode(self, total_width: int, left_width: int) -> None:
+        if self.content_search_match_view_active():
+            save_content_search_left_pane_percent(total_width, left_width)
+            return
+        save_left_pane_percent(total_width, left_width)
+
+    def show_inline_error(self, message: str) -> None:
+        self.state.rendered = f"\033[31m{message}\033[0m"
+        self.rebuild_screen_lines(preserve_scroll=False)
+        self.state.text_x = 0
+        self.state.dir_preview_path = None
+        self.state.dir_preview_truncated = False
+        self.state.preview_image_path = None
+        self.state.preview_image_format = None
+        self.state.dirty = True
+
+    def current_preview_image_path(self) -> Path | None:
+        if not self.kitty_graphics_supported:
+            return None
+        if self.state.preview_image_format != "png":
+            return None
+        if self.state.preview_image_path is None:
+            return None
+        try:
+            image_path = self.state.preview_image_path.resolve()
+        except Exception:
+            image_path = self.state.preview_image_path
+        if not image_path.exists() or not image_path.is_file():
+            return None
+        return image_path
+
+    def current_preview_image_geometry(self, columns: int) -> tuple[int, int, int, int]:
+        image_rows = self.visible_content_rows()
+        if self.state.browser_visible:
+            image_col = self.state.left_width + 2
+            image_width = max(1, columns - self.state.left_width - 2 - 1)
+        else:
+            image_col = 1
+            image_width = max(1, columns - 1)
+        return image_col, 1, image_width, image_rows
+
+
+def _launch_editor_for_path(target: Path, *, terminal: TerminalController) -> str | None:
+    return launch_editor(target, terminal.disable_tui_mode, terminal.enable_tui_mode)
+
+
+def _dispatch_normal_key(
+    key: str,
+    term_columns: int,
+    *,
+    state: AppState,
+    ops: NormalKeyOps,
+) -> bool:
+    return handle_normal_key_event(
+        key=key,
+        term_columns=term_columns,
+        state=state,
+        ops=ops,
+    )
+
+
+def _clear_source_selection(state: AppState) -> bool:
+    changed = state.source_selection_anchor is not None or state.source_selection_focus is not None
+    state.source_selection_anchor = None
+    state.source_selection_focus = None
+    return changed
+
+
+def _sorted_git_modified_file_paths(state: AppState) -> list[Path]:
+    if not state.git_features_enabled:
+        return []
+    if not state.git_status_overlay:
+        return []
+
+    root = state.tree_root.resolve()
+    rel_to_path: dict[Path, Path] = {}
+    for raw_path, flags in state.git_status_overlay.items():
+        if flags == 0:
+            continue
+        path = raw_path.resolve()
+        if path == root or not path.is_relative_to(root):
+            continue
+        if not path.exists() or path.is_dir():
+            continue
+        try:
+            rel = path.relative_to(root)
+        except Exception:
+            continue
+        if not state.show_hidden and any(part.startswith(".") for part in rel.parts):
+            continue
+        rel_to_path[rel] = path
+
+    if not rel_to_path:
+        return []
+    ordered_rel = sorted(rel_to_path, key=_tree_order_key_for_relative_path)
+    return [rel_to_path[rel] for rel in ordered_rel]
+
+
+def _launch_lazygit(
+    *,
+    state: AppState,
+    terminal: TerminalController,
+    show_inline_error: Callable[[str], None],
+    sync_selected_target_after_tree_refresh: Callable[..., None],
+    mark_tree_watch_dirty: Callable[[], None],
+) -> None:
+    if shutil.which("lazygit") is None:
+        show_inline_error("lazygit not found in PATH")
+        return
+
+    launch_error: str | None = None
+    terminal.disable_tui_mode()
+    try:
+        try:
+            subprocess.run(
+                ["lazygit"],
+                cwd=state.tree_root.resolve(),
+                check=False,
+            )
+        except Exception as exc:
+            launch_error = f"failed to launch lazygit: {exc}"
+    finally:
+        terminal.enable_tui_mode()
+
+    if launch_error is not None:
+        show_inline_error(launch_error)
+        return
+
+    preferred_path = state.current_path.resolve()
+    sync_selected_target_after_tree_refresh(preferred_path=preferred_path, force_rebuild=True)
+    mark_tree_watch_dirty()
+
+
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
     if nopager or not os.isatty(sys.stdin.fileno()):
         rendered = content
@@ -380,9 +655,19 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     stdout_fd = sys.stdout.fileno()
     terminal = TerminalController(stdin_fd, stdout_fd)
     kitty_graphics_supported = terminal.supports_kitty_graphics()
-    index_warmup_lock = threading.Lock()
-    index_warmup_pending: tuple[Path, bool] | None = None
-    index_warmup_running = False
+    index_warmup_scheduler = _TreeFilterIndexWarmupScheduler()
+    schedule_tree_filter_index_warmup = partial(index_warmup_scheduler.schedule_for_state, state)
+    layout_ops = _PagerLayoutOps(
+        state=state,
+        kitty_graphics_supported=kitty_graphics_supported,
+    )
+    visible_content_rows = layout_ops.visible_content_rows
+    sync_left_width_for_tree_filter_mode = layout_ops.sync_left_width_for_tree_filter_mode
+    save_left_pane_width_for_mode = layout_ops.save_left_pane_width_for_mode
+    rebuild_screen_lines = layout_ops.rebuild_screen_lines
+    show_inline_error = layout_ops.show_inline_error
+    current_preview_image_path = layout_ops.current_preview_image_path
+    current_preview_image_geometry = layout_ops.current_preview_image_geometry
     tree_watch_last_poll = 0.0
     tree_watch_signature: str | None = None
     git_watch_last_poll = 0.0
@@ -401,173 +686,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         source_selection_drag_pointer = None
         source_selection_drag_edge = None
         source_selection_drag_h_edge = None
-
-    def index_warmup_worker() -> None:
-        nonlocal index_warmup_pending, index_warmup_running
-        while True:
-            with index_warmup_lock:
-                pending = index_warmup_pending
-                index_warmup_pending = None
-                if pending is None:
-                    index_warmup_running = False
-                    return
-
-            root, show_hidden_value = pending
-            try:
-                collect_project_file_labels(
-                    root,
-                    show_hidden_value,
-                    skip_gitignored=_skip_gitignored_for_hidden_mode(show_hidden_value),
-                )
-            except Exception:
-                # Warming is best-effort; foreground path still loads synchronously if needed.
-                pass
-
-    def schedule_tree_filter_index_warmup(
-        root: Path | None = None,
-        show_hidden_value: bool | None = None,
-    ) -> None:
-        nonlocal index_warmup_pending, index_warmup_running
-        if root is None:
-            root = state.tree_root
-        if show_hidden_value is None:
-            show_hidden_value = state.show_hidden
-
-        with index_warmup_lock:
-            index_warmup_pending = (root.resolve(), show_hidden_value)
-            if index_warmup_running:
-                return
-            index_warmup_running = True
-
-        worker = threading.Thread(
-            target=index_warmup_worker,
-            name="lazyviewer-file-index",
-            daemon=True,
-        )
-        worker.start()
-
-    def effective_text_width(columns: int | None = None) -> int:
-        if columns is None:
-            columns = shutil.get_terminal_size((80, 24)).columns
-        if state.browser_visible:
-            return max(1, columns - state.left_width - 2)
-        return max(1, columns - 1)
-
-    def visible_content_rows() -> int:
-        help_rows = help_panel_row_count(
-            state.usable,
-            state.show_help,
-            browser_visible=state.browser_visible,
-            tree_filter_active=state.tree_filter_active,
-            tree_filter_mode=state.tree_filter_mode,
-            tree_filter_editing=state.tree_filter_editing,
-        )
-        return max(1, state.usable - help_rows)
-
-    def content_search_match_view_active() -> bool:
-        return (
-            state.tree_filter_active
-            and state.tree_filter_mode == "content"
-            and bool(state.tree_filter_query)
-        )
-
-    content_mode_left_width_active = content_search_match_view_active()
-
-    def sync_left_width_for_tree_filter_mode(force: bool = False) -> None:
-        nonlocal content_mode_left_width_active
-
-        use_content_mode_width = content_search_match_view_active()
-        if not force and use_content_mode_width == content_mode_left_width_active:
-            return
-        content_mode_left_width_active = use_content_mode_width
-
-        columns = shutil.get_terminal_size((80, 24)).columns
-        if use_content_mode_width:
-            saved_percent = load_content_search_left_pane_percent()
-            if saved_percent is None:
-                current_percent = (state.left_width / max(1, columns)) * 100.0
-                saved_percent = min(
-                    99.0,
-                    max(
-                        CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT,
-                        current_percent + CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT,
-                    ),
-                )
-        else:
-            saved_percent = load_left_pane_percent()
-
-        if saved_percent is None:
-            desired_left = compute_left_width(columns)
-        else:
-            desired_left = int((saved_percent / 100.0) * columns)
-        desired_left = clamp_left_width(columns, desired_left)
-        if desired_left == state.left_width:
-            return
-
-        state.left_width = desired_left
-        state.right_width = max(1, columns - state.left_width - 2)
-        if state.right_width != state.last_right_width:
-            state.last_right_width = state.right_width
-            rebuild_screen_lines(columns=columns)
-        state.dirty = True
-
-    def save_left_pane_width_for_mode(total_width: int, left_width: int) -> None:
-        if content_search_match_view_active():
-            save_content_search_left_pane_percent(total_width, left_width)
-            return
-        save_left_pane_percent(total_width, left_width)
-
-    def rebuild_screen_lines(
-        columns: int | None = None,
-        preserve_scroll: bool = True,
-    ) -> None:
-        state.lines = build_screen_lines(
-            state.rendered,
-            effective_text_width(columns),
-            wrap=state.wrap_text,
-        )
-        state.max_start = max(0, len(state.lines) - visible_content_rows())
-        if preserve_scroll:
-            state.start = max(0, min(state.start, state.max_start))
-        else:
-            state.start = 0
-        if state.wrap_text:
-            state.text_x = 0
-
-    def show_inline_error(message: str) -> None:
-        state.rendered = f"\033[31m{message}\033[0m"
-        rebuild_screen_lines(preserve_scroll=False)
-        state.text_x = 0
-        state.dir_preview_path = None
-        state.dir_preview_truncated = False
-        state.preview_image_path = None
-        state.preview_image_format = None
-        state.dirty = True
-
-    def current_preview_image_path() -> Path | None:
-        if not kitty_graphics_supported:
-            return None
-        if state.preview_image_format != "png":
-            return None
-        if state.preview_image_path is None:
-            return None
-        try:
-            image_path = state.preview_image_path.resolve()
-        except Exception:
-            image_path = state.preview_image_path
-        if not image_path.exists() or not image_path.is_file():
-            return None
-        return image_path
-
-    def current_preview_image_geometry(columns: int) -> tuple[int, int, int, int]:
-        image_rows = visible_content_rows()
-        if state.browser_visible:
-            image_col = state.left_width + 2
-            image_width = max(1, columns - state.left_width - 2 - 1)
-        else:
-            image_col = 1
-            image_width = max(1, columns - 1)
-        return image_col, 1, image_width, image_rows
 
     def refresh_git_status_overlay(force: bool = False) -> None:
         if not state.git_features_enabled:
@@ -652,34 +770,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         ):
             state.dirty = True
 
-    def sorted_git_modified_file_paths() -> list[Path]:
-        if not state.git_features_enabled:
-            return []
-        if not state.git_status_overlay:
-            return []
-
-        root = state.tree_root.resolve()
-        rel_to_path: dict[Path, Path] = {}
-        for raw_path, flags in state.git_status_overlay.items():
-            if flags == 0:
-                continue
-            path = raw_path.resolve()
-            if path == root or not path.is_relative_to(root):
-                continue
-            if not path.exists() or path.is_dir():
-                continue
-            try:
-                rel = path.relative_to(root)
-            except Exception:
-                continue
-            if not state.show_hidden and any(part.startswith(".") for part in rel.parts):
-                continue
-            rel_to_path[rel] = path
-
-        if not rel_to_path:
-            return []
-        ordered_rel = sorted(rel_to_path, key=_tree_order_key_for_relative_path)
-        return [rel_to_path[rel] for rel in ordered_rel]
+    sorted_git_modified_file_paths = partial(_sorted_git_modified_file_paths, state)
 
     def refresh_rendered_for_current_path(
         reset_scroll: bool = True,
@@ -731,12 +822,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         if reset_scroll:
             state.text_x = 0
 
-    def clear_source_selection() -> bool:
-        if state.source_selection_anchor is None and state.source_selection_focus is None:
-            return False
-        state.source_selection_anchor = None
-        state.source_selection_focus = None
-        return True
+    clear_source_selection = partial(_clear_source_selection, state)
 
     def toggle_git_features() -> None:
         state.git_features_enabled = not state.git_features_enabled
@@ -1445,35 +1531,15 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     git_watch_last_poll = time.monotonic()
     refresh_git_status_overlay(force=True)
 
-    def launch_editor_for_path(target: Path) -> str | None:
-        return launch_editor(target, terminal.disable_tui_mode, terminal.enable_tui_mode)
-
-    def launch_lazygit() -> None:
-        if shutil.which("lazygit") is None:
-            show_inline_error("lazygit not found in PATH")
-            return
-
-        launch_error: str | None = None
-        terminal.disable_tui_mode()
-        try:
-            try:
-                subprocess.run(
-                    ["lazygit"],
-                    cwd=state.tree_root.resolve(),
-                    check=False,
-                )
-            except Exception as exc:
-                launch_error = f"failed to launch lazygit: {exc}"
-        finally:
-            terminal.enable_tui_mode()
-
-        if launch_error is not None:
-            show_inline_error(launch_error)
-            return
-
-        preferred_path = state.current_path.resolve()
-        sync_selected_target_after_tree_refresh(preferred_path=preferred_path, force_rebuild=True)
-        mark_tree_watch_dirty()
+    launch_editor_for_path = partial(_launch_editor_for_path, terminal=terminal)
+    launch_lazygit = partial(
+        _launch_lazygit,
+        state=state,
+        terminal=terminal,
+        show_inline_error=show_inline_error,
+        sync_selected_target_after_tree_refresh=sync_selected_target_after_tree_refresh,
+        mark_tree_watch_dirty=mark_tree_watch_dirty,
+    )
 
     nav = navigation_ops
 
@@ -1503,14 +1569,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         launch_editor_for_path=launch_editor_for_path,
         jump_to_next_git_modified=jump_to_next_git_modified,
     )
-
-    def handle_normal_key(key: str, term_columns: int) -> bool:
-        return handle_normal_key_event(
-            key=key,
-            term_columns=term_columns,
-            state=state,
-            ops=normal_key_ops,
-        )
+    handle_normal_key = partial(_dispatch_normal_key, state=state, ops=normal_key_ops)
 
     loop_timing = RuntimeLoopTiming(
         double_click_seconds=DOUBLE_CLICK_SECONDS,
