@@ -1,4 +1,8 @@
-"""Search and selection highlighting helpers for preview rendering."""
+"""Apply search-hit and selection highlighting to ANSI-rendered source rows.
+
+Functions here preserve existing ANSI style sequences while layering additional
+emphasis for query matches and source-selection ranges.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +17,11 @@ def highlight_ansi_substrings(
     current_column: int | None = None,
     has_current_target: bool = False,
 ) -> str:
+    """Highlight case-insensitive query matches in ANSI text.
+
+    When ``has_current_target`` is true, the current hit gets stronger emphasis
+    while other hits are still highlighted.
+    """
     if not text or not query:
         return text
 
@@ -104,6 +113,7 @@ def highlight_ansi_substrings(
 
 
 def _highlight_segment_with_background(text: str) -> str:
+    """Apply selection background while preserving existing ANSI attributes."""
     if not text:
         return text
     out: list[str] = [f"\033[{SOURCE_SELECTION_BG_SGR}m"]
@@ -130,6 +140,7 @@ def _highlight_segment_with_background(text: str) -> str:
 
 
 def highlight_ansi_column_range(text: str, start_col: int, end_col: int) -> str:
+    """Highlight an ANSI text segment spanning display columns ``[start_col,end_col)``."""
     if not text:
         return text
     if end_col <= start_col:
@@ -171,6 +182,7 @@ def normalized_selection_range(
     anchor: tuple[int, int] | None,
     focus: tuple[int, int] | None,
 ) -> tuple[tuple[int, int], tuple[int, int]] | None:
+    """Normalize nullable selection endpoints into ordered ``(anchor, focus)`` pair."""
     if anchor is None and focus is None:
         return None
     if anchor is None:
@@ -190,6 +202,7 @@ def selection_span_for_rendered_line(
     viewport_start_col: int,
     viewport_end_col: int,
 ) -> tuple[int, int] | None:
+    """Project absolute selection range onto one rendered line's viewport columns."""
     if selection_range is None:
         return None
 
@@ -235,6 +248,7 @@ def rendered_preview_row(
     has_current_text_hit: bool,
     selection_range: tuple[tuple[int, int], tuple[int, int]] | None,
 ) -> str:
+    """Render one source row with viewport clipping, search, and selection overlays."""
     if text_idx >= len(text_lines):
         return ""
 

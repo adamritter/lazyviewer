@@ -15,7 +15,7 @@ from unittest import mock
 from lazyviewer.source_pane.diff import _ADDED_BG_SGR, _REMOVED_BG_SGR, _apply_line_background
 from lazyviewer.navigation import JumpLocation
 from lazyviewer.render import render_dual_page
-from lazyviewer.tree_filter import TreeFilterDeps, TreeFilterOps
+from lazyviewer.filter_panel import TreeFilterDeps, TreeFilterOps
 from lazyviewer.search.fuzzy import (
     clear_project_files_cache,
     collect_project_file_labels,
@@ -160,7 +160,7 @@ class PerformanceBudgetTests(unittest.TestCase):
                 time.sleep(0.07)
                 return {}, False, None
 
-            with mock.patch("lazyviewer.tree_filter.search_project_content_rg", side_effect=slow_search):
+            with mock.patch("lazyviewer.filter_panel.controller.search_project_content_rg", side_effect=slow_search):
                 cold_start = time.perf_counter()
                 ops.apply_tree_filter_query("alpha")
                 cold_elapsed = time.perf_counter() - cold_start

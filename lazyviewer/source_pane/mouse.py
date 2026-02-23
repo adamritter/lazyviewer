@@ -1,4 +1,8 @@
-"""Source-pane mouse event helpers."""
+"""Mouse drag/click handling for source-pane interactions.
+
+This layer owns source-text selection drag behavior, edge auto-scroll, and
+click routing to preview actions (directory row jump, import jump, token search).
+"""
 
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR = 1
 
 
 def _drag_scroll_step(overshoot: int, span: int) -> int:
+    """Compute scroll delta during drag when pointer overshoots pane bounds."""
     if overshoot < 1:
         overshoot = 1
     base_step = max(1, min(max(1, span // 2), overshoot))
@@ -30,12 +35,15 @@ def _drag_scroll_step(overshoot: int, span: int) -> int:
 
 @dataclass
 class SourceSelectionDragState:
+    """Mutable drag-state snapshot for active source selection gestures."""
+
     active: bool = False
     pointer: tuple[int, int] | None = None
     vertical_edge: str | None = None
     horizontal_edge: str | None = None
 
     def reset(self) -> None:
+        """Clear all drag-tracking fields."""
         self.active = False
         self.pointer = None
         self.vertical_edge = None
@@ -44,6 +52,8 @@ class SourceSelectionDragState:
 
 @dataclass(frozen=True)
 class SourcePaneMouseCallbacks:
+    """Side-effect callbacks required by ``SourcePaneMouseHandlers``."""
+
     visible_content_rows: Callable[[], int]
     source_pane_col_bounds: Callable[[], tuple[int, int]]
     source_selection_position: Callable[[int, int], tuple[int, int] | None]
@@ -59,16 +69,21 @@ class SourcePaneMouseCallbacks:
 
 @dataclass(frozen=True)
 class SourcePaneClickResult:
+    """Outcome of source-pane click handling."""
+
     handled: bool
     route_to_tree: bool = False
 
 
 class SourcePaneMouseHandlers:
+    """Handle source-pane mouse clicks, drags, and auto-scroll updates."""
+
     def __init__(
         self,
         state: AppState,
         callbacks: SourcePaneMouseCallbacks,
     ) -> None:
+        """Bind source-pane mouse handlers to app state and callback hooks."""
         self._state = state
         self._visible_content_rows = callbacks.visible_content_rows
         self._source_pane_col_bounds = callbacks.source_pane_col_bounds
@@ -84,9 +99,11 @@ class SourcePaneMouseHandlers:
         self._drag = SourceSelectionDragState()
 
     def reset_source_selection_drag_state(self) -> None:
+        """Reset drag-tracking state to idle."""
         self._drag.reset()
 
     def _update_drag_pointer(self, col: int, row: int) -> None:
+        """Update drag pointer and infer active edge states for auto-scroll."""
         visible_rows = self._visible_content_rows()
         previous_row = self._drag.pointer[1] if self._drag.pointer is not None else row
         previous_col = self._drag.pointer[0] if self._drag.pointer is not None else col
@@ -116,6 +133,7 @@ class SourcePaneMouseHandlers:
             self._drag.horizontal_edge = None
 
     def tick_source_selection_drag(self) -> None:
+        """Advance drag selection and auto-scroll when pointer is at pane edges."""
         state = self._state
         if not self._drag.active or state.source_selection_anchor is None:
             return
@@ -190,6 +208,7 @@ class SourcePaneMouseHandlers:
         is_left_down: bool,
         is_left_up: bool,
     ) -> SourcePaneClickResult:
+        """Handle one mouse click/release event inside or near source pane."""
         state = self._state
         if self._drag.active and is_left_down:
             self._update_drag_pointer(col, row)

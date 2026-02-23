@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from lazyviewer.navigation import JumpLocation
-from lazyviewer.tree_filter import TreeFilterDeps, TreeFilterOps
+from lazyviewer.filter_panel import TreeFilterDeps, TreeFilterOps
 from lazyviewer.state import AppState
 from lazyviewer.tree import TreeEntry
 
@@ -64,7 +64,7 @@ class RuntimeTreeFilterTests(unittest.TestCase):
             )
 
             with mock.patch(
-                "lazyviewer.tree_filter.search_project_content_rg",
+                "lazyviewer.filter_panel.controller.search_project_content_rg",
                 return_value=({}, False, None),
             ) as search_mock:
                 ops.apply_tree_filter_query("a")

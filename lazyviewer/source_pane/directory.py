@@ -1,4 +1,9 @@
-"""Directory tree preview rendering and cache helpers."""
+"""Render directory previews with bounded depth, size labels, and cache reuse.
+
+Preview output is ANSI-formatted tree text used by the source pane when the
+selected path is a directory. Results are memoized with keys that include root
+mtime and git-overlay signature.
+"""
 
 from __future__ import annotations
 
@@ -28,6 +33,7 @@ def _cache_key_for_directory(
     show_size_labels: bool,
     git_overlay_signature: int,
 ) -> tuple[str, bool, int, int, bool, bool, int, int] | None:
+    """Build cache key for a directory preview request."""
     try:
         resolved = root_dir.resolve()
         mtime_ns = resolved.stat().st_mtime_ns
@@ -46,6 +52,7 @@ def _cache_key_for_directory(
 
 
 def _cache_get(key: tuple[str, bool, int, int, bool, bool, int, int] | None) -> tuple[str, bool] | None:
+    """Return cached preview/truncation pair and refresh LRU order."""
     if key is None:
         return None
     cached = _DIR_PREVIEW_CACHE.get(key)
@@ -56,6 +63,7 @@ def _cache_get(key: tuple[str, bool, int, int, bool, bool, int, int] | None) -> 
 
 
 def _cache_put(key: tuple[str, bool, int, int, bool, bool, int, int] | None, preview: str, truncated: bool) -> None:
+    """Insert preview result into LRU cache with bounded size."""
     if key is None:
         return
     _DIR_PREVIEW_CACHE[key] = (preview, truncated)
@@ -65,10 +73,12 @@ def _cache_put(key: tuple[str, bool, int, int, bool, bool, int, int] | None, pre
 
 
 def clear_directory_preview_cache() -> None:
+    """Clear in-memory directory preview cache."""
     _DIR_PREVIEW_CACHE.clear()
 
 
 def _directory_overlay_signature(root_dir: Path, git_status_overlay: dict[Path, int] | None) -> int:
+    """Compute stable hash of overlay entries that affect directory preview rows."""
     if not git_status_overlay:
         return 0
 
@@ -112,6 +122,7 @@ def build_directory_preview(
     git_status_overlay: dict[Path, int] | None = None,
     show_size_labels: bool = True,
 ) -> tuple[str, bool]:
+    """Render directory tree preview and return ``(text, truncated)``."""
     overlay_signature = _directory_overlay_signature(root_dir, git_status_overlay)
     cache_key = _cache_key_for_directory(
         root_dir,
@@ -143,6 +154,7 @@ def build_directory_preview(
     emitted = 0
 
     def iter_children(directory: Path) -> tuple[list[tuple[str, Path, bool, int | None]], Exception | None]:
+        """Scan and sort one directory's visible children for preview rendering."""
         children: list[tuple[str, Path, bool, int | None]] = []
         try:
             with os.scandir(directory) as entries:
@@ -171,6 +183,7 @@ def build_directory_preview(
         return children, None
 
     def walk(directory: Path, prefix: str, depth: int) -> None:
+        """Emit preview rows depth-first until depth/entry limits are reached."""
         nonlocal emitted
         if depth > max_depth or emitted >= max_entries:
             return

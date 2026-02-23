@@ -104,7 +104,7 @@ class AppRuntimePreviewClickTests(unittest.TestCase):
             with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
             ), mock.patch(
-                "lazyviewer.tree_filter.search_project_content_rg", side_effect=fake_search_content
+                "lazyviewer.filter_panel.controller.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch(
                 "lazyviewer.app_runtime.collect_project_file_labels", return_value=[]
             ), mock.patch(
@@ -182,7 +182,7 @@ class AppRuntimePreviewClickTests(unittest.TestCase):
             with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
             ), mock.patch(
-                "lazyviewer.tree_filter.search_project_content_rg", side_effect=fake_search_content
+                "lazyviewer.filter_panel.controller.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch(
                 "lazyviewer.app_runtime.collect_project_file_labels", return_value=[]
             ), mock.patch(

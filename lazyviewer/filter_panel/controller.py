@@ -12,15 +12,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .navigation import JumpLocation
-from .search.content import ContentMatch, search_project_content_rg
-from .search.fuzzy import (
+from ..navigation import JumpLocation
+from ..search.content import ContentMatch, search_project_content_rg
+from ..search.fuzzy import (
     STRICT_SUBSTRING_ONLY_MIN_FILES,
     collect_project_file_labels,
     fuzzy_match_label_index,
 )
-from .state import AppState
-from .tree import (
+from ..state import AppState
+from ..tree import (
     build_tree_entries,
     filter_tree_entries_for_content_matches,
     filter_tree_entries_for_files,

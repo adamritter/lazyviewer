@@ -1,4 +1,11 @@
-"""File and path preview rendering helpers."""
+"""Build preview payloads for files and directories.
+
+This module decides how a selected path should be rendered in the source pane:
+- directory tree previews
+- binary/image placeholders
+- git-diff previews for modified tracked files
+- plain or syntax-colored source text
+"""
 
 from __future__ import annotations
 

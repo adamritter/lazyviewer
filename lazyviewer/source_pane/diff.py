@@ -1,4 +1,9 @@
-"""Git diff preview rendering helpers for preview pane."""
+"""Build annotated git-diff previews aligned to current source content.
+
+The generated preview keeps full-file context, marks added/removed lines, and
+optionally preserves syntax coloring while applying readable diff backgrounds.
+Results are memoized with a git-signature-aware cache key.
+"""
 
 from __future__ import annotations
 
@@ -24,6 +29,8 @@ _DIFF_CONTRAST_TRUECOLOR = ("170", "170", "170")
 
 @dataclass
 class DiffHunk:
+    """Parsed hunk metadata plus removed lines from unified diff text."""
+
     old_start: int
     old_count: int
     new_start: int
@@ -32,6 +39,7 @@ class DiffHunk:
 
 
 def _cache_get(key: tuple[str, int, int, str, bool, str]) -> tuple[bool, str | None]:
+    """Lookup diff preview cache entry and refresh LRU order."""
     if key not in _DIFF_PREVIEW_CACHE:
         return False, None
     cached = _DIFF_PREVIEW_CACHE[key]
@@ -40,6 +48,7 @@ def _cache_get(key: tuple[str, int, int, str, bool, str]) -> tuple[bool, str | N
 
 
 def _cache_put(key: tuple[str, int, int, str, bool, str], value: str | None) -> None:
+    """Insert diff preview cache entry and evict oldest overflow entries."""
     _DIFF_PREVIEW_CACHE[key] = value
     _DIFF_PREVIEW_CACHE.move_to_end(key)
     while len(_DIFF_PREVIEW_CACHE) > GIT_DIFF_PREVIEW_CACHE_MAX:
@@ -47,10 +56,12 @@ def _cache_put(key: tuple[str, int, int, str, bool, str], value: str | None) -> 
 
 
 def clear_diff_preview_cache() -> None:
+    """Clear in-memory diff preview cache."""
     _DIFF_PREVIEW_CACHE.clear()
 
 
 def _resolve_repo_and_git_dir(path: Path, timeout_seconds: float) -> tuple[Path | None, Path | None]:
+    """Resolve repository root and git-dir for a path."""
     try:
         proc = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--show-toplevel", "--git-dir"],
@@ -78,6 +89,7 @@ def _resolve_repo_and_git_dir(path: Path, timeout_seconds: float) -> tuple[Path 
 
 
 def _run_git(repo_root: Path, args: list[str], timeout_seconds: float) -> subprocess.CompletedProcess[str] | None:
+    """Execute a git subcommand with timeout and tolerant failure handling."""
     try:
         return subprocess.run(
             ["git", "-C", str(repo_root), *args],
@@ -94,6 +106,7 @@ def _run_git(repo_root: Path, args: list[str], timeout_seconds: float) -> subpro
 
 
 def _parse_diff_hunks(diff_text: str) -> list[DiffHunk]:
+    """Parse unified diff text into hunk records."""
     hunks: list[DiffHunk] = []
     current: DiffHunk | None = None
 
@@ -124,6 +137,7 @@ def _parse_diff_hunks(diff_text: str) -> list[DiffHunk]:
 
 
 def _format_marked_line(marker: str, code_line: str, colorize: bool) -> str:
+    """Format one annotated preview line with marker-aware background styling."""
     if not colorize:
         return f"{marker} {code_line}"
 
@@ -135,6 +149,7 @@ def _format_marked_line(marker: str, code_line: str, colorize: bool) -> str:
 
 
 def _boost_foreground_contrast_for_diff(params: str) -> str:
+    """Adjust low-contrast foreground SGR params for diff background readability."""
     parts = [part for part in params.split(";") if part]
     if not parts:
         return params
@@ -190,7 +205,9 @@ def _boost_foreground_contrast_for_diff(params: str) -> str:
 
 
 def _apply_line_background(code_line: str, bg_sgr: str) -> str:
+    """Apply persistent background SGR to an ANSI-coded source line."""
     def _inject_bg(match: re.Match[str]) -> str:
+        """Inject background into each SGR sequence while preserving contrast."""
         params = _boost_foreground_contrast_for_diff(match.group(1))
         if params:
             return f"\033[{params};{bg_sgr}m"
@@ -201,6 +218,7 @@ def _apply_line_background(code_line: str, bg_sgr: str) -> str:
 
 
 def _colorize_lines(lines: list[str], target: Path, style: str, colorize: bool) -> list[str]:
+    """Colorize source lines and preserve one-to-one line count."""
     if not colorize or not lines:
         return lines
     rendered = colorize_source("\n".join(lines), target, style)
@@ -218,6 +236,7 @@ def _build_annotated_source_preview(
     style: str,
     colorize: bool,
 ) -> str:
+    """Build combined source+diff view with inline added/removed markers."""
     total_lines = len(source_lines)
     added_line_numbers: set[int] = set()
     removed_insertions: dict[int, list[str]] = {}
@@ -264,6 +283,11 @@ def build_unified_diff_preview_for_path(
     colorize: bool = True,
     style: str = "monokai",
 ) -> str | None:
+    """Return annotated git diff preview for a tracked modified file.
+
+    Returns ``None`` when target is outside a repo, unmodified/untracked, or no
+    hunk data can be derived.
+    """
     target = target.resolve()
     if not target.is_file():
         return None
