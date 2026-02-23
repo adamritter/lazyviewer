@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
@@ -473,6 +474,131 @@ class _PagerLayoutOps:
         return image_col, 1, image_width, image_rows
 
 
+class _SourcePaneOps:
+    def __init__(
+        self,
+        *,
+        state: AppState,
+        visible_content_rows: Callable[[], int],
+    ) -> None:
+        self.state = state
+        self.visible_content_rows = visible_content_rows
+
+    def preview_pane_width(self) -> int:
+        if self.state.browser_visible:
+            return max(1, self.state.right_width)
+        term = shutil.get_terminal_size((80, 24))
+        return max(1, term.columns - 1)
+
+    def max_horizontal_text_offset(self) -> int:
+        if self.state.wrap_text or not self.state.lines:
+            return 0
+        viewport_width = self.preview_pane_width()
+        max_width = 0
+        for line in self.state.lines:
+            max_width = max(max_width, _rendered_line_display_width(line))
+        return max(0, max_width - viewport_width)
+
+    def source_pane_col_bounds(self) -> tuple[int, int]:
+        if self.state.browser_visible:
+            min_col = self.state.left_width + 2
+            pane_width = max(1, self.state.right_width)
+        else:
+            min_col = 1
+            pane_width = self.preview_pane_width()
+        max_col = min_col + pane_width - 1
+        return min_col, max_col
+
+    def source_selection_position(self, col: int, row: int) -> tuple[int, int] | None:
+        visible_rows = self.visible_content_rows()
+        if row < 1 or row > visible_rows:
+            return None
+
+        if self.state.browser_visible:
+            right_start_col = self.state.left_width + 2
+            if col < right_start_col:
+                return None
+            text_col = max(0, col - right_start_col + self.state.text_x)
+        else:
+            right_start_col = 1
+            if col < right_start_col:
+                return None
+            text_col = max(0, col - right_start_col + self.state.text_x)
+
+        if not self.state.lines:
+            return None
+        line_idx = max(0, min(self.state.start + row - 1, len(self.state.lines) - 1))
+        return line_idx, text_col
+
+    def display_line_to_source_line(self, display_idx: int) -> int | None:
+        if display_idx < 0 or display_idx >= len(self.state.lines):
+            return None
+        if not self.state.wrap_text:
+            return display_idx
+
+        source_idx = 0
+        for idx in range(display_idx):
+            if _line_has_newline_terminator(self.state.lines[idx]):
+                source_idx += 1
+        return source_idx
+
+    def directory_preview_target_for_display_line(self, display_idx: int) -> Path | None:
+        if self.state.dir_preview_path is None:
+            return None
+
+        source_idx = self.display_line_to_source_line(display_idx)
+        if source_idx is None:
+            return None
+
+        rendered_lines = self.state.rendered.splitlines()
+        if source_idx < 0 or source_idx >= len(rendered_lines):
+            return None
+
+        root = self.state.dir_preview_path.resolve()
+        dirs_by_depth: dict[int, Path] = {0: root}
+
+        for idx, raw_line in enumerate(rendered_lines):
+            plain_line = ANSI_ESCAPE_RE.sub("", raw_line).rstrip("\r\n")
+            target: Path | None = None
+            depth = 0
+            is_dir = False
+
+            if idx == 0:
+                target = root
+                depth = 0
+                is_dir = True
+            else:
+                branch_idx = plain_line.find("├─ ")
+                if branch_idx < 0:
+                    branch_idx = plain_line.find("└─ ")
+                if branch_idx >= 0:
+                    name_part = plain_line[branch_idx + 3 :]
+                    if name_part and not name_part.startswith("<error:"):
+                        badge_match = _TRAILING_GIT_BADGES_RE.match(name_part.rstrip())
+                        if badge_match is not None:
+                            name_part = badge_match.group(1)
+                        is_dir = name_part.endswith("/")
+                        if is_dir:
+                            name_part = name_part[:-1]
+                        if name_part:
+                            depth = (branch_idx // 3) + 1
+                            parent = dirs_by_depth.get(depth - 1, root)
+                            target = (parent / name_part).resolve()
+
+            if target is not None and is_dir:
+                dirs_by_depth[depth] = target
+                for existing_depth in list(dirs_by_depth):
+                    if existing_depth > depth:
+                        del dirs_by_depth[existing_depth]
+
+            if idx == source_idx:
+                if target is None:
+                    return None
+                return target
+
+        return None
+
+
 def _launch_editor_for_path(target: Path, *, terminal: TerminalController) -> str | None:
     return launch_editor(target, terminal.disable_tui_mode, terminal.enable_tui_mode)
 
@@ -529,6 +655,110 @@ def _sorted_git_modified_file_paths(state: AppState) -> list[Path]:
     return [rel_to_path[rel] for rel in ordered_rel]
 
 
+def _refresh_rendered_for_current_path(
+    *,
+    state: AppState,
+    style: str,
+    no_color: bool,
+    rebuild_screen_lines: Callable[..., None],
+    visible_content_rows: Callable[[], int],
+    reset_scroll: bool = True,
+    reset_dir_budget: bool = False,
+    force_rebuild: bool = False,
+) -> None:
+    if force_rebuild:
+        clear_directory_preview_cache()
+        clear_diff_preview_cache()
+    resolved_target = state.current_path.resolve()
+    is_dir_target = resolved_target.is_dir()
+    if is_dir_target:
+        if reset_dir_budget or state.dir_preview_path != resolved_target:
+            state.dir_preview_max_entries = DIR_PREVIEW_INITIAL_MAX_ENTRIES
+        dir_limit = state.dir_preview_max_entries
+    else:
+        dir_limit = DIR_PREVIEW_INITIAL_MAX_ENTRIES
+
+    prefer_git_diff = state.git_features_enabled and not (
+        state.tree_filter_active
+        and state.tree_filter_mode == "content"
+        and bool(state.tree_filter_query)
+    )
+    rendered_for_path = build_rendered_for_path(
+        state.current_path,
+        state.show_hidden,
+        style,
+        no_color,
+        dir_max_entries=dir_limit,
+        dir_skip_gitignored=_skip_gitignored_for_hidden_mode(state.show_hidden),
+        prefer_git_diff=prefer_git_diff,
+        dir_git_status_overlay=(state.git_status_overlay if state.git_features_enabled else None),
+    )
+    state.rendered = rendered_for_path.text
+    rebuild_screen_lines(preserve_scroll=not reset_scroll)
+    if reset_scroll and rendered_for_path.is_git_diff_preview:
+        first_change = _first_git_change_screen_line(state.lines)
+        if first_change is not None:
+            state.start = _centered_scroll_start(
+                first_change,
+                state.max_start,
+                visible_content_rows(),
+            )
+    state.dir_preview_truncated = rendered_for_path.truncated
+    state.dir_preview_path = resolved_target if rendered_for_path.is_directory else None
+    state.preview_image_path = rendered_for_path.image_path
+    state.preview_image_format = rendered_for_path.image_format
+    state.preview_is_git_diff = rendered_for_path.is_git_diff_preview
+    if reset_scroll:
+        state.text_x = 0
+
+
+def _maybe_grow_directory_preview(
+    *,
+    state: AppState,
+    visible_content_rows: Callable[[], int],
+    refresh_rendered_for_current_path: Callable[..., None],
+) -> bool:
+    if state.dir_preview_path is None or not state.dir_preview_truncated:
+        return False
+    if state.current_path.resolve() != state.dir_preview_path:
+        return False
+    if state.dir_preview_max_entries >= DIR_PREVIEW_HARD_MAX_ENTRIES:
+        return False
+
+    # Only grow when the user is effectively at the end of the current preview.
+    near_end_threshold = max(1, visible_content_rows() // 3)
+    if state.start < max(0, state.max_start - near_end_threshold):
+        return False
+
+    previous_line_count = len(state.lines)
+    state.dir_preview_max_entries = min(
+        DIR_PREVIEW_HARD_MAX_ENTRIES,
+        state.dir_preview_max_entries + DIR_PREVIEW_GROWTH_STEP,
+    )
+    refresh_rendered_for_current_path(reset_scroll=False, reset_dir_budget=False)
+    return len(state.lines) > previous_line_count
+
+
+def _toggle_git_features(
+    *,
+    state: AppState,
+    refresh_git_status_overlay: Callable[..., None],
+    refresh_rendered_for_current_path: Callable[..., None],
+) -> None:
+    state.git_features_enabled = not state.git_features_enabled
+    if state.git_features_enabled:
+        refresh_git_status_overlay(force=True)
+    else:
+        if state.git_status_overlay:
+            state.git_status_overlay = {}
+        state.git_status_last_refresh = time.monotonic()
+    refresh_rendered_for_current_path(
+        reset_scroll=state.git_features_enabled,
+        reset_dir_budget=False,
+    )
+    state.dirty = True
+
+
 def _launch_lazygit(
     *,
     state: AppState,
@@ -562,6 +792,120 @@ def _launch_lazygit(
     preferred_path = state.current_path.resolve()
     sync_selected_target_after_tree_refresh(preferred_path=preferred_path, force_rebuild=True)
     mark_tree_watch_dirty()
+
+
+@dataclass
+class _WatchRefreshContext:
+    tree_last_poll: float = 0.0
+    tree_signature: str | None = None
+    git_last_poll: float = 0.0
+    git_signature: str | None = None
+    git_repo_root: Path | None = None
+    git_dir: Path | None = None
+
+
+def _refresh_git_status_overlay(
+    *,
+    state: AppState,
+    refresh_rendered_for_current_path: Callable[..., None],
+    force: bool = False,
+) -> None:
+    if not state.git_features_enabled:
+        if state.git_status_overlay:
+            state.git_status_overlay = {}
+            state.dirty = True
+        state.git_status_last_refresh = time.monotonic()
+        return
+
+    now = time.monotonic()
+    if not force and (now - state.git_status_last_refresh) < GIT_STATUS_REFRESH_SECONDS:
+        return
+
+    previous = state.git_status_overlay
+    state.git_status_overlay = collect_git_status_overlay(state.tree_root)
+    state.git_status_last_refresh = time.monotonic()
+    if state.git_status_overlay != previous:
+        if state.current_path.resolve().is_dir():
+            refresh_rendered_for_current_path(reset_scroll=False, reset_dir_budget=False)
+        state.dirty = True
+
+
+def _reset_git_watch_context(
+    *,
+    state: AppState,
+    watch_context: _WatchRefreshContext,
+) -> None:
+    watch_context.git_repo_root, watch_context.git_dir = resolve_git_paths(state.tree_root)
+    watch_context.git_last_poll = 0.0
+    watch_context.git_signature = None
+
+
+def _maybe_refresh_tree_watch(
+    *,
+    state: AppState,
+    watch_context: _WatchRefreshContext,
+    sync_selected_target_after_tree_refresh: Callable[..., None],
+) -> None:
+    now = time.monotonic()
+    if (now - watch_context.tree_last_poll) < TREE_WATCH_POLL_SECONDS:
+        return
+    watch_context.tree_last_poll = now
+
+    signature = build_tree_watch_signature(
+        state.tree_root,
+        state.expanded,
+        state.show_hidden,
+    )
+    if watch_context.tree_signature is None:
+        watch_context.tree_signature = signature
+        return
+    if signature == watch_context.tree_signature:
+        return
+
+    watch_context.tree_signature = signature
+    preferred_path = (
+        state.tree_entries[state.selected_idx].path.resolve()
+        if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries)
+        else state.current_path.resolve()
+    )
+    sync_selected_target_after_tree_refresh(preferred_path=preferred_path)
+
+
+def _maybe_refresh_git_watch(
+    *,
+    state: AppState,
+    watch_context: _WatchRefreshContext,
+    refresh_git_status_overlay: Callable[..., None],
+    refresh_rendered_for_current_path: Callable[..., None],
+) -> None:
+    if not state.git_features_enabled:
+        return
+    now = time.monotonic()
+    if (now - watch_context.git_last_poll) < GIT_WATCH_POLL_SECONDS:
+        return
+    watch_context.git_last_poll = now
+
+    signature = build_git_watch_signature(watch_context.git_dir)
+    if watch_context.git_signature is None:
+        watch_context.git_signature = signature
+        return
+    if signature == watch_context.git_signature:
+        return
+
+    watch_context.git_signature = signature
+    refresh_git_status_overlay(force=True)
+    # Git HEAD/index changes can invalidate the current file's diff preview
+    # even when the selected path hasn't changed.
+    previous_rendered = state.rendered
+    previous_start = state.start
+    previous_max_start = state.max_start
+    refresh_rendered_for_current_path(reset_scroll=False, reset_dir_budget=False)
+    if (
+        state.rendered != previous_rendered
+        or state.start != previous_start
+        or state.max_start != previous_max_start
+    ):
+        state.dirty = True
 
 
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
@@ -668,12 +1012,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     show_inline_error = layout_ops.show_inline_error
     current_preview_image_path = layout_ops.current_preview_image_path
     current_preview_image_geometry = layout_ops.current_preview_image_geometry
-    tree_watch_last_poll = 0.0
-    tree_watch_signature: str | None = None
-    git_watch_last_poll = 0.0
-    git_watch_signature: str | None = None
-    git_watch_repo_root: Path | None = None
-    git_watch_dir: Path | None = None
+    watch_refresh = _WatchRefreshContext()
     source_selection_drag_active = False
     source_selection_drag_pointer: tuple[int, int] | None = None
     source_selection_drag_edge: str | None = None
@@ -687,156 +1026,50 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         source_selection_drag_edge = None
         source_selection_drag_h_edge = None
 
-    def refresh_git_status_overlay(force: bool = False) -> None:
-        if not state.git_features_enabled:
-            if state.git_status_overlay:
-                state.git_status_overlay = {}
-                state.dirty = True
-            state.git_status_last_refresh = time.monotonic()
-            return
-
-        now = time.monotonic()
-        if not force and (now - state.git_status_last_refresh) < GIT_STATUS_REFRESH_SECONDS:
-            return
-
-        previous = state.git_status_overlay
-        state.git_status_overlay = collect_git_status_overlay(state.tree_root)
-        state.git_status_last_refresh = time.monotonic()
-        if state.git_status_overlay != previous:
-            if state.current_path.resolve().is_dir():
-                refresh_rendered_for_current_path(reset_scroll=False, reset_dir_budget=False)
-            state.dirty = True
-
-    def reset_git_watch_context() -> None:
-        nonlocal git_watch_last_poll, git_watch_signature, git_watch_repo_root, git_watch_dir
-        git_watch_repo_root, git_watch_dir = resolve_git_paths(state.tree_root)
-        git_watch_last_poll = 0.0
-        git_watch_signature = None
-
-    def maybe_refresh_tree_watch() -> None:
-        nonlocal tree_watch_last_poll, tree_watch_signature
-        now = time.monotonic()
-        if (now - tree_watch_last_poll) < TREE_WATCH_POLL_SECONDS:
-            return
-        tree_watch_last_poll = now
-
-        signature = build_tree_watch_signature(
-            state.tree_root,
-            state.expanded,
-            state.show_hidden,
-        )
-        if tree_watch_signature is None:
-            tree_watch_signature = signature
-            return
-        if signature == tree_watch_signature:
-            return
-
-        tree_watch_signature = signature
-        preferred_path = (
-            state.tree_entries[state.selected_idx].path.resolve()
-            if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries)
-            else state.current_path.resolve()
-        )
-        sync_selected_target_after_tree_refresh(preferred_path=preferred_path)
-
-    def maybe_refresh_git_watch() -> None:
-        nonlocal git_watch_last_poll, git_watch_signature
-        if not state.git_features_enabled:
-            return
-        now = time.monotonic()
-        if (now - git_watch_last_poll) < GIT_WATCH_POLL_SECONDS:
-            return
-        git_watch_last_poll = now
-
-        signature = build_git_watch_signature(git_watch_dir)
-        if git_watch_signature is None:
-            git_watch_signature = signature
-            return
-        if signature == git_watch_signature:
-            return
-
-        git_watch_signature = signature
-        refresh_git_status_overlay(force=True)
-        # Git HEAD/index changes can invalidate the current file's diff preview
-        # even when the selected path hasn't changed.
-        previous_rendered = state.rendered
-        previous_start = state.start
-        previous_max_start = state.max_start
-        refresh_rendered_for_current_path(reset_scroll=False, reset_dir_budget=False)
-        if (
-            state.rendered != previous_rendered
-            or state.start != previous_start
-            or state.max_start != previous_max_start
-        ):
-            state.dirty = True
-
     sorted_git_modified_file_paths = partial(_sorted_git_modified_file_paths, state)
+    refresh_rendered_for_current_path = partial(
+        _refresh_rendered_for_current_path,
+        state=state,
+        style=style,
+        no_color=no_color,
+        rebuild_screen_lines=rebuild_screen_lines,
+        visible_content_rows=visible_content_rows,
+    )
 
-    def refresh_rendered_for_current_path(
-        reset_scroll: bool = True,
-        reset_dir_budget: bool = False,
-        force_rebuild: bool = False,
-    ) -> None:
-        if force_rebuild:
-            clear_directory_preview_cache()
-            clear_diff_preview_cache()
-        resolved_target = state.current_path.resolve()
-        is_dir_target = resolved_target.is_dir()
-        if is_dir_target:
-            if reset_dir_budget or state.dir_preview_path != resolved_target:
-                state.dir_preview_max_entries = DIR_PREVIEW_INITIAL_MAX_ENTRIES
-            dir_limit = state.dir_preview_max_entries
-        else:
-            dir_limit = DIR_PREVIEW_INITIAL_MAX_ENTRIES
-
-        prefer_git_diff = state.git_features_enabled and not (
-            state.tree_filter_active
-            and state.tree_filter_mode == "content"
-            and bool(state.tree_filter_query)
-        )
-        rendered_for_path = build_rendered_for_path(
-            state.current_path,
-            state.show_hidden,
-            style,
-            no_color,
-            dir_max_entries=dir_limit,
-            dir_skip_gitignored=_skip_gitignored_for_hidden_mode(state.show_hidden),
-            prefer_git_diff=prefer_git_diff,
-            dir_git_status_overlay=(state.git_status_overlay if state.git_features_enabled else None),
-        )
-        state.rendered = rendered_for_path.text
-        rebuild_screen_lines(preserve_scroll=not reset_scroll)
-        if reset_scroll and rendered_for_path.is_git_diff_preview:
-            first_change = _first_git_change_screen_line(state.lines)
-            if first_change is not None:
-                state.start = _centered_scroll_start(
-                    first_change,
-                    state.max_start,
-                    visible_content_rows(),
-                )
-        state.dir_preview_truncated = rendered_for_path.truncated
-        state.dir_preview_path = resolved_target if rendered_for_path.is_directory else None
-        state.preview_image_path = rendered_for_path.image_path
-        state.preview_image_format = rendered_for_path.image_format
-        state.preview_is_git_diff = rendered_for_path.is_git_diff_preview
-        if reset_scroll:
-            state.text_x = 0
+    refresh_git_status_overlay = partial(
+        _refresh_git_status_overlay,
+        state=state,
+        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+    )
+    reset_git_watch_context = partial(
+        _reset_git_watch_context,
+        state=state,
+        watch_context=watch_refresh,
+    )
+    sync_selected_target_after_tree_refresh_proxy = lambda **kwargs: sync_selected_target_after_tree_refresh(
+        **kwargs
+    )
+    maybe_refresh_tree_watch = partial(
+        _maybe_refresh_tree_watch,
+        state=state,
+        watch_context=watch_refresh,
+        sync_selected_target_after_tree_refresh=sync_selected_target_after_tree_refresh_proxy,
+    )
+    maybe_refresh_git_watch = partial(
+        _maybe_refresh_git_watch,
+        state=state,
+        watch_context=watch_refresh,
+        refresh_git_status_overlay=refresh_git_status_overlay,
+        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+    )
 
     clear_source_selection = partial(_clear_source_selection, state)
-
-    def toggle_git_features() -> None:
-        state.git_features_enabled = not state.git_features_enabled
-        if state.git_features_enabled:
-            refresh_git_status_overlay(force=True)
-        else:
-            if state.git_status_overlay:
-                state.git_status_overlay = {}
-            state.git_status_last_refresh = time.monotonic()
-        refresh_rendered_for_current_path(
-            reset_scroll=state.git_features_enabled,
-            reset_dir_budget=False,
-        )
-        state.dirty = True
+    toggle_git_features = partial(
+        _toggle_git_features,
+        state=state,
+        refresh_git_status_overlay=refresh_git_status_overlay,
+        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+    )
 
     def preview_selected_entry(force: bool = False) -> None:
         if not state.tree_entries:
@@ -857,137 +1090,23 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state.current_path = selected_target
         refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
 
-    def maybe_grow_directory_preview() -> bool:
-        if state.dir_preview_path is None or not state.dir_preview_truncated:
-            return False
-        if state.current_path.resolve() != state.dir_preview_path:
-            return False
-        if state.dir_preview_max_entries >= DIR_PREVIEW_HARD_MAX_ENTRIES:
-            return False
+    maybe_grow_directory_preview = partial(
+        _maybe_grow_directory_preview,
+        state=state,
+        visible_content_rows=visible_content_rows,
+        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+    )
 
-        # Only grow when the user is effectively at the end of the current preview.
-        near_end_threshold = max(1, visible_content_rows() // 3)
-        if state.start < max(0, state.max_start - near_end_threshold):
-            return False
-
-        previous_line_count = len(state.lines)
-        state.dir_preview_max_entries = min(
-            DIR_PREVIEW_HARD_MAX_ENTRIES,
-            state.dir_preview_max_entries + DIR_PREVIEW_GROWTH_STEP,
-        )
-        refresh_rendered_for_current_path(reset_scroll=False, reset_dir_budget=False)
-        return len(state.lines) > previous_line_count
-
-    def preview_pane_width() -> int:
-        if state.browser_visible:
-            return max(1, state.right_width)
-        term = shutil.get_terminal_size((80, 24))
-        return max(1, term.columns - 1)
-
-    def max_horizontal_text_offset() -> int:
-        if state.wrap_text or not state.lines:
-            return 0
-        viewport_width = preview_pane_width()
-        max_width = 0
-        for line in state.lines:
-            max_width = max(max_width, _rendered_line_display_width(line))
-        return max(0, max_width - viewport_width)
-
-    def source_pane_col_bounds() -> tuple[int, int]:
-        if state.browser_visible:
-            min_col = state.left_width + 2
-            pane_width = max(1, state.right_width)
-        else:
-            min_col = 1
-            pane_width = preview_pane_width()
-        max_col = min_col + pane_width - 1
-        return min_col, max_col
-
-    def source_selection_position(col: int, row: int) -> tuple[int, int] | None:
-        visible_rows = visible_content_rows()
-        if row < 1 or row > visible_rows:
-            return None
-
-        if state.browser_visible:
-            right_start_col = state.left_width + 2
-            if col < right_start_col:
-                return None
-            text_col = max(0, col - right_start_col + state.text_x)
-        else:
-            right_start_col = 1
-            if col < right_start_col:
-                return None
-            text_col = max(0, col - right_start_col + state.text_x)
-
-        if not state.lines:
-            return None
-        line_idx = max(0, min(state.start + row - 1, len(state.lines) - 1))
-        return line_idx, text_col
-
-    def display_line_to_source_line(display_idx: int) -> int | None:
-        if display_idx < 0 or display_idx >= len(state.lines):
-            return None
-        if not state.wrap_text:
-            return display_idx
-
-        source_idx = 0
-        for idx in range(display_idx):
-            if _line_has_newline_terminator(state.lines[idx]):
-                source_idx += 1
-        return source_idx
-
-    def directory_preview_target_for_display_line(display_idx: int) -> Path | None:
-        if state.dir_preview_path is None:
-            return None
-
-        source_idx = display_line_to_source_line(display_idx)
-        if source_idx is None:
-            return None
-
-        rendered_lines = state.rendered.splitlines()
-        if source_idx < 0 or source_idx >= len(rendered_lines):
-            return None
-
-        root = state.dir_preview_path.resolve()
-        dirs_by_depth: dict[int, Path] = {0: root}
-
-        for idx, raw_line in enumerate(rendered_lines):
-            plain_line = ANSI_ESCAPE_RE.sub("", raw_line).rstrip("\r\n")
-            target: Path | None = None
-            depth = 0
-            is_dir = False
-
-            if idx == 0:
-                target = root
-                depth = 0
-                is_dir = True
-            else:
-                branch_idx = plain_line.find("├─ ")
-                if branch_idx < 0:
-                    branch_idx = plain_line.find("└─ ")
-                if branch_idx >= 0:
-                    name_part = plain_line[branch_idx + 3 :]
-                    if name_part and not name_part.startswith("<error:"):
-                        badge_match = _TRAILING_GIT_BADGES_RE.match(name_part.rstrip())
-                        if badge_match is not None:
-                            name_part = badge_match.group(1)
-                        is_dir = name_part.endswith("/")
-                        if is_dir:
-                            name_part = name_part[:-1]
-                        if name_part:
-                            depth = (branch_idx // 3) + 1
-                            parent = dirs_by_depth.get(depth - 1, root)
-                            target = (parent / name_part).resolve()
-
-            if target is not None:
-                for key in [level for level in dirs_by_depth if level > depth]:
-                    dirs_by_depth.pop(key, None)
-                if is_dir:
-                    dirs_by_depth[depth] = target
-                if idx == source_idx:
-                    return target
-
-        return None
+    source_pane_ops = _SourcePaneOps(
+        state=state,
+        visible_content_rows=visible_content_rows,
+    )
+    preview_pane_width = source_pane_ops.preview_pane_width
+    max_horizontal_text_offset = source_pane_ops.max_horizontal_text_offset
+    source_pane_col_bounds = source_pane_ops.source_pane_col_bounds
+    source_selection_position = source_pane_ops.source_selection_position
+    display_line_to_source_line = source_pane_ops.display_line_to_source_line
+    directory_preview_target_for_display_line = source_pane_ops.directory_preview_target_for_display_line
 
     def tick_source_selection_drag() -> None:
         if not source_selection_drag_active or state.source_selection_anchor is None:
@@ -1133,7 +1252,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         return True
 
     def handle_tree_mouse_click(mouse_key: str) -> bool:
-        nonlocal tree_watch_signature, source_selection_drag_active, source_selection_drag_pointer
+        nonlocal source_selection_drag_active, source_selection_drag_pointer
         nonlocal source_selection_drag_edge, source_selection_drag_h_edge
         is_left_down = mouse_key.startswith("MOUSE_LEFT_DOWN:")
         is_left_up = mouse_key.startswith("MOUSE_LEFT_UP:")
@@ -1149,7 +1268,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             *,
             content_mode_toggle: bool = False,
         ) -> None:
-            nonlocal tree_watch_signature
             if content_mode_toggle and state.tree_filter_active and state.tree_filter_mode == "content":
                 if resolved in state.tree_filter_collapsed_dirs:
                     state.tree_filter_collapsed_dirs.remove(resolved)
@@ -1161,7 +1279,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             else:
                 state.expanded.symmetric_difference_update({resolved})
             rebuild_tree_entries(preferred_path=resolved)
-            tree_watch_signature = None
+            watch_refresh.tree_signature = None
             state.dirty = True
 
         if source_selection_drag_active and is_left_down:
@@ -1314,8 +1432,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         return True
 
     def mark_tree_watch_dirty() -> None:
-        nonlocal tree_watch_signature
-        tree_watch_signature = None
+        watch_refresh.tree_signature = None
 
     def sync_selected_target_after_tree_refresh(
         *,
@@ -1520,15 +1637,15 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         return True
 
     schedule_tree_filter_index_warmup()
-    tree_watch_signature = build_tree_watch_signature(
+    watch_refresh.tree_signature = build_tree_watch_signature(
         state.tree_root,
         state.expanded,
         state.show_hidden,
     )
-    tree_watch_last_poll = time.monotonic()
+    watch_refresh.tree_last_poll = time.monotonic()
     reset_git_watch_context()
-    git_watch_signature = build_git_watch_signature(git_watch_dir)
-    git_watch_last_poll = time.monotonic()
+    watch_refresh.git_signature = build_git_watch_signature(watch_refresh.git_dir)
+    watch_refresh.git_last_poll = time.monotonic()
     refresh_git_status_overlay(force=True)
 
     launch_editor_for_path = partial(_launch_editor_for_path, terminal=terminal)
