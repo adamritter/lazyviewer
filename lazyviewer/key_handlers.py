@@ -286,10 +286,11 @@ def handle_tree_filter_key(
         return False
 
     def apply_live_filter_query(query: str) -> None:
+        content_mode = state.tree_filter_mode == "content"
         apply_tree_filter_query(
             query,
-            preview_selection=True,
-            select_first_file=True,
+            preview_selection=not content_mode,
+            select_first_file=not content_mode,
         )
 
     if state.tree_filter_editing:
@@ -298,7 +299,10 @@ def handle_tree_filter_key(
         if handle_tree_mouse_click(key):
             return True
         if key == "ESC":
-            close_tree_filter(clear_query=True)
+            close_tree_filter(
+                clear_query=True,
+                restore_origin=state.tree_filter_mode == "content",
+            )
             return True
         if key == "ENTER":
             activate_tree_filter_selection()
@@ -363,6 +367,7 @@ class NormalKeyOps:
     toggle_hidden_files: Callable[[], None]
     toggle_tree_pane: Callable[[], None]
     toggle_wrap_mode: Callable[[], None]
+    toggle_tree_size_labels: Callable[[], None]
     toggle_help_panel: Callable[[], None]
     toggle_git_features: Callable[[], None]
     launch_lazygit: Callable[[], None]
@@ -395,6 +400,7 @@ def handle_normal_key(
     toggle_hidden_files = ops.toggle_hidden_files
     toggle_tree_pane = ops.toggle_tree_pane
     toggle_wrap_mode = ops.toggle_wrap_mode
+    toggle_tree_size_labels = ops.toggle_tree_size_labels
     toggle_help_panel = ops.toggle_help_panel
     toggle_git_features = ops.toggle_git_features
     launch_lazygit = ops.launch_lazygit
@@ -452,15 +458,10 @@ def handle_normal_key(
     pre_exact_bindings = KeyComboRegistry().register_bindings(
         KeyComboBinding(("m",), begin_mark_set_action),
         KeyComboBinding(("'",), begin_mark_jump_action),
-    )
-    pre_lower_bindings = KeyComboRegistry(normalize=str.lower).register_bindings(
         KeyComboBinding(("s",), open_symbol_picker_action),
     )
 
     handled = pre_exact_bindings.dispatch(key)
-    if handled is not None:
-        return handled
-    handled = pre_lower_bindings.dispatch(key)
     if handled is not None:
         return handled
 
@@ -577,6 +578,10 @@ def handle_normal_key(
         toggle_wrap_mode()
         return False
 
+    def toggle_tree_size_labels_action() -> bool:
+        toggle_tree_size_labels()
+        return False
+
     def edit_selected_target_action() -> bool:
         edit_target: Path | None = None
         if state.browser_visible and state.tree_entries:
@@ -621,6 +626,7 @@ def handle_normal_key(
 
     mode_exact_bindings = KeyComboRegistry().register_bindings(
         KeyComboBinding(("R",), reroot_to_parent_action),
+        KeyComboBinding(("S",), toggle_tree_size_labels_action),
         KeyComboBinding(("r",), reroot_to_selected_target_action),
         KeyComboBinding((".",), toggle_hidden_files_action),
         KeyComboBinding(("n",), lambda: jump_to_next_git_modified_action(1)),

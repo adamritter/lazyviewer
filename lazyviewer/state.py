@@ -34,6 +34,7 @@ class AppState:
     last_right_width: int
     browser_visible: bool = True
     show_help: bool = False
+    show_tree_sizes: bool = True
     dirty: bool = True
     status_message: str = ""
     status_message_until: float = 0.0
@@ -52,6 +53,7 @@ class AppState:
     tree_filter_loading: bool = False
     tree_filter_collapsed_dirs: set[Path] = field(default_factory=set)
     tree_filter_prev_browser_visible: bool | None = None
+    tree_filter_origin: JumpLocation | None = None
     tree_render_expanded: set[Path] = field(default_factory=set)
     picker_active: bool = False
     picker_mode: str = "symbols"

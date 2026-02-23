@@ -224,9 +224,6 @@ class TreeFilterOps:
         self.preview_selected_entry()
         return True
 
-    def first_tree_filter_result_index(self) -> int | None:
-        return self.next_tree_filter_result_entry_index(-1, 1)
-
     def jump_to_next_content_hit(self, direction: int) -> bool:
         if direction == 0:
             return False
@@ -323,7 +320,7 @@ class TreeFilterOps:
             )
 
         if force_first_file:
-            first_idx = self.first_tree_filter_result_index()
+            first_idx = self.next_tree_filter_result_entry_index(-1, 1)
             self.state.selected_idx = first_idx if first_idx is not None else 0
         else:
             preferred_target = preferred_path.resolve()
@@ -356,7 +353,7 @@ class TreeFilterOps:
 
             if not matched_preferred:
                 if self.state.tree_filter_active and self.state.tree_filter_query:
-                    first_idx = self.first_tree_filter_result_index()
+                    first_idx = self.next_tree_filter_result_entry_index(-1, 1)
                     self.state.selected_idx = first_idx if first_idx is not None else 0
                 else:
                     self.state.selected_idx = self.default_selected_index(prefer_files=bool(self.state.tree_filter_query))
@@ -365,6 +362,7 @@ class TreeFilterOps:
                 self.state.tree_filter_active
                 and self.state.tree_filter_query
                 and self.state.tree_filter_mode == "content"
+                and not self.state.tree_filter_editing
             ):
                 coerced_idx = self.coerce_tree_filter_result_index(self.state.selected_idx)
                 self.state.selected_idx = coerced_idx if coerced_idx is not None else 0
@@ -420,6 +418,7 @@ class TreeFilterOps:
         self.state.tree_filter_active = True
         self.state.tree_filter_mode = mode
         self.state.tree_filter_editing = True
+        self.state.tree_filter_origin = self.current_jump_location() if mode == "content" else None
         self.state.tree_filter_query = ""
         self.state.tree_filter_match_count = 0
         self.state.tree_filter_truncated = False
@@ -430,8 +429,11 @@ class TreeFilterOps:
         if self.on_tree_filter_state_change is not None:
             self.on_tree_filter_state_change()
 
-    def close_tree_filter(self, clear_query: bool = True) -> None:
+    def close_tree_filter(self, clear_query: bool = True, restore_origin: bool = False) -> None:
         previous_browser_visible = self.state.tree_filter_prev_browser_visible
+        restore_location: JumpLocation | None = None
+        if restore_origin and self.state.tree_filter_mode == "content" and self.state.tree_filter_origin is not None:
+            restore_location = self.state.tree_filter_origin.normalized()
         self.state.tree_filter_active = False
         self.state.tree_filter_editing = False
         self.state.tree_filter_mode = "files"
@@ -445,7 +447,14 @@ class TreeFilterOps:
             self.state.browser_visible = previous_browser_visible
             if self.state.wrap_text and browser_visibility_changed:
                 self.rebuild_screen_lines()
-        self.rebuild_tree_entries(preferred_path=self.state.current_path.resolve())
+        if restore_location is not None:
+            self.jump_to_path(restore_location.path)
+            self.state.max_start = max(0, len(self.state.lines) - self.visible_content_rows())
+            self.state.start = max(0, min(restore_location.start, self.state.max_start))
+            self.state.text_x = 0 if self.state.wrap_text else max(0, restore_location.text_x)
+        else:
+            self.rebuild_tree_entries(preferred_path=self.state.current_path.resolve())
+        self.state.tree_filter_origin = None
         self.state.dirty = True
         if self.on_tree_filter_state_change is not None:
             self.on_tree_filter_state_change()
@@ -474,7 +483,7 @@ class TreeFilterOps:
             # Keep content-search mode active after Enter/double-click; Esc exits.
             origin = self.current_jump_location()
             self.state.tree_filter_editing = False
-            self.preview_selected_entry(force=True)
+            self.preview_selected_entry()
             self.record_jump_if_changed(origin)
             self.state.dirty = True
             return

@@ -751,7 +751,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertFalse(bool(snapshots["tree_filter_editing"]))
             self.assertIsNone(snapshots["source_selection_anchor"])
             self.assertIsNone(snapshots["source_selection_focus"])
-            self.assertEqual(snapshots["selected_kind"], "search_hit")
+            self.assertEqual(snapshots["selected_kind"], "path")
             self.assertEqual(snapshots["selected_path"], file_path.resolve())
 
     def test_single_click_relative_import_module_in_preview_jumps_to_module_file(self) -> None:
@@ -1463,6 +1463,190 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertEqual(snapshots["current_path"], file_path.resolve())
             self.assertEqual(snapshots["selected_kind"], "search_hit")
             self.assertGreater(int(snapshots["start"]), 0)
+
+    def test_content_search_typing_and_enter_keep_origin_until_hit_is_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            current_file = root / "zzz.py"
+            other_file = root / "aaa.py"
+            current_file.write_text("line\n" * 120, encoding="utf-8")
+            other_file.write_text("line\n" * 120, encoding="utf-8")
+            snapshots: dict[str, object] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_search_content(_root, _query, _show_hidden, **_kwargs):
+                return (
+                    {
+                        other_file.resolve(): [
+                            ContentMatch(
+                                path=other_file.resolve(),
+                                line=10,
+                                column=1,
+                                preview="needle",
+                            )
+                        ],
+                        current_file.resolve(): [
+                            ContentMatch(
+                                path=current_file.resolve(),
+                                line=80,
+                                column=1,
+                                preview="needle",
+                            )
+                        ],
+                    },
+                    False,
+                    None,
+                )
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                open_tree_filter = _callback(kwargs, "open_tree_filter")
+                apply_tree_filter_query = _callback(kwargs, "apply_tree_filter_query")
+                activate_tree_filter_selection = _callback(kwargs, "activate_tree_filter_selection")
+                state.start = 30
+                state.text_x = 4
+                snapshots["origin_path"] = state.current_path.resolve()
+                snapshots["origin_start"] = state.start
+                snapshots["origin_text_x"] = state.text_x
+
+                open_tree_filter("content")
+                apply_tree_filter_query("needle", preview_selection=False, select_first_file=False)
+                snapshots["after_typing_path"] = state.current_path.resolve()
+                snapshots["after_typing_start"] = state.start
+                snapshots["after_typing_text_x"] = state.text_x
+                snapshots["after_typing_selected_kind"] = state.tree_entries[state.selected_idx].kind
+
+                activate_tree_filter_selection()
+                snapshots["after_enter_path"] = state.current_path.resolve()
+                snapshots["after_enter_start"] = state.start
+                snapshots["after_enter_text_x"] = state.text_x
+                snapshots["after_enter_editing"] = state.tree_filter_editing
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.tree_filter.search_project_content_rg", side_effect=fake_search_content
+            ), mock.patch("lazyviewer.app_runtime.os.isatty", return_value=True), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", current_file, "monokai", True, False)
+
+            self.assertEqual(snapshots["after_typing_path"], snapshots["origin_path"])
+            self.assertEqual(snapshots["after_typing_start"], snapshots["origin_start"])
+            self.assertEqual(snapshots["after_typing_text_x"], snapshots["origin_text_x"])
+            self.assertEqual(snapshots["after_typing_selected_kind"], "path")
+            self.assertEqual(snapshots["after_enter_path"], snapshots["origin_path"])
+            self.assertEqual(snapshots["after_enter_start"], snapshots["origin_start"])
+            self.assertEqual(snapshots["after_enter_text_x"], snapshots["origin_text_x"])
+            self.assertFalse(bool(snapshots["after_enter_editing"]))
+
+    def test_content_search_escape_from_prompt_restores_original_location(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            current_file = root / "zzz.py"
+            other_file = root / "aaa.py"
+            current_file.write_text("line\n" * 120, encoding="utf-8")
+            other_file.write_text("line\n" * 120, encoding="utf-8")
+            snapshots: dict[str, object] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_search_content(_root, _query, _show_hidden, **_kwargs):
+                return (
+                    {
+                        other_file.resolve(): [
+                            ContentMatch(
+                                path=other_file.resolve(),
+                                line=25,
+                                column=1,
+                                preview="needle",
+                            )
+                        ],
+                        current_file.resolve(): [
+                            ContentMatch(
+                                path=current_file.resolve(),
+                                line=80,
+                                column=1,
+                                preview="needle",
+                            )
+                        ],
+                    },
+                    False,
+                    None,
+                )
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                open_tree_filter = _callback(kwargs, "open_tree_filter")
+                apply_tree_filter_query = _callback(kwargs, "apply_tree_filter_query")
+                activate_tree_filter_selection = _callback(kwargs, "activate_tree_filter_selection")
+                close_tree_filter = _callback(kwargs, "close_tree_filter")
+                state.start = 30
+                state.text_x = 6
+                snapshots["origin_path"] = state.current_path.resolve()
+                snapshots["origin_start"] = state.start
+                snapshots["origin_text_x"] = state.text_x
+
+                open_tree_filter("content")
+                apply_tree_filter_query("needle", preview_selection=False, select_first_file=False)
+                state.selected_idx = next(
+                    idx
+                    for idx, entry in enumerate(state.tree_entries)
+                    if entry.kind == "search_hit" and entry.path.resolve() == other_file.resolve()
+                )
+                activate_tree_filter_selection()
+                snapshots["after_select_path"] = state.current_path.resolve()
+                snapshots["after_select_start"] = state.start
+
+                state.tree_filter_editing = True
+                close_tree_filter(clear_query=True, restore_origin=True)
+                snapshots["after_escape_path"] = state.current_path.resolve()
+                snapshots["after_escape_start"] = state.start
+                snapshots["after_escape_text_x"] = state.text_x
+                snapshots["after_escape_active"] = state.tree_filter_active
+                snapshots["after_escape_query"] = state.tree_filter_query
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.tree_filter.search_project_content_rg", side_effect=fake_search_content
+            ), mock.patch("lazyviewer.app_runtime.os.isatty", return_value=True), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", current_file, "monokai", True, False)
+
+            self.assertEqual(snapshots["after_select_path"], other_file.resolve())
+            self.assertNotEqual(int(snapshots["after_select_start"]), int(snapshots["origin_start"]))
+            self.assertEqual(snapshots["after_escape_path"], snapshots["origin_path"])
+            self.assertEqual(snapshots["after_escape_start"], snapshots["origin_start"])
+            self.assertEqual(snapshots["after_escape_text_x"], snapshots["origin_text_x"])
+            self.assertFalse(bool(snapshots["after_escape_active"]))
+            self.assertEqual(snapshots["after_escape_query"], "")
 
     def test_content_search_directory_arrow_click_collapses_and_reopens_subtree(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -54,6 +54,8 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         key: str,
         toggle_git_features,
         jump_to_next_git_modified,
+        toggle_tree_size_labels=lambda: None,
+        open_symbol_picker=lambda: None,
         launch_lazygit=lambda: None,
         launch_editor_for_path=None,
         visible_rows: int = 20,
@@ -63,12 +65,13 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         ops = NormalKeyOps(
             current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
             record_jump_if_changed=lambda _origin: None,
-            open_symbol_picker=lambda: None,
+            open_symbol_picker=open_symbol_picker,
             reroot_to_parent=lambda: None,
             reroot_to_selected_target=lambda: None,
             toggle_hidden_files=lambda: None,
             toggle_tree_pane=lambda: None,
             toggle_wrap_mode=lambda: None,
+            toggle_tree_size_labels=toggle_tree_size_labels,
             toggle_help_panel=lambda: None,
             toggle_git_features=toggle_git_features,
             launch_lazygit=launch_lazygit,
@@ -122,6 +125,38 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
 
         self.assertFalse(should_quit)
         self.assertEqual(called["count"], 1)
+
+    def test_shift_s_toggles_tree_size_labels(self) -> None:
+        state = _make_state()
+        called = {"count": 0}
+
+        should_quit = self._invoke(
+            state=state,
+            key="S",
+            toggle_git_features=lambda: None,
+            toggle_tree_size_labels=lambda: called.__setitem__("count", called["count"] + 1),
+            jump_to_next_git_modified=lambda _direction: False,
+        )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(called["count"], 1)
+
+    def test_lower_s_keeps_symbol_picker_binding(self) -> None:
+        state = _make_state()
+        called = {"symbol": 0, "sizes": 0}
+
+        should_quit = self._invoke(
+            state=state,
+            key="s",
+            toggle_git_features=lambda: None,
+            toggle_tree_size_labels=lambda: called.__setitem__("sizes", called["sizes"] + 1),
+            jump_to_next_git_modified=lambda _direction: False,
+            open_symbol_picker=lambda: called.__setitem__("symbol", called["symbol"] + 1),
+        )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(called["symbol"], 1)
+        self.assertEqual(called["sizes"], 0)
 
     def test_ctrl_c_quits_in_normal_mode(self) -> None:
         state = _make_state()
@@ -211,9 +246,10 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
     def test_question_character_is_appended_while_tree_filter_editing(self) -> None:
         state = _make_state()
         state.tree_filter_active = True
+        state.tree_filter_mode = "content"
         state.tree_filter_editing = True
         state.tree_filter_query = "abc"
-        called = {"query": "", "toggle_help": 0}
+        called = {"query": "", "preview_selection": None, "select_first_file": None, "toggle_help": 0}
 
         handled = handle_tree_filter_key(
             "?",
@@ -225,14 +261,44 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
                 close_tree_filter=lambda **_kwargs: None,
                 activate_tree_filter_selection=lambda: None,
                 move_tree_selection=lambda _direction: False,
-                apply_tree_filter_query=lambda query, **_kwargs: called.__setitem__("query", query),
+                apply_tree_filter_query=lambda query, **kwargs: called.__setitem__("query", query)
+                or called.__setitem__("preview_selection", kwargs.get("preview_selection"))
+                or called.__setitem__("select_first_file", kwargs.get("select_first_file")),
                 jump_to_next_content_hit=lambda _direction: False,
             ),
         )
 
         self.assertTrue(handled)
         self.assertEqual(called["query"], "abc?")
+        self.assertFalse(bool(called["preview_selection"]))
+        self.assertFalse(bool(called["select_first_file"]))
         self.assertEqual(called["toggle_help"], 0)
+
+    def test_escape_in_content_filter_prompt_requests_restore_to_origin(self) -> None:
+        state = _make_state()
+        state.tree_filter_active = True
+        state.tree_filter_mode = "content"
+        state.tree_filter_editing = True
+        called: dict[str, object] = {}
+
+        handled = handle_tree_filter_key(
+            "ESC",
+            state,
+            TreeFilterKeyCallbacks(
+                handle_tree_mouse_wheel=lambda _key: False,
+                handle_tree_mouse_click=lambda _key: False,
+                toggle_help_panel=lambda: None,
+                close_tree_filter=lambda **kwargs: called.update(kwargs),
+                activate_tree_filter_selection=lambda: None,
+                move_tree_selection=lambda _direction: False,
+                apply_tree_filter_query=lambda _query, **_kwargs: None,
+                jump_to_next_content_hit=lambda _direction: False,
+            ),
+        )
+
+        self.assertTrue(handled)
+        self.assertEqual(called["clear_query"], True)
+        self.assertEqual(called["restore_origin"], True)
 
     def test_ctrl_question_toggles_help_while_tree_filter_editing(self) -> None:
         state = _make_state()
@@ -464,6 +530,7 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
             toggle_hidden_files=lambda: None,
             toggle_tree_pane=lambda: None,
             toggle_wrap_mode=lambda: None,
+            toggle_tree_size_labels=lambda: None,
             toggle_help_panel=lambda: None,
             toggle_git_features=lambda: None,
             launch_lazygit=lambda: None,
