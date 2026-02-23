@@ -13,14 +13,13 @@ from pathlib import Path
 
 from ..ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line
 from ..preview import rendering as preview_rendering
+from ..tree_pane.rendering import TreePaneRenderer
 from .help import (
     help_panel_lines,
     help_panel_row_count,
     render_help_page,
 )
-from ..tree import TreeEntry, clamp_left_width, format_tree_entry
-
-FILTER_SPINNER_FRAMES: tuple[str, ...] = ("|", "/", "-", "\\")
+from ..tree import TreeEntry, clamp_left_width
 
 
 @dataclass
@@ -122,15 +121,6 @@ def render_dual_page_context(context: RenderContext) -> None:
     )
 
 
-def selected_with_ansi(text: str) -> str:
-    """Apply selection styling without discarding existing ANSI colors."""
-    if not text:
-        return text
-
-    # Keep reverse video active even when the text contains internal resets.
-    return "\033[7m" + text.replace("\033[0m", "\033[0;7m") + "\033[0m"
-
-
 def _help_line(lines: tuple[str, ...], row: int) -> str:
     if 0 <= row < len(lines):
         return lines[row]
@@ -159,34 +149,6 @@ def _compose_status_left_text(
     if not status_message:
         return base
     return f"{base} · {status_message}"
-
-
-def _format_tree_filter_status(
-    query: str,
-    match_count: int,
-    truncated: bool,
-    loading: bool,
-    spinner_frame: int,
-) -> str:
-    if not query:
-        return ""
-
-    parts: list[str] = []
-    if loading:
-        spinner = FILTER_SPINNER_FRAMES[spinner_frame % len(FILTER_SPINNER_FRAMES)]
-        parts.append(f"{spinner} searching")
-
-    if match_count <= 0:
-        if not loading:
-            parts.append("no results")
-    else:
-        noun = "match" if match_count == 1 else "matches"
-        parts.append(f"{match_count:,} {noun}")
-
-    if truncated:
-        parts.append("truncated")
-
-    return " · ".join(parts)
 
 
 def render_dual_page(
@@ -352,89 +314,39 @@ def render_dual_page(
         text_content_rows,
         wrap_text,
     )
-    picker_overlay_active = picker_active and picker_mode in {"symbols", "commands"}
-    tree_filter_row_visible = tree_filter_active and not picker_overlay_active
-    tree_row_offset = 1 if tree_filter_row_visible else 0
-    items = picker_items if picker_overlay_active else []
-    if items:
-        picker_selected = max(0, min(picker_selected, len(items) - 1))
-    else:
-        picker_selected = 0
-    picker_rows = max(1, content_rows - 1)
-    max_picker_start = max(0, len(items) - picker_rows)
-    picker_list_start = max(0, min(picker_list_start, max_picker_start))
+    tree_renderer = TreePaneRenderer(
+        left_width=left_width,
+        content_rows=content_rows,
+        tree_entries=tree_entries,
+        tree_start=tree_start,
+        tree_selected=tree_selected,
+        tree_root=tree_root,
+        expanded=expanded,
+        show_tree_sizes=show_tree_sizes,
+        git_status_overlay=git_status_overlay,
+        tree_search_query=tree_search_query,
+        tree_filter_active=tree_filter_active,
+        tree_filter_query=tree_filter_query,
+        tree_filter_editing=tree_filter_editing,
+        tree_filter_cursor_visible=tree_filter_cursor_visible,
+        tree_filter_match_count=tree_filter_match_count,
+        tree_filter_truncated=tree_filter_truncated,
+        tree_filter_loading=tree_filter_loading,
+        tree_filter_spinner_frame=tree_filter_spinner_frame,
+        tree_filter_prefix=tree_filter_prefix,
+        tree_filter_placeholder=tree_filter_placeholder,
+        picker_active=picker_active,
+        picker_mode=picker_mode,
+        picker_query=picker_query,
+        picker_items=picker_items,
+        picker_selected=picker_selected,
+        picker_focus=picker_focus,
+        picker_list_start=picker_list_start,
+        picker_message=picker_message,
+    )
 
     for row in range(content_rows):
-        if picker_overlay_active:
-            if picker_mode == "commands":
-                query_prefix = ": "
-                placeholder = "type to filter commands"
-            else:
-                query_prefix = "s> "
-                placeholder = "type to filter symbols"
-            if row == 0:
-                if picker_query:
-                    query_text = f"\033[1;38;5;81m{query_prefix}{picker_query}\033[0m"
-                else:
-                    query_text = f"\033[2;38;5;250m{query_prefix}{placeholder}\033[0m"
-                tree_text = clip_ansi_line(query_text, left_width)
-                if picker_focus == "query":
-                    tree_text = selected_with_ansi(tree_text)
-            else:
-                picker_idx = picker_list_start + row - 1
-                if picker_idx < len(items):
-                    tree_text = clip_ansi_line(f" {items[picker_idx]}", left_width)
-                    if picker_idx == picker_selected:
-                        if picker_focus == "tree":
-                            tree_text = selected_with_ansi(tree_text)
-                        else:
-                            tree_text = f"\033[38;5;81m{tree_text}\033[0m"
-                elif row == 1 and picker_message:
-                    tree_text = clip_ansi_line(f"\033[2;38;5;250m{picker_message}\033[0m", left_width)
-                else:
-                    tree_text = ""
-        elif tree_filter_row_visible and row == 0:
-            status_label = _format_tree_filter_status(
-                tree_filter_query,
-                tree_filter_match_count,
-                tree_filter_truncated,
-                tree_filter_loading,
-                tree_filter_spinner_frame,
-            )
-            if tree_filter_editing:
-                base = f"{tree_filter_prefix} {tree_filter_query}" if tree_filter_query else f"{tree_filter_prefix} "
-                cursor = "_" if tree_filter_cursor_visible else " "
-                query_text = f"\033[1;38;5;81m{base}{cursor}\033[0m"
-            elif tree_filter_query:
-                query_text = f"\033[1;38;5;81m{tree_filter_prefix} {tree_filter_query}\033[0m"
-            else:
-                query_text = f"\033[2;38;5;250m{tree_filter_prefix} {tree_filter_placeholder}\033[0m"
-            if status_label:
-                query_text += f"\033[2;38;5;250m  {status_label}\033[0m"
-            tree_text = clip_ansi_line(query_text, left_width)
-            if tree_filter_editing:
-                tree_text = selected_with_ansi(tree_text)
-        else:
-            tree_idx = tree_start + row - tree_row_offset
-            if tree_idx < len(tree_entries):
-                tree_text = format_tree_entry(
-                    tree_entries[tree_idx],
-                    tree_root,
-                    expanded,
-                    git_status_overlay=git_status_overlay,
-                    search_query=tree_search_query,
-                    show_size_labels=show_tree_sizes,
-                )
-                tree_text = clip_ansi_line(tree_text, left_width)
-                if tree_idx == tree_selected:
-                    tree_text = selected_with_ansi(tree_text)
-            else:
-                tree_text = ""
-        out.append(tree_text)
-        tree_plain = ANSI_ESCAPE_RE.sub("", tree_text)
-        tree_len = sum(char_display_width(ch, 0) for ch in tree_plain)
-        if tree_len < left_width:
-            out.append(" " * (left_width - tree_len))
+        out.append(tree_renderer.padded_row_text(row))
 
         out.append("\033[2m│\033[0m")
 
