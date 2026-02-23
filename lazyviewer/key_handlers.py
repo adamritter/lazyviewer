@@ -360,8 +360,9 @@ def handle_normal_key(
     mark_tree_watch_dirty = ops.mark_tree_watch_dirty
     launch_editor_for_path = ops.launch_editor_for_path
     jump_to_next_git_modified = ops.jump_to_next_git_modified
+    key_lower = key.lower()
 
-    if key.lower() == "s" and not state.picker_active:
+    if key_lower == "s" and not state.picker_active:
         state.count_buffer = ""
         open_symbol_picker()
         return False
@@ -393,7 +394,7 @@ def handle_normal_key(
     if key == "CTRL_O":
         toggle_git_features()
         return False
-    if key == "CTRL_U" or key == "CTRL_D":
+    if key in {"CTRL_U", "CTRL_D"}:
         if state.browser_visible and state.tree_entries:
             direction = -1 if key == "CTRL_U" else 1
             jump_steps = 1 if count is None else max(1, min(10, count))
@@ -466,13 +467,13 @@ def handle_normal_key(
     if key == ".":
         toggle_hidden_files()
         return False
-    if key.lower() == "t":
+    if key_lower == "t":
         toggle_tree_pane()
         return False
-    if key.lower() == "w":
+    if key_lower == "w":
         toggle_wrap_mode()
         return False
-    if key.lower() == "e":
+    if key_lower == "e":
         edit_target: Path | None = None
         if state.browser_visible and state.tree_entries:
             selected_entry = state.tree_entries[state.selected_idx]
@@ -503,29 +504,23 @@ def handle_normal_key(
             state.preview_is_git_diff = False
         state.dirty = True
         return False
-    if key.lower() == "q" or key == "\x03":
+    if key_lower == "q" or key == "\x03":
         return True
-    if not state.tree_filter_active and state.git_features_enabled and key == "n":
-        if jump_to_next_git_modified(1):
-            state.dirty = True
-        return False
-    if not state.tree_filter_active and state.git_features_enabled and key == "N":
-        if jump_to_next_git_modified(-1):
+    if not state.tree_filter_active and state.git_features_enabled and key in {"n", "N"}:
+        direction = 1 if key == "n" else -1
+        if jump_to_next_git_modified(direction):
             state.dirty = True
         return False
     if handle_tree_mouse_wheel(key):
         return False
     if handle_tree_mouse_click(key):
         return False
-    if state.browser_visible and key.lower() == "j":
-        if move_tree_selection(1):
+    if state.browser_visible and key_lower in {"j", "k"}:
+        direction = 1 if key_lower == "j" else -1
+        if move_tree_selection(direction):
             state.dirty = True
         return False
-    if state.browser_visible and key.lower() == "k":
-        if move_tree_selection(-1):
-            state.dirty = True
-        return False
-    if state.browser_visible and key.lower() == "l":
+    if state.browser_visible and key_lower == "l":
         entry = state.tree_entries[state.selected_idx]
         if entry.is_dir:
             resolved = entry.path.resolve()
@@ -550,7 +545,7 @@ def handle_normal_key(
             record_jump_if_changed(origin)
             state.dirty = True
         return False
-    if state.browser_visible and key.lower() == "h":
+    if state.browser_visible and key_lower == "h":
         entry = state.tree_entries[state.selected_idx]
         if (
             entry.is_dir
@@ -597,21 +592,21 @@ def handle_normal_key(
     scrolling_down = False
     page_rows = visible_content_rows()
     effective_max_start = _effective_max_start(state, page_rows)
-    if key == " " or key.lower() == "f":
+    if key == " " or key_lower == "f":
         pages = count if count is not None else 1
         state.start += page_rows * max(1, pages)
         scrolling_down = True
-    elif key.lower() == "d":
+    elif key_lower == "d":
         mult = count if count is not None else 1
         state.start += max(1, page_rows // 2) * max(1, mult)
         scrolling_down = True
-    elif key.lower() == "u":
+    elif key_lower == "u":
         mult = count if count is not None else 1
         state.start -= max(1, page_rows // 2) * max(1, mult)
-    elif key == "DOWN" or (not state.browser_visible and key.lower() == "j"):
+    elif key == "DOWN" or (not state.browser_visible and key_lower == "j"):
         state.start += count if count is not None else 1
         scrolling_down = True
-    elif key == "UP" or (not state.browser_visible and key.lower() == "k"):
+    elif key == "UP" or (not state.browser_visible and key_lower == "k"):
         state.start -= count if count is not None else 1
     elif key == "g":
         if count is None:
@@ -630,10 +625,10 @@ def handle_normal_key(
     elif key == "B":
         pages = count if count is not None else 1
         state.start -= page_rows * max(1, pages)
-    elif (key == "LEFT" or (not state.browser_visible and key.lower() == "h")) and not state.wrap_text:
+    elif (key == "LEFT" or (not state.browser_visible and key_lower == "h")) and not state.wrap_text:
         step = count if count is not None else 4
         state.text_x = max(0, state.text_x - max(1, step))
-    elif (key == "RIGHT" or (not state.browser_visible and key.lower() == "l")) and not state.wrap_text:
+    elif (key == "RIGHT" or (not state.browser_visible and key_lower == "l")) and not state.wrap_text:
         step = count if count is not None else 4
         state.text_x += max(1, step)
     elif key == "HOME":
