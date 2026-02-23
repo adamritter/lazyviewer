@@ -17,28 +17,28 @@ from pathlib import Path
 
 from .ansi import ANSI_ESCAPE_RE, build_screen_lines
 from .git_jumps import (
-    _GitModifiedJumpDeps,
+    GitModifiedJumpDeps,
 )
 from .mouse import (
-    _SourcePaneOps,
-    _TreeMouseCallbacks,
-    _TreeMouseHandlers,
+    SourcePaneOps,
+    TreeMouseCallbacks,
+    TreeMouseHandlers,
     _copy_selected_source_range,
     _handle_tree_mouse_wheel,
 )
 from .tree_sync import (
-    _PreviewSelectionDeps,
-    _TreeRefreshSyncDeps,
+    PreviewSelectionDeps,
+    TreeRefreshSyncDeps,
 )
-from .index_warmup import _TreeFilterIndexWarmupScheduler
-from .layout import _PagerLayoutOps
+from .index_warmup import TreeFilterIndexWarmupScheduler
+from .layout import PagerLayoutOps
 from .screen_utils import (
     _centered_scroll_start,
     _first_git_change_screen_line,
     _tree_order_key_for_relative_path,
 )
 from .watch_refresh import (
-    _WatchRefreshContext,
+    WatchRefreshContext,
     _refresh_git_status_overlay,
 )
 from .config import (
@@ -310,7 +310,7 @@ def _launch_lazygit(
     sync_selected_target_after_tree_refresh(preferred_path=preferred_path, force_rebuild=True)
     mark_tree_watch_dirty()
 
-class _NavigationProxy:
+class NavigationProxy:
     def __init__(self) -> None:
         self._ops: NavigationPickerOps | None = None
 
@@ -424,12 +424,12 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     stdout_fd = sys.stdout.fileno()
     terminal = TerminalController(stdin_fd, stdout_fd)
     kitty_graphics_supported = terminal.supports_kitty_graphics()
-    index_warmup_scheduler = _TreeFilterIndexWarmupScheduler(
+    index_warmup_scheduler = TreeFilterIndexWarmupScheduler(
         collect_project_file_labels=collect_project_file_labels,
         skip_gitignored_for_hidden_mode=_skip_gitignored_for_hidden_mode,
     )
     schedule_tree_filter_index_warmup = partial(index_warmup_scheduler.schedule_for_state, state)
-    layout_ops = _PagerLayoutOps(
+    layout_ops = PagerLayoutOps(
         state,
         kitty_graphics_supported,
         help_panel_row_count=help_panel_row_count,
@@ -451,7 +451,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     show_inline_error = layout_ops.show_inline_error
     current_preview_image_path = layout_ops.current_preview_image_path
     current_preview_image_geometry = layout_ops.current_preview_image_geometry
-    watch_refresh = _WatchRefreshContext()
+    watch_refresh = WatchRefreshContext()
     mark_tree_watch_dirty = watch_refresh.mark_tree_dirty
     refresh_rendered_for_current_path = partial(
         _refresh_rendered_for_current_path,
@@ -502,7 +502,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         refresh_rendered_for_current_path,
     )
 
-    source_pane_ops = _SourcePaneOps(
+    source_pane_ops = SourcePaneOps(
         state,
         visible_content_rows,
         get_terminal_size=shutil.get_terminal_size,
@@ -521,8 +521,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     tick_source_selection_drag: Callable[[], None]
 
     sync_selected_target_after_tree_refresh: Callable[..., None]
-    navigation_proxy = _NavigationProxy()
-    preview_selection_deps = _PreviewSelectionDeps(
+    navigation_proxy = NavigationProxy()
+    preview_selection_deps = PreviewSelectionDeps(
         state=state,
         clear_source_selection=clear_source_selection,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
@@ -552,7 +552,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     close_tree_filter = tree_filter_ops.close_tree_filter
     activate_tree_filter_selection = tree_filter_ops.activate_tree_filter_selection
     jump_to_next_content_hit = tree_filter_ops.jump_to_next_content_hit
-    tree_refresh_sync_deps = _TreeRefreshSyncDeps(
+    tree_refresh_sync_deps = TreeRefreshSyncDeps(
         state=state,
         rebuild_tree_entries=rebuild_tree_entries,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
@@ -592,7 +592,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     navigation_ops = NavigationPickerOps(navigation_picker_deps)
     navigation_proxy.bind(navigation_ops)
     navigation_ops.set_open_tree_filter(open_tree_filter)
-    tree_mouse_callbacks = _TreeMouseCallbacks(
+    tree_mouse_callbacks = TreeMouseCallbacks(
         visible_content_rows=visible_content_rows,
         source_pane_col_bounds=source_pane_col_bounds,
         source_selection_position=source_selection_position,
@@ -612,7 +612,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         copy_text_to_clipboard=_copy_text_to_clipboard,
         monotonic=time.monotonic,
     )
-    mouse_handlers = _TreeMouseHandlers(
+    mouse_handlers = TreeMouseHandlers(
         state,
         tree_mouse_callbacks,
         double_click_seconds=DOUBLE_CLICK_SECONDS,
@@ -622,7 +622,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
     current_jump_location = navigation_ops.current_jump_location
     record_jump_if_changed = navigation_ops.record_jump_if_changed
-    git_modified_jump_deps = _GitModifiedJumpDeps(
+    git_modified_jump_deps = GitModifiedJumpDeps(
         state=state,
         visible_content_rows=visible_content_rows,
         refresh_git_status_overlay=refresh_git_status_overlay,

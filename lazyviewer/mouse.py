@@ -119,7 +119,7 @@ def _open_content_search_for_token(
     return True
 
 
-class _SourcePaneOps:
+class SourcePaneOps:
     def __init__(
         self,
         state: AppState,
@@ -330,7 +330,7 @@ def _handle_tree_mouse_wheel(
 
 
 @dataclass
-class _SourceSelectionDragState:
+class SourceSelectionDragState:
     active: bool = False
     pointer: tuple[int, int] | None = None
     vertical_edge: str | None = None
@@ -344,7 +344,7 @@ class _SourceSelectionDragState:
 
 
 @dataclass(frozen=True)
-class _TreeMouseCallbacks:
+class TreeMouseCallbacks:
     visible_content_rows: Callable[[], int]
     source_pane_col_bounds: Callable[[], tuple[int, int]]
     source_selection_position: Callable[[int, int], tuple[int, int] | None]
@@ -365,11 +365,11 @@ class _TreeMouseCallbacks:
     monotonic: Callable[[], float] = time.monotonic
 
 
-class _TreeMouseHandlers:
+class TreeMouseHandlers:
     def __init__(
         self,
         state: AppState,
-        callbacks: _TreeMouseCallbacks,
+        callbacks: TreeMouseCallbacks,
         double_click_seconds: float,
     ) -> None:
         self._state = state
@@ -392,7 +392,7 @@ class _TreeMouseHandlers:
         self._copy_text_to_clipboard = callbacks.copy_text_to_clipboard
         self._monotonic = callbacks.monotonic
         self._double_click_seconds = double_click_seconds
-        self._drag = _SourceSelectionDragState()
+        self._drag = SourceSelectionDragState()
 
     def _reset_source_selection_drag_state(self) -> None:
         self._drag.reset()

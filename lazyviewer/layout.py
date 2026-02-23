@@ -9,7 +9,7 @@ from pathlib import Path
 from .state import AppState
 
 
-class _PagerLayoutOps:
+class PagerLayoutOps:
     def __init__(
         self,
         state: AppState,

@@ -10,7 +10,7 @@ from .state import AppState
 
 
 @dataclass(frozen=True)
-class _PreviewSelectionDeps:
+class PreviewSelectionDeps:
     state: AppState
     clear_source_selection: Callable[[], bool]
     refresh_rendered_for_current_path: Callable[..., None]
@@ -41,7 +41,7 @@ class _PreviewSelectionDeps:
 
 
 @dataclass(frozen=True)
-class _TreeRefreshSyncDeps:
+class TreeRefreshSyncDeps:
     state: AppState
     rebuild_tree_entries: Callable[..., None]
     refresh_rendered_for_current_path: Callable[..., None]

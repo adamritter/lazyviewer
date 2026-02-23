@@ -10,7 +10,7 @@ from .state import AppState
 
 
 @dataclass
-class _WatchRefreshContext:
+class WatchRefreshContext:
     tree_last_poll: float = 0.0
     tree_signature: str | None = None
     git_last_poll: float = 0.0

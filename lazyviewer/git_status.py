@@ -29,7 +29,7 @@ _DIFF_CONTRAST_TRUECOLOR = ("170", "170", "170")
 
 
 @dataclass
-class _DiffHunk:
+class DiffHunk:
     old_start: int
     old_count: int
     new_start: int
@@ -184,9 +184,9 @@ def collect_git_status_overlay(tree_root: Path, timeout_seconds: float = 0.25) -
     return overlay
 
 
-def _parse_diff_hunks(diff_text: str) -> list[_DiffHunk]:
-    hunks: list[_DiffHunk] = []
-    current: _DiffHunk | None = None
+def _parse_diff_hunks(diff_text: str) -> list[DiffHunk]:
+    hunks: list[DiffHunk] = []
+    current: DiffHunk | None = None
 
     for raw_line in diff_text.splitlines():
         match = _HUNK_RE.match(raw_line)
@@ -195,7 +195,7 @@ def _parse_diff_hunks(diff_text: str) -> list[_DiffHunk]:
                 hunks.append(current)
             old_count = int(match.group(2) or "1")
             new_count = int(match.group(4) or "1")
-            current = _DiffHunk(
+            current = DiffHunk(
                 old_start=int(match.group(1)),
                 old_count=old_count,
                 new_start=int(match.group(3)),
@@ -306,7 +306,7 @@ def _colorize_lines(lines: list[str], target: Path, style: str, colorize: bool) 
 def _build_annotated_source_preview(
     source_lines: list[str],
     source_display_lines: list[str],
-    hunks: list[_DiffHunk],
+    hunks: list[DiffHunk],
     target: Path,
     style: str,
     colorize: bool,

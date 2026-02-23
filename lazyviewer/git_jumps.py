@@ -45,7 +45,7 @@ def _sorted_git_modified_file_paths(state: AppState) -> list[Path]:
 
 
 @dataclass(frozen=True)
-class _GitModifiedJumpDeps:
+class GitModifiedJumpDeps:
     state: AppState
     visible_content_rows: Callable[[], int]
     refresh_git_status_overlay: Callable[..., None]

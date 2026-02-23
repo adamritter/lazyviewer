@@ -9,7 +9,7 @@ from pathlib import Path
 from .state import AppState
 
 
-class _TreeFilterIndexWarmupScheduler:
+class TreeFilterIndexWarmupScheduler:
     def __init__(
         self,
         collect_project_file_labels: Callable[..., object],
