@@ -12,9 +12,10 @@ import os
 import sys
 from pathlib import Path
 
-from .git_status import build_unified_diff_preview_for_path, format_git_status_badges
-from .gitignore import get_gitignore_matcher
-from .highlight import colorize_source, read_text, sanitize_terminal_text
+from ..git_status import format_git_status_badges
+from ..gitignore import get_gitignore_matcher
+from ..highlight import colorize_source, read_text, sanitize_terminal_text
+from .diff import build_unified_diff_preview_for_path
 
 DIR_PREVIEW_DEFAULT_DEPTH = 3
 DIR_PREVIEW_INITIAL_MAX_ENTRIES = 400

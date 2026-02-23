@@ -50,7 +50,7 @@ from .config import (
     load_show_hidden,
 )
 from .editor import launch_editor
-from .git_status import clear_diff_preview_cache, collect_git_status_overlay
+from .git_status import collect_git_status_overlay
 from .highlight import colorize_source
 from .key_handlers import NormalKeyOps, handle_normal_key as handle_normal_key_event
 from .preview import (
@@ -60,6 +60,7 @@ from .preview import (
     build_rendered_for_path,
     clear_directory_preview_cache,
 )
+from .preview.diff import clear_diff_preview_cache
 from .render import help_panel_row_count
 from .loop import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
 from .picker_navigation import NavigationPickerDeps, NavigationPickerOps
