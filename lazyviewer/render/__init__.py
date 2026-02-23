@@ -1,7 +1,8 @@
-"""Rendering engine for the split tree/text terminal view.
+"""Frame renderer for lazyviewer terminal UI.
 
-Defines render context data and writes fully composed ANSI frames.
-Also computes status/help/search overlays without mutating runtime state.
+This module composes complete ANSI frames for both split-pane and text-only
+layouts. It coordinates tree-pane and source-pane row renderers, help overlays,
+and status bar text, then writes one atomic frame to stdout.
 """
 
 from __future__ import annotations
@@ -24,6 +25,8 @@ from ..tree import TreeEntry, clamp_left_width
 
 @dataclass
 class RenderContext:
+    """Input snapshot used to render one frame without further state mutation."""
+
     text_lines: list[str]
     text_start: int
     tree_entries: list[TreeEntry]
@@ -72,6 +75,7 @@ class RenderContext:
 
 
 def render_dual_page_context(context: RenderContext) -> None:
+    """Render frame from a :class:`RenderContext` object."""
     render_dual_page(
         context.text_lines,
         context.text_start,
@@ -122,12 +126,14 @@ def render_dual_page_context(context: RenderContext) -> None:
 
 
 def _help_line(lines: tuple[str, ...], row: int) -> str:
+    """Safe row lookup for help-line tuples."""
     if 0 <= row < len(lines):
         return lines[row]
     return ""
 
 
 def build_status_line(left_text: str, width: int, right_text: str = "│ ? Help") -> str:
+    """Build one-line status bar with right-aligned help hint."""
     usable = max(1, width - 1)
     if usable <= len(right_text):
         return right_text[-usable:]
@@ -145,6 +151,7 @@ def _compose_status_left_text(
     text_percent: float,
     status_message: str,
 ) -> str:
+    """Compose left status segment with location and transient message."""
     base = f"{current_path} ({status_start}-{status_end}/{status_total} {text_percent:5.1f}%)"
     if not status_message:
         return base
@@ -198,6 +205,7 @@ def render_dual_page(
     source_selection_anchor: tuple[int, int] | None = None,
     source_selection_focus: tuple[int, int] | None = None,
 ) -> None:
+    """Render one full terminal frame for split or text-only mode."""
     out: list[str] = []
     out.append("\033[H\033[J")
     tree_help_lines, text_help_lines, text_only_help_lines = help_panel_lines(

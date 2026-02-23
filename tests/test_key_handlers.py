@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lazyviewer.key_handlers import (
+from lazyviewer.input import (
     NormalKeyOps,
     PickerKeyCallbacks,
     TreeFilterKeyCallbacks,

@@ -1,7 +1,9 @@
-"""Tree filter and content-search orchestration.
+"""Controller for file-filter and content-search modes in the tree pane.
 
-Handles file-filter and content-search modes, selection coercion, and previews.
-Includes cached ripgrep result reuse to keep query editing responsive.
+This module owns filter session state transitions, query application, result
+tree rebuilding, and selection coercion. It keeps UI handlers thin by exposing
+one stateful operations object (`TreeFilterOps`) that encapsulates both mode
+semantics and performance behavior (match limits + cached content-search calls).
 """
 
 from __future__ import annotations
@@ -41,12 +43,15 @@ CONTENT_SEARCH_CACHE_MAX_QUERIES = 64
 
 
 def _skip_gitignored_for_hidden_mode(show_hidden: bool) -> bool:
+    """Return whether gitignored paths should be excluded for current hidden mode."""
     # Hidden mode should reveal both dotfiles and gitignored paths.
     return not show_hidden
 
 
 @dataclass(frozen=True)
 class TreeFilterDeps:
+    """Runtime dependencies required by :class:`TreeFilterOps`."""
+
     state: AppState
     visible_content_rows: Callable[[], int]
     rebuild_screen_lines: Callable[..., None]
@@ -59,7 +64,10 @@ class TreeFilterDeps:
 
 
 class TreeFilterOps:
+    """Stateful controller for tree filter lifecycle and navigation."""
+
     def __init__(self, deps: TreeFilterDeps) -> None:
+        """Create operations object bound to shared runtime state."""
         self.state = deps.state
         self.visible_content_rows = deps.visible_content_rows
         self.rebuild_screen_lines = deps.rebuild_screen_lines
@@ -76,9 +84,11 @@ class TreeFilterOps:
         ] = OrderedDict()
 
     def get_loading_until(self) -> float:
+        """Return timestamp until which loading indicator should remain visible."""
         return self.loading_until
 
     def refresh_tree_filter_file_index(self) -> None:
+        """Refresh cached file-label index when root/hidden-mode changes."""
         root = self.state.tree_root.resolve()
         if self.state.picker_files_root == root and self.state.picker_files_show_hidden == self.state.show_hidden:
             return
@@ -92,6 +102,7 @@ class TreeFilterOps:
         self.state.picker_files_show_hidden = self.state.show_hidden
 
     def default_selected_index(self, prefer_files: bool = False) -> int:
+        """Return default selected tree index after (re)building entries."""
         if not self.state.tree_entries:
             return 0
         if prefer_files:
@@ -103,18 +114,22 @@ class TreeFilterOps:
         return 0
 
     def tree_filter_prompt_prefix(self) -> str:
+        """Return prompt prefix for active filter mode."""
         return "/>" if self.state.tree_filter_mode == "content" else "p>"
 
     def tree_filter_placeholder(self) -> str:
+        """Return placeholder text for active filter mode."""
         return "type to search content" if self.state.tree_filter_mode == "content" else "type to filter files"
 
     def tree_view_rows(self) -> int:
+        """Return visible tree rows, reserving one row for active filter prompt."""
         rows = self.visible_content_rows()
         if self.state.tree_filter_active and not self.state.picker_active:
             return max(1, rows - 1)
         return rows
 
     def tree_filter_match_limit(self, query: str) -> int:
+        """Return adaptive file-filter match cap based on query length."""
         if len(query) <= 1:
             return TREE_FILTER_MATCH_LIMIT_1CHAR
         if len(query) == 2:
@@ -124,6 +139,7 @@ class TreeFilterOps:
         return TREE_FILTER_MATCH_LIMIT_DEFAULT
 
     def content_search_match_limit(self, query: str) -> int:
+        """Return adaptive content-search match cap based on query length."""
         if len(query) <= 1:
             return CONTENT_SEARCH_MATCH_LIMIT_1CHAR
         if len(query) == 2:
@@ -133,6 +149,7 @@ class TreeFilterOps:
         return CONTENT_SEARCH_MATCH_LIMIT_DEFAULT
 
     def _content_search_cache_key(self, query: str, max_matches: int) -> tuple[str, str, bool, bool, int, int]:
+        """Build stable cache key for one content-search request."""
         skip_gitignored = _skip_gitignored_for_hidden_mode(self.state.show_hidden)
         return (
             str(self.state.tree_root.resolve()),
@@ -148,6 +165,7 @@ class TreeFilterOps:
         query: str,
         max_matches: int,
     ) -> tuple[dict[Path, list[ContentMatch]], bool, str | None]:
+        """Run content search with LRU caching by query/root/mode/limits."""
         key = self._content_search_cache_key(query, max_matches)
         cached = self.content_search_cache.get(key)
         if cached is not None:
@@ -169,6 +187,7 @@ class TreeFilterOps:
         return result
 
     def next_content_hit_entry_index(self, selected_idx: int, direction: int) -> int | None:
+        """Return next search-hit entry index from selected index."""
         if not self.state.tree_entries or direction == 0:
             return None
         step = 1 if direction > 0 else -1
@@ -180,17 +199,20 @@ class TreeFilterOps:
         return None
 
     def next_tree_filter_result_entry_index(self, selected_idx: int, direction: int) -> int | None:
+        """Return next result row index for active filter mode."""
         if self.state.tree_filter_mode == "content":
             return self.next_content_hit_entry_index(selected_idx, direction)
         return next_file_entry_index(self.state.tree_entries, selected_idx, direction)
 
     def nearest_tree_filter_result_entry_index(self, selected_idx: int) -> int | None:
+        """Return closest result row index around selected index."""
         candidate_idx = self.next_tree_filter_result_entry_index(selected_idx, 1)
         if candidate_idx is None:
             candidate_idx = self.next_tree_filter_result_entry_index(selected_idx, -1)
         return candidate_idx
 
     def coerce_tree_filter_result_index(self, idx: int) -> int | None:
+        """Coerce arbitrary row index onto nearest selectable filter result."""
         if not (0 <= idx < len(self.state.tree_entries)):
             return None
         if not (self.state.tree_filter_active and self.state.tree_filter_query):
@@ -206,6 +228,7 @@ class TreeFilterOps:
         return self.nearest_tree_filter_result_entry_index(idx)
 
     def move_tree_selection(self, direction: int) -> bool:
+        """Move tree selection, honoring filter-result-only navigation when active."""
         if not self.state.tree_entries or direction == 0:
             return False
 
@@ -225,6 +248,7 @@ class TreeFilterOps:
         return True
 
     def jump_to_next_content_hit(self, direction: int) -> bool:
+        """Jump to next/previous content hit with wrap-around behavior."""
         if direction == 0:
             return False
         if direction > 0:
@@ -251,6 +275,11 @@ class TreeFilterOps:
         center_selection: bool = False,
         force_first_file: bool = False,
     ) -> None:
+        """Rebuild tree entries for current filter state and preserve intent.
+
+        Preserves current file/hit when possible, otherwise picks nearest valid
+        result depending on mode and query state.
+        """
         previous_selected_hit_path: Path | None = None
         previous_selected_hit_line: int | None = None
         previous_selected_hit_column: int | None = None
@@ -377,6 +406,7 @@ class TreeFilterOps:
         preview_selection: bool = False,
         select_first_file: bool = False,
     ) -> None:
+        """Apply query text, rebuild results, and update loading indicator timing."""
         self.state.tree_filter_query = query
         if not query:
             self.loading_until = 0.0
@@ -403,10 +433,12 @@ class TreeFilterOps:
             self.on_tree_filter_state_change()
 
     def reset_tree_filter_session_state(self) -> None:
+        """Reset per-session transient filter state."""
         self.state.tree_filter_loading = False
         self.state.tree_filter_collapsed_dirs = set()
 
     def open_tree_filter(self, mode: str = "files") -> None:
+        """Open filter panel in requested mode and initialize session fields."""
         was_active = self.state.tree_filter_active
         previous_mode = self.state.tree_filter_mode
         if not self.state.tree_filter_active:
@@ -430,6 +462,7 @@ class TreeFilterOps:
             self.on_tree_filter_state_change()
 
     def close_tree_filter(self, clear_query: bool = True, restore_origin: bool = False) -> None:
+        """Close filter panel, optionally restoring original content-search position."""
         previous_browser_visible = self.state.tree_filter_prev_browser_visible
         restore_location: JumpLocation | None = None
         if restore_origin and self.state.tree_filter_mode == "content" and self.state.tree_filter_origin is not None:
@@ -460,6 +493,7 @@ class TreeFilterOps:
             self.on_tree_filter_state_change()
 
     def activate_tree_filter_selection(self) -> None:
+        """Activate selected filter result according to current filter mode."""
         if not self.state.tree_entries:
             if self.state.tree_filter_mode == "content":
                 self.state.tree_filter_editing = False

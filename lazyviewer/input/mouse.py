@@ -7,9 +7,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .source_pane import SourcePaneMouseCallbacks, SourcePaneMouseHandlers
-from .state import AppState
-from .tree_pane.events import TreePaneMouseCallbacks, TreePaneMouseHandlers
+from ..source_pane import SourcePaneMouseCallbacks, SourcePaneMouseHandlers
+from ..state import AppState
+from ..tree_pane.events import TreePaneMouseCallbacks, TreePaneMouseHandlers
 
 
 def _parse_mouse_col_row(mouse_key: str) -> tuple[int | None, int | None]:

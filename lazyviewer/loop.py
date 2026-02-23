@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .input import read_key
-from .key_handlers import (
+from .input import (
     PickerKeyCallbacks,
     TreeFilterKeyCallbacks,
     handle_picker_key,

@@ -19,7 +19,7 @@ from .ansi import ANSI_ESCAPE_RE, build_screen_lines
 from .git_jumps import (
     GitModifiedJumpDeps,
 )
-from .mouse import (
+from .input import (
     TreeMouseCallbacks,
     TreeMouseHandlers,
     _handle_tree_mouse_wheel,
@@ -51,7 +51,7 @@ from .config import (
 from .editor import launch_editor
 from .git_status import collect_git_status_overlay
 from .highlight import colorize_source
-from .key_handlers import NormalKeyOps, handle_normal_key as handle_normal_key_event
+from .input import NormalKeyOps, handle_normal_key as handle_normal_key_event
 from .source_pane import (
     DIR_PREVIEW_GROWTH_STEP,
     DIR_PREVIEW_HARD_MAX_ENTRIES,
