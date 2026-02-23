@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line
-from ..preview import rendering as preview_rendering
+from ..source_pane import SourcePaneRenderer
 from ..tree_pane.rendering import TreePaneRenderer
 from .help import (
     help_panel_lines,
@@ -214,63 +214,33 @@ def render_dual_page(
         tree_filter_editing=tree_filter_editing,
     )
     content_rows = max(1, max_lines - help_rows)
-    has_current_text_hit = text_search_current_line > 0 and text_search_current_column > 0
-    selection_range = preview_rendering.normalized_selection_range(source_selection_anchor, source_selection_focus)
-
-    sticky_symbols = preview_rendering.sticky_symbol_headers_for_position(
-        text_lines=text_lines,
-        text_start=text_start,
-        content_rows=content_rows,
-        current_path=current_path,
-        wrap_text=wrap_text,
-        preview_is_git_diff=preview_is_git_diff,
-    )
 
     if not browser_visible:
         line_width = max(1, width - 1)
-        sticky_headers = preview_rendering.formatted_sticky_headers(
-            text_lines,
-            sticky_symbols,
-            line_width,
-            wrap_text,
-            text_x,
-            preview_is_git_diff=preview_is_git_diff,
-        )
-        sticky_header_rows = len(sticky_headers)
-        text_content_rows = max(1, content_rows - sticky_header_rows)
-        text_percent = preview_rendering.scroll_percent(text_start, len(text_lines), text_content_rows)
-        status_start, status_end, status_total = preview_rendering.status_line_range(
+        source_renderer = SourcePaneRenderer(
             text_lines,
             text_start,
-            text_content_rows,
+            content_rows,
+            line_width,
+            current_path,
             wrap_text,
+            text_x,
+            text_search_query,
+            text_search_current_line,
+            text_search_current_column,
+            preview_is_git_diff=preview_is_git_diff,
+            source_selection_anchor=source_selection_anchor,
+            source_selection_focus=source_selection_focus,
         )
+        text_percent = source_renderer.text_percent
+        status_start = source_renderer.status_start
+        status_end = source_renderer.status_end
+        status_total = source_renderer.status_total
         for row in range(content_rows):
-            if row < sticky_header_rows:
-                sticky_text = sticky_headers[row]
-                out.append(sticky_text)
-                if "\033" in sticky_text:
-                    out.append("\033[0m")
-                out.append("\r\n")
-                continue
-
-            text_idx = text_start + row
-            if text_idx < len(text_lines):
-                text_raw = preview_rendering.rendered_preview_row(
-                    text_lines,
-                    text_idx,
-                    line_width,
-                    wrap_text,
-                    text_x,
-                    text_search_query,
-                    text_search_current_line,
-                    text_search_current_column,
-                    has_current_text_hit,
-                    selection_range,
-                )
-                out.append(text_raw)
-                if "\033" in text_raw:
-                    out.append("\033[0m")
+            text_raw = source_renderer.render_row(row)
+            out.append(text_raw)
+            if "\033" in text_raw:
+                out.append("\033[0m")
             out.append("\r\n")
         for row in range(help_rows):
             help_text = clip_ansi_line(_help_line(text_only_help_lines, row), line_width)
@@ -296,24 +266,25 @@ def render_dual_page(
     left_width = clamp_left_width(width, left_width)
     divider_width = 1
     right_width = max(1, width - left_width - divider_width - 1)
-    sticky_headers = preview_rendering.formatted_sticky_headers(
-        text_lines,
-        sticky_symbols,
-        right_width,
-        wrap_text,
-        text_x,
-        preview_is_git_diff=preview_is_git_diff,
-    )
-    sticky_header_rows = len(sticky_headers)
-    text_content_rows = max(1, content_rows - sticky_header_rows)
-
-    text_percent = preview_rendering.scroll_percent(text_start, len(text_lines), text_content_rows)
-    status_start, status_end, status_total = preview_rendering.status_line_range(
+    source_renderer = SourcePaneRenderer(
         text_lines,
         text_start,
-        text_content_rows,
+        content_rows,
+        right_width,
+        current_path,
         wrap_text,
+        text_x,
+        text_search_query,
+        text_search_current_line,
+        text_search_current_column,
+        preview_is_git_diff=preview_is_git_diff,
+        source_selection_anchor=source_selection_anchor,
+        source_selection_focus=source_selection_focus,
     )
+    text_percent = source_renderer.text_percent
+    status_start = source_renderer.status_start
+    status_end = source_renderer.status_end
+    status_total = source_renderer.status_total
     tree_renderer = TreePaneRenderer(
         left_width=left_width,
         content_rows=content_rows,
@@ -350,31 +321,10 @@ def render_dual_page(
 
         out.append("\033[2m│\033[0m")
 
-        if row < sticky_header_rows:
-            sticky_text = sticky_headers[row]
-            out.append(sticky_text)
-            if "\033" in sticky_text:
-                out.append("\033[0m")
-        else:
-            text_idx = text_start + row
-            if text_idx < len(text_lines):
-                text_raw = preview_rendering.rendered_preview_row(
-                    text_lines,
-                    text_idx,
-                    right_width,
-                    wrap_text,
-                    text_x,
-                    text_search_query,
-                    text_search_current_line,
-                    text_search_current_column,
-                    has_current_text_hit,
-                    selection_range,
-                )
-                out.append(text_raw)
-                if "\033" in text_raw:
-                    out.append("\033[0m")
-            else:
-                out.append("")
+        text_raw = source_renderer.render_row(row)
+        out.append(text_raw)
+        if "\033" in text_raw:
+            out.append("\033[0m")
         out.append("\r\n")
 
     for row in range(help_rows):

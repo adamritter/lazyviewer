@@ -20,12 +20,11 @@ from .git_jumps import (
     GitModifiedJumpDeps,
 )
 from .mouse import (
-    SourcePaneOps,
     TreeMouseCallbacks,
     TreeMouseHandlers,
-    _copy_selected_source_range,
     _handle_tree_mouse_wheel,
 )
+from .source_pane import SourcePaneOps, copy_selected_source_range as copy_source_selection_range
 from .tree_sync import (
     PreviewSelectionDeps,
     TreeRefreshSyncDeps,
@@ -515,7 +514,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     source_selection_position = source_pane_ops.source_selection_position
     directory_preview_target_for_display_line = partial(preview_directory_preview_target_for_display_line, state)
     copy_selected_source_range = partial(
-        _copy_selected_source_range,
+        copy_source_selection_range,
         state,
         copy_text_to_clipboard=_copy_text_to_clipboard,
     )
