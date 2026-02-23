@@ -1,4 +1,9 @@
-"""Source-line mapping and extraction helpers for preview rendering."""
+"""Map between rendered rows and logical source lines.
+
+This module is the source-pane bridge between display coordinates and source
+coordinates. It handles wrapped text and git-diff previews where removed lines
+appear visually but do not consume source line numbers.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +23,7 @@ def source_line_display_index(
     wrap_text: bool,
     preview_is_git_diff: bool = False,
 ) -> int | None:
+    """Return display index of the first chunk for a 1-based source line."""
     if not text_lines:
         return None
 
@@ -58,6 +64,7 @@ def source_line_raw_text(
     wrap_text: bool,
     preview_is_git_diff: bool = False,
 ) -> str:
+    """Return raw text for one logical source line without newline terminator."""
     start_idx = source_line_display_index(
         text_lines,
         source_line,
@@ -86,6 +93,7 @@ def source_line_is_blank(
     wrap_text: bool,
     preview_is_git_diff: bool = False,
 ) -> bool:
+    """Return whether a logical source line is empty/whitespace only."""
     source_text = source_line_raw_text(
         text_lines,
         source_line,
@@ -101,6 +109,7 @@ def source_line_count(
     wrap_text: bool,
     preview_is_git_diff: bool = False,
 ) -> int:
+    """Count logical source lines represented by rendered text lines."""
     if not text_lines:
         return 0
 
@@ -134,6 +143,7 @@ def next_nonblank_source_line(
     wrap_text: bool,
     preview_is_git_diff: bool = False,
 ) -> int | None:
+    """Return first nonblank source line number at/after ``start_line``."""
     total_lines = source_line_count(
         text_lines,
         wrap_text,
@@ -156,6 +166,7 @@ def status_line_range(
     content_rows: int,
     wrap_text: bool,
 ) -> tuple[int, int, int]:
+    """Compute ``(start, end, total)`` status counters for current viewport."""
     if not text_lines:
         return 1, 1, 1
 
@@ -192,6 +203,7 @@ def extract_source_line_text(
     text_x: int,
     preview_is_git_diff: bool = False,
 ) -> str:
+    """Extract one source line as display text for the current horizontal view."""
     source_text = source_line_raw_text(
         text_lines,
         source_line,
@@ -215,6 +227,7 @@ def sticky_source_lines(
     text_x: int,
     preview_is_git_diff: bool = False,
 ) -> list[str]:
+    """Return rendered source text for each sticky symbol header line."""
     out: list[str] = []
     for symbol in sticky_symbols:
         source_line = symbol.line + 1

@@ -1,4 +1,10 @@
-"""Preview-pane click event helpers."""
+"""Interpret clicks inside the source preview pane.
+
+This module resolves three click intents in order:
+1. navigate directory preview rows
+2. jump to import targets
+3. run content search for clicked token
+"""
 
 from __future__ import annotations
 
@@ -19,6 +25,7 @@ _IMPORT_RE = re.compile(r"^\s*import\s+(?P<modules>.+?)\s*$")
 
 
 def _display_col_to_text_index(text: str, display_col: int) -> int:
+    """Convert display column offset to string index using terminal widths."""
     if display_col <= 0:
         return 0
     col = 0
@@ -32,6 +39,7 @@ def _display_col_to_text_index(text: str, display_col: int) -> int:
 
 
 def _line_has_newline_terminator(line: str) -> bool:
+    """Return whether line ends with CR or LF terminator."""
     return line.endswith("\n") or line.endswith("\r")
 
 
@@ -40,6 +48,7 @@ def _display_line_to_source_line(
     wrap_text: bool,
     display_idx: int,
 ) -> int | None:
+    """Map display row index to logical source-line index."""
     if display_idx < 0 or display_idx >= len(lines):
         return None
     if not wrap_text:
@@ -53,6 +62,7 @@ def _display_line_to_source_line(
 
 
 def directory_preview_target_for_display_line(state: AppState, display_idx: int) -> Path | None:
+    """Resolve clicked directory-preview row to filesystem path."""
     if state.dir_preview_path is None:
         return None
 
@@ -118,6 +128,7 @@ def _clicked_preview_token_details(
     lines: list[str],
     selection_pos: tuple[int, int],
 ) -> tuple[str, int, int, str, int] | None:
+    """Return token and cursor context for a click in rendered preview text."""
     if not lines:
         return None
 
@@ -149,6 +160,7 @@ def clicked_preview_search_token(
     lines: list[str],
     selection_pos: tuple[int, int],
 ) -> str | None:
+    """Return token under click suitable for content-search query."""
     details = _clicked_preview_token_details(lines, selection_pos)
     if details is None:
         return None
@@ -159,6 +171,7 @@ def _resolve_module_spec_to_path(
     state: AppState,
     module_spec: str,
 ) -> Path | None:
+    """Resolve Python import module spec (absolute/relative) to a local file."""
     if not module_spec:
         return None
     if not state.current_path.resolve().is_file():
@@ -198,6 +211,7 @@ def clicked_preview_import_target(
     lines: list[str],
     selection_pos: tuple[int, int],
 ) -> Path | None:
+    """Resolve clicked token to import target path when click is on import syntax."""
     details = _clicked_preview_token_details(lines, selection_pos)
     if details is None:
         return None
@@ -257,6 +271,7 @@ def _open_content_search_for_token(
     open_tree_filter: Callable[[str], None],
     apply_tree_filter_query: Callable[..., None],
 ) -> bool:
+    """Open content-search UI and seed query from clicked token."""
     token = query.strip()
     if not token:
         return False
@@ -282,6 +297,7 @@ def handle_preview_click(
     open_tree_filter: Callable[[str], None],
     apply_tree_filter_query: Callable[..., None],
 ) -> bool:
+    """Handle a click in source pane and execute highest-priority matching action."""
     if state.dir_preview_path is not None:
         preview_target = directory_preview_target_for_display_line(selection_pos[0])
         if preview_target is not None:

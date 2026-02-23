@@ -1,4 +1,8 @@
-"""Diff-specific helpers for preview rendering."""
+"""Map rendered diff rows back to source-line positions.
+
+These helpers let sticky-header and status logic operate on semantic source
+lines even when rendered diff previews include removed-line-only rows.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +16,11 @@ def iter_diff_logical_line_ranges(
     text_lines: list[str],
     wrap_text: bool,
 ) -> list[tuple[int, int]]:
+    """Group rendered rows into logical lines.
+
+    In wrapped mode, consecutive display chunks without newline terminators are
+    treated as one logical line range.
+    """
     ranges: list[tuple[int, int]] = []
     idx = 0
     while idx < len(text_lines):
@@ -28,6 +37,7 @@ def diff_preview_uses_plain_markers(
     text_lines: list[str],
     wrap_text: bool,
 ) -> bool:
+    """Heuristically detect plain ``'  '``/``'+ '``/``'- '`` diff markers."""
     logical_ranges = iter_diff_logical_line_ranges(text_lines, wrap_text)
     if len(logical_ranges) < 3:
         return False
@@ -52,6 +62,7 @@ def diff_preview_logical_line_is_removed(
     first_chunk: str,
     use_plain_markers: bool,
 ) -> bool:
+    """Return whether a logical diff line represents a removed source line."""
     if use_plain_markers:
         plain = ANSI_ESCAPE_RE.sub("", first_chunk)
         return len(plain) >= 2 and plain[:2] == "- "
@@ -63,6 +74,10 @@ def diff_source_line_for_display_index(
     display_index: int,
     wrap_text: bool,
 ) -> int:
+    """Map rendered display index to corresponding 1-based source line number.
+
+    Removed lines do not advance the source-line counter.
+    """
     if not text_lines:
         return 1
 

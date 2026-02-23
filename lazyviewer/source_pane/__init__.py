@@ -1,4 +1,13 @@
-"""Public API for source-pane rendering, previewing, and interactions."""
+"""Public API surface for source-pane behavior.
+
+This package groups all right-pane concerns:
+- file/directory preview construction
+- line rendering and sticky headers
+- source selection and mouse interactions
+
+The ``__init__`` module is intentionally a compatibility facade so callers can
+import from ``lazyviewer.source_pane`` without depending on internal layout.
+"""
 
 from __future__ import annotations
 
@@ -19,7 +28,7 @@ from .directory import (
 )
 from .mouse import SourcePaneClickResult, SourcePaneMouseCallbacks, SourcePaneMouseHandlers
 from .ops import SourcePaneOps, copy_selected_source_range
-from .pane import SourcePaneRenderer
+from .renderer import SourcePaneRenderer
 from .path import (
     BINARY_PROBE_BYTES,
     COLORIZE_MAX_FILE_BYTES,
@@ -41,6 +50,11 @@ def build_rendered_for_path(
     dir_git_status_overlay: dict[Path, int] | None = None,
     dir_show_size_labels: bool = True,
 ) -> RenderedPath:
+    """Build preview payload for a path using package defaults.
+
+    This wrapper forwards to ``source_pane.path.build_rendered_for_path`` and
+    injects the package-level ``colorize_source`` implementation.
+    """
     return _build_rendered_for_path(
         target,
         show_hidden,

@@ -1,4 +1,8 @@
-"""Source-pane layout and selection helpers."""
+"""Source-pane geometry and text-selection primitives.
+
+These helpers convert terminal coordinates into source positions and implement
+selection-copy behavior shared by keyboard/mouse interaction paths.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +15,7 @@ from ..state import AppState
 
 
 def _rendered_line_display_width(line: str) -> int:
+    """Return display width of one rendered line after stripping ANSI/newline."""
     plain = ANSI_ESCAPE_RE.sub("", line).rstrip("\r\n")
     col = 0
     for ch in plain:
@@ -19,23 +24,28 @@ def _rendered_line_display_width(line: str) -> int:
 
 
 class SourcePaneOps:
+    """Stateful source-pane geometry helpers bound to ``AppState``."""
+
     def __init__(
         self,
         state: AppState,
         visible_content_rows: Callable[[], int],
         get_terminal_size: Callable[[tuple[int, int]], os.terminal_size] = shutil.get_terminal_size,
     ) -> None:
+        """Bind pane operations to shared state and terminal-size provider."""
         self.state = state
         self.visible_content_rows = visible_content_rows
         self._get_terminal_size = get_terminal_size
 
     def preview_pane_width(self) -> int:
+        """Return current preview pane width in columns."""
         if self.state.browser_visible:
             return max(1, self.state.right_width)
         term = self._get_terminal_size((80, 24))
         return max(1, term.columns - 1)
 
     def max_horizontal_text_offset(self) -> int:
+        """Return max valid horizontal scroll offset for current rendered lines."""
         if self.state.wrap_text or not self.state.lines:
             return 0
         viewport_width = self.preview_pane_width()
@@ -45,6 +55,7 @@ class SourcePaneOps:
         return max(0, max_width - viewport_width)
 
     def source_pane_col_bounds(self) -> tuple[int, int]:
+        """Return inclusive terminal column bounds of source pane."""
         if self.state.browser_visible:
             min_col = self.state.left_width + 2
             pane_width = max(1, self.state.right_width)
@@ -55,6 +66,7 @@ class SourcePaneOps:
         return min_col, max_col
 
     def source_selection_position(self, col: int, row: int) -> tuple[int, int] | None:
+        """Map terminal ``(col,row)`` to ``(line_idx,text_col)`` in rendered content."""
         visible_rows = self.visible_content_rows()
         if row < 1 or row > visible_rows:
             return None
@@ -82,6 +94,7 @@ def copy_selected_source_range(
     end_pos: tuple[int, int],
     copy_text_to_clipboard: Callable[[str], bool],
 ) -> bool:
+    """Copy selected source range to clipboard using plain-text coordinates."""
     if not state.lines:
         return False
 

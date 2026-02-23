@@ -1,4 +1,9 @@
-"""Source-pane preview rendering helpers."""
+"""Object wrapper around source-pane row rendering.
+
+``SourcePaneRenderer`` computes sticky headers and scroll/status metadata once
+per frame, then provides row-level rendering methods used by the top-level page
+renderer.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,8 @@ from . import rendering as preview_rendering
 
 
 class SourcePaneRenderer:
+    """Precompute source-pane rendering context for one frame."""
+
     def __init__(
         self,
         text_lines: list[str],
@@ -24,6 +31,7 @@ class SourcePaneRenderer:
         source_selection_anchor: tuple[int, int] | None,
         source_selection_focus: tuple[int, int] | None,
     ) -> None:
+        """Initialize renderer state and sticky-header metadata."""
         self.text_lines = text_lines
         self.text_start = text_start
         self.line_width = line_width
@@ -65,6 +73,7 @@ class SourcePaneRenderer:
         )
 
     def render_row(self, row: int) -> str:
+        """Render one visible source-pane row, including sticky-header rows."""
         if row < self.sticky_header_rows:
             return self.sticky_headers[row]
 
