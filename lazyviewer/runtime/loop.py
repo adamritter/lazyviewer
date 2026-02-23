@@ -12,17 +12,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .input import read_key
-from .input import (
+from ..input import read_key
+from ..input import (
     PickerKeyCallbacks,
     TreeFilterKeyCallbacks,
     handle_picker_key,
     handle_tree_filter_key,
 )
-from .render import RenderContext, render_dual_page_context
-from .state import AppState
-from .terminal import TerminalController
-from .tree import clamp_left_width
+from ..render import RenderContext, render_dual_page_context
+from ..state import AppState
+from ..terminal import TerminalController
+from ..tree import clamp_left_width
 
 
 @dataclass(frozen=True)

@@ -1,4 +1,4 @@
-"""Integration-heavy tests for ``lazyviewer.app_runtime`` wiring.
+"""Integration-heavy tests for ``lazyviewer.runtime.app`` wiring.
 
 Covers git/watch refresh behavior, key-driven state transitions, and search flows.
 These tests ensure runtime callbacks and state orchestration stay coherent.
@@ -14,9 +14,9 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
-from lazyviewer import app_runtime
+from lazyviewer.runtime import app as app_runtime
 from lazyviewer.ansi import ANSI_ESCAPE_RE
-from lazyviewer.app_runtime import (
+from lazyviewer.screen_utils import (
     _centered_scroll_start,
     _first_git_change_screen_line,
     _tree_order_key_for_relative_path,

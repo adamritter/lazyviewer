@@ -7,7 +7,7 @@ import time
 import unittest
 from unittest import mock
 
-from lazyviewer.loop import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
+from lazyviewer.runtime import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
 from lazyviewer.state import AppState
 from lazyviewer.terminal import TerminalController
 from lazyviewer.tree import TreeEntry
@@ -113,13 +113,13 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
         keys = iter(["q"])
 
         with mock.patch(
-            "lazyviewer.loop.shutil.get_terminal_size",
+            "lazyviewer.runtime.loop.shutil.get_terminal_size",
             return_value=mock.Mock(columns=120, lines=40),
         ), mock.patch(
-            "lazyviewer.loop.read_key",
+            "lazyviewer.runtime.loop.read_key",
             side_effect=lambda *_args, **_kwargs: next(keys),
         ), mock.patch(
-            "lazyviewer.loop.render_dual_page_context",
+            "lazyviewer.runtime.loop.render_dual_page_context",
             return_value=None,
         ):
             run_main_loop(
@@ -144,13 +144,13 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
             "lazyviewer.terminal.os.write",
             side_effect=lambda _fd, data: writes.append(data) or len(data),
         ), mock.patch(
-            "lazyviewer.loop.shutil.get_terminal_size",
+            "lazyviewer.runtime.loop.shutil.get_terminal_size",
             return_value=mock.Mock(columns=120, lines=40),
         ), mock.patch(
-            "lazyviewer.loop.read_key",
+            "lazyviewer.runtime.loop.read_key",
             side_effect=lambda *_args, **_kwargs: next(keys),
         ), mock.patch(
-            "lazyviewer.loop.render_dual_page_context",
+            "lazyviewer.runtime.loop.render_dual_page_context",
             return_value=None,
         ):
             terminal = TerminalController(stdin_fd=0, stdout_fd=1)
@@ -172,13 +172,13 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
         keys = iter(["\x19", "q"])
 
         with mock.patch(
-            "lazyviewer.loop.shutil.get_terminal_size",
+            "lazyviewer.runtime.loop.shutil.get_terminal_size",
             return_value=mock.Mock(columns=120, lines=40),
         ), mock.patch(
-            "lazyviewer.loop.read_key",
+            "lazyviewer.runtime.loop.read_key",
             side_effect=lambda *_args, **_kwargs: next(keys),
         ), mock.patch(
-            "lazyviewer.loop.render_dual_page_context",
+            "lazyviewer.runtime.loop.render_dual_page_context",
             return_value=None,
         ):
             run_main_loop(
@@ -206,13 +206,13 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
             return event
 
         with mock.patch(
-            "lazyviewer.loop.shutil.get_terminal_size",
+            "lazyviewer.runtime.loop.shutil.get_terminal_size",
             return_value=mock.Mock(columns=120, lines=40),
         ), mock.patch(
-            "lazyviewer.loop.read_key",
+            "lazyviewer.runtime.loop.read_key",
             side_effect=_read_key,
         ), mock.patch(
-            "lazyviewer.loop.render_dual_page_context",
+            "lazyviewer.runtime.loop.render_dual_page_context",
             return_value=None,
         ):
             run_main_loop(
@@ -248,13 +248,13 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
 
         start = time.perf_counter()
         with mock.patch(
-            "lazyviewer.loop.shutil.get_terminal_size",
+            "lazyviewer.runtime.loop.shutil.get_terminal_size",
             return_value=mock.Mock(columns=120, lines=40),
         ), mock.patch(
-            "lazyviewer.loop.read_key",
+            "lazyviewer.runtime.loop.read_key",
             side_effect=lambda *_args, **_kwargs: next(keys),
         ), mock.patch(
-            "lazyviewer.loop.render_dual_page_context",
+            "lazyviewer.runtime.loop.render_dual_page_context",
             side_effect=fake_render,
         ):
             run_main_loop(
@@ -282,13 +282,13 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
         calls = {"tree": 0, "git": 0, "overlay": 0}
 
         with mock.patch(
-            "lazyviewer.loop.shutil.get_terminal_size",
+            "lazyviewer.runtime.loop.shutil.get_terminal_size",
             return_value=mock.Mock(columns=120, lines=40),
         ), mock.patch(
-            "lazyviewer.loop.read_key",
+            "lazyviewer.runtime.loop.read_key",
             side_effect=lambda *_args, **_kwargs: next(keys),
         ), mock.patch(
-            "lazyviewer.loop.render_dual_page_context",
+            "lazyviewer.runtime.loop.render_dual_page_context",
             return_value=None,
         ):
             run_main_loop(

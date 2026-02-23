@@ -1,4 +1,4 @@
-"""Integration-heavy tests for ``lazyviewer.app_runtime`` wiring.
+"""Integration-heavy tests for ``lazyviewer.runtime.app`` wiring.
 
 Covers git/watch refresh behavior, key-driven state transitions, and search flows.
 These tests ensure runtime callbacks and state orchestration stay coherent.
@@ -14,9 +14,9 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
-from lazyviewer import app_runtime
+from lazyviewer.runtime import app as app_runtime
 from lazyviewer.ansi import ANSI_ESCAPE_RE
-from lazyviewer.app_runtime import (
+from lazyviewer.screen_utils import (
     _centered_scroll_start,
     _first_git_change_screen_line,
     _tree_order_key_for_relative_path,
@@ -82,16 +82,16 @@ class AppRuntimeGitTests(unittest.TestCase):
                 snapshots["after_p"] = state.current_path.resolve()
                 snapshots["after_p_status"] = state.status_message
 
-            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
-                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.app_runtime.os.isatty", return_value=True
-            ), mock.patch("lazyviewer.app_runtime.sys.stdin.fileno", return_value=0), mock.patch(
-                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
-            ), mock.patch("lazyviewer.app_runtime.load_show_hidden", return_value=False), mock.patch(
-                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.runtime.app.os.isatty", return_value=True
+            ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
+                "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
+            ), mock.patch("lazyviewer.runtime.app.load_show_hidden", return_value=False), mock.patch(
+                "lazyviewer.runtime.app.load_left_pane_percent", return_value=None
             ), mock.patch(
-                "lazyviewer.app_runtime.GIT_STATUS_REFRESH_SECONDS", 0.0
+                "lazyviewer.runtime.app.GIT_STATUS_REFRESH_SECONDS", 0.0
             ):
                 app_runtime.run_pager("", root, "monokai", True, False)
 
@@ -158,16 +158,16 @@ class AppRuntimeGitTests(unittest.TestCase):
                 snapshots["after_p_start"] = state.start
                 snapshots["after_p_status"] = state.status_message
 
-            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
-                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.app_runtime.os.isatty", return_value=True
-            ), mock.patch("lazyviewer.app_runtime.sys.stdin.fileno", return_value=0), mock.patch(
-                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
-            ), mock.patch("lazyviewer.app_runtime.load_show_hidden", return_value=False), mock.patch(
-                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.runtime.app.os.isatty", return_value=True
+            ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
+                "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
+            ), mock.patch("lazyviewer.runtime.app.load_show_hidden", return_value=False), mock.patch(
+                "lazyviewer.runtime.app.load_left_pane_percent", return_value=None
             ), mock.patch(
-                "lazyviewer.app_runtime.GIT_STATUS_REFRESH_SECONDS", 0.0
+                "lazyviewer.runtime.app.GIT_STATUS_REFRESH_SECONDS", 0.0
             ):
                 app_runtime.run_pager("", file_path, "monokai", True, False)
 
@@ -238,16 +238,16 @@ class AppRuntimeGitTests(unittest.TestCase):
                 snapshots["after_N2_path"] = state.current_path.resolve()
                 snapshots["after_N2_start"] = state.start
 
-            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
-                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.app_runtime.os.isatty", return_value=True
-            ), mock.patch("lazyviewer.app_runtime.sys.stdin.fileno", return_value=0), mock.patch(
-                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
-            ), mock.patch("lazyviewer.app_runtime.load_show_hidden", return_value=False), mock.patch(
-                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.runtime.app.os.isatty", return_value=True
+            ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
+                "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
+            ), mock.patch("lazyviewer.runtime.app.load_show_hidden", return_value=False), mock.patch(
+                "lazyviewer.runtime.app.load_left_pane_percent", return_value=None
             ), mock.patch(
-                "lazyviewer.app_runtime.GIT_STATUS_REFRESH_SECONDS", 0.0
+                "lazyviewer.runtime.app.GIT_STATUS_REFRESH_SECONDS", 0.0
             ):
                 app_runtime.run_pager("", root, "monokai", True, False)
 
@@ -294,18 +294,18 @@ class AppRuntimeGitTests(unittest.TestCase):
 
                 snapshots["after_commit"] = state.rendered
 
-            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
-                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.app_runtime.os.isatty", return_value=True
-            ), mock.patch("lazyviewer.app_runtime.sys.stdin.fileno", return_value=0), mock.patch(
-                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
-            ), mock.patch("lazyviewer.app_runtime.load_show_hidden", return_value=False), mock.patch(
-                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.runtime.app.os.isatty", return_value=True
+            ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
+                "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
+            ), mock.patch("lazyviewer.runtime.app.load_show_hidden", return_value=False), mock.patch(
+                "lazyviewer.runtime.app.load_left_pane_percent", return_value=None
             ), mock.patch(
-                "lazyviewer.app_runtime.GIT_WATCH_POLL_SECONDS", 0.0
+                "lazyviewer.runtime.app.GIT_WATCH_POLL_SECONDS", 0.0
             ), mock.patch(
-                "lazyviewer.app_runtime.GIT_STATUS_REFRESH_SECONDS", 0.0
+                "lazyviewer.runtime.app.GIT_STATUS_REFRESH_SECONDS", 0.0
             ):
                 app_runtime.run_pager("", file_path, "monokai", True, False)
 
@@ -357,14 +357,14 @@ class AppRuntimeGitTests(unittest.TestCase):
                 handle_normal_key(".", 120)
                 snapshots["after"] = current_labels()
 
-            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
-                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.app_runtime.os.isatty", return_value=True
-            ), mock.patch("lazyviewer.app_runtime.sys.stdin.fileno", return_value=0), mock.patch(
-                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
-            ), mock.patch("lazyviewer.app_runtime.load_show_hidden", return_value=False), mock.patch(
-                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.runtime.app.os.isatty", return_value=True
+            ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
+                "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
+            ), mock.patch("lazyviewer.runtime.app.load_show_hidden", return_value=False), mock.patch(
+                "lazyviewer.runtime.app.load_left_pane_percent", return_value=None
             ):
                 app_runtime.run_pager("", root, "monokai", True, False)
 
@@ -406,20 +406,20 @@ class AppRuntimeGitTests(unittest.TestCase):
                 snapshots["after_ctrl_o"] = state.git_features_enabled
                 handle_normal_key("CTRL_G", 120)
 
-            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
-                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.app_runtime.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.app_runtime.shutil.which", return_value="/usr/local/bin/lazygit"
-            ), mock.patch("lazyviewer.app_runtime.subprocess.run") as lazygit_run, mock.patch(
-                "lazyviewer.app_runtime.os.isatty", return_value=True
+            with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.runtime.app.shutil.which", return_value="/usr/local/bin/lazygit"
+            ), mock.patch("lazyviewer.runtime.app.subprocess.run") as lazygit_run, mock.patch(
+                "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(
-                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+                "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
             ), mock.patch(
-                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+                "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
             ), mock.patch(
-                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+                "lazyviewer.runtime.app.load_show_hidden", return_value=False
             ), mock.patch(
-                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+                "lazyviewer.runtime.app.load_left_pane_percent", return_value=None
             ):
                 app_runtime.run_pager("", root, "monokai", True, False)
 

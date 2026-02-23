@@ -15,32 +15,32 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
-from .ansi import ANSI_ESCAPE_RE, build_screen_lines
-from .git_jumps import (
+from ..ansi import ANSI_ESCAPE_RE, build_screen_lines
+from ..git_jumps import (
     GitModifiedJumpDeps,
 )
-from .input import (
+from ..input import (
     TreeMouseCallbacks,
     TreeMouseHandlers,
     _handle_tree_mouse_wheel,
 )
-from .source_pane import SourcePaneOps, copy_selected_source_range as copy_source_selection_range
-from .tree_sync import (
+from ..source_pane import SourcePaneOps, copy_selected_source_range as copy_source_selection_range
+from ..tree_sync import (
     PreviewSelectionDeps,
     TreeRefreshSyncDeps,
 )
-from .index_warmup import TreeFilterIndexWarmupScheduler
-from .layout import PagerLayoutOps
-from .screen_utils import (
+from ..index_warmup import TreeFilterIndexWarmupScheduler
+from ..layout import PagerLayoutOps
+from ..screen_utils import (
     _centered_scroll_start,
     _first_git_change_screen_line,
     _tree_order_key_for_relative_path,
 )
-from .watch_refresh import (
+from ..watch_refresh import (
     WatchRefreshContext,
     _refresh_git_status_overlay,
 )
-from .config import (
+from ..config import (
     load_content_search_left_pane_percent,
     load_left_pane_percent,
     load_named_marks,
@@ -48,32 +48,32 @@ from .config import (
     save_left_pane_percent,
     load_show_hidden,
 )
-from .editor import launch_editor
-from .git_status import collect_git_status_overlay
-from .highlight import colorize_source
-from .input import NormalKeyOps, handle_normal_key as handle_normal_key_event
-from .source_pane import (
+from ..editor import launch_editor
+from ..git_status import collect_git_status_overlay
+from ..highlight import colorize_source
+from ..input import NormalKeyOps, handle_normal_key as handle_normal_key_event
+from ..source_pane import (
     DIR_PREVIEW_GROWTH_STEP,
     DIR_PREVIEW_HARD_MAX_ENTRIES,
     DIR_PREVIEW_INITIAL_MAX_ENTRIES,
     build_rendered_for_path,
     clear_directory_preview_cache,
 )
-from .source_pane.diff import clear_diff_preview_cache
-from .source_pane.events import directory_preview_target_for_display_line as preview_directory_preview_target_for_display_line
-from .render import help_panel_row_count
+from ..source_pane.diff import clear_diff_preview_cache
+from ..source_pane.events import directory_preview_target_for_display_line as preview_directory_preview_target_for_display_line
+from ..render import help_panel_row_count
 from .loop import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
-from .picker_panel import NavigationPickerDeps, NavigationPickerOps
-from .filter_panel import TreeFilterDeps, TreeFilterOps
-from .search.fuzzy import collect_project_file_labels
-from .state import AppState
-from .terminal import TerminalController
-from .tree import (
+from ..picker_panel import NavigationPickerDeps, NavigationPickerOps
+from ..filter_panel import TreeFilterDeps, TreeFilterOps
+from ..search.fuzzy import collect_project_file_labels
+from ..state import AppState
+from ..terminal import TerminalController
+from ..tree import (
     build_tree_entries,
     clamp_left_width,
     compute_left_width,
 )
-from .watch import build_git_watch_signature, build_tree_watch_signature, resolve_git_paths
+from ..watch import build_git_watch_signature, build_tree_watch_signature, resolve_git_paths
 
 DOUBLE_CLICK_SECONDS = 0.35
 FILTER_CURSOR_BLINK_SECONDS = 0.5
@@ -89,6 +89,7 @@ WRAP_STATUS_SECONDS = 1.2
 
 
 def _skip_gitignored_for_hidden_mode(show_hidden: bool) -> bool:
+    """Return whether gitignored paths should be excluded for current visibility mode."""
     # Hidden mode should reveal both dotfiles and gitignored paths.
     return not show_hidden
 
@@ -109,6 +110,7 @@ COMMAND_PALETTE_ITEMS: tuple[tuple[str, str], ...] = (
 
 
 def _copy_text_to_clipboard(text: str) -> bool:
+    """Best-effort clipboard copy across macOS, Windows, and common Linux tools."""
     if not text:
         return False
 
@@ -144,16 +146,19 @@ def _copy_text_to_clipboard(text: str) -> bool:
 
 
 def _clear_status_message(state: AppState) -> None:
+    """Clear transient status message and its expiration timestamp."""
     state.status_message = ""
     state.status_message_until = 0.0
 
 
 def _set_status_message(state: AppState, message: str) -> None:
+    """Set transient status message visible for a fixed short interval."""
     state.status_message = message
     state.status_message_until = time.monotonic() + WRAP_STATUS_SECONDS
 
 
 def _clear_source_selection(state: AppState) -> bool:
+    """Clear source text selection anchors, returning whether anything changed."""
     changed = state.source_selection_anchor is not None or state.source_selection_focus is not None
     state.source_selection_anchor = None
     state.source_selection_focus = None
@@ -170,6 +175,7 @@ def _refresh_rendered_for_current_path(
     reset_dir_budget: bool = False,
     force_rebuild: bool = False,
 ) -> None:
+    """Rebuild rendered preview text for ``state.current_path`` and sync derived fields."""
     if force_rebuild:
         clear_directory_preview_cache()
         clear_diff_preview_cache()
@@ -222,6 +228,7 @@ def _maybe_grow_directory_preview(
     visible_content_rows: Callable[[], int],
     refresh_rendered_for_current_path: Callable[..., None],
 ) -> bool:
+    """Expand directory preview budget when scrolling near truncated preview end."""
     if state.dir_preview_path is None or not state.dir_preview_truncated:
         return False
     if state.current_path.resolve() != state.dir_preview_path:
@@ -248,6 +255,7 @@ def _toggle_git_features(
     refresh_git_status_overlay: Callable[..., None],
     refresh_rendered_for_current_path: Callable[..., None],
 ) -> None:
+    """Toggle git-aware features and refresh overlays/rendering accordingly."""
     state.git_features_enabled = not state.git_features_enabled
     if state.git_features_enabled:
         refresh_git_status_overlay(force=True)
@@ -266,6 +274,7 @@ def _toggle_tree_size_labels(
     state: AppState,
     refresh_rendered_for_current_path: Callable[..., None],
 ) -> None:
+    """Toggle directory size labels in preview and refresh when relevant."""
     state.show_tree_sizes = not state.show_tree_sizes
     if state.current_path.resolve().is_dir():
         refresh_rendered_for_current_path(reset_scroll=False, reset_dir_budget=False)
@@ -279,6 +288,7 @@ def _launch_lazygit(
     sync_selected_target_after_tree_refresh: Callable[..., None],
     mark_tree_watch_dirty: Callable[[], None],
 ) -> None:
+    """Run ``lazygit`` in tree root and resync UI state after returning."""
     if shutil.which("lazygit") is None:
         show_inline_error("lazygit not found in PATH")
         return
@@ -306,29 +316,38 @@ def _launch_lazygit(
     mark_tree_watch_dirty()
 
 class NavigationProxy:
+    """Late-bound proxy exposing navigation operations before ops construction."""
+
     def __init__(self) -> None:
+        """Initialize proxy with no bound navigation operations."""
         self._ops: NavigationPickerOps | None = None
 
     def bind(self, ops: NavigationPickerOps) -> None:
+        """Attach concrete navigation operations implementation."""
         self._ops = ops
 
     def current_jump_location(self):
+        """Delegate current jump-location lookup to bound navigation ops."""
         assert self._ops is not None
         return self._ops.current_jump_location()
 
     def record_jump_if_changed(self, origin: object) -> None:
+        """Delegate conditional jump-history recording to bound navigation ops."""
         assert self._ops is not None
         self._ops.record_jump_if_changed(origin)
 
     def jump_to_path(self, target: Path) -> None:
+        """Delegate path jump request to bound navigation ops."""
         assert self._ops is not None
         self._ops.jump_to_path(target)
 
     def jump_to_line(self, line_number: int) -> None:
+        """Delegate line jump request to bound navigation ops."""
         assert self._ops is not None
         self._ops.jump_to_line(line_number)
 
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
+    """Initialize pager runtime state, wire subsystems, and run event loop."""
     if nopager or not os.isatty(sys.stdin.fileno()):
         rendered = content
         if not no_color and os.isatty(sys.stdout.fileno()):

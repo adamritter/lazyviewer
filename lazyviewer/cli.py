@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .app_runtime import run_pager
+from .runtime import run_pager
 from .highlight import read_text
 
 
