@@ -113,6 +113,47 @@ class PreviewBehaviorTests(unittest.TestCase):
             self.assertIn("src/ [?]", plain)
             self.assertIn("main.py [M][?]", plain)
 
+    def test_build_directory_preview_adds_colored_size_label_for_files_at_least_10_kb(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            large_file = root / "large.bin"
+            small_file = root / "small.txt"
+            large_file.write_bytes(b"x" * (10 * 1024))
+            small_file.write_text("tiny\n", encoding="utf-8")
+
+            rendered, truncated = preview.build_directory_preview(
+                root,
+                show_hidden=False,
+                max_depth=2,
+                max_entries=20,
+            )
+            plain = strip_ansi(rendered)
+
+            self.assertFalse(truncated)
+            self.assertIn("large.bin [10 KB]", plain)
+            self.assertIn("\033[38;5;109m [10 KB]\033[0m", rendered)
+            self.assertIn("small.txt", plain)
+            self.assertNotIn("small.txt [", plain)
+
+    def test_build_directory_preview_can_hide_size_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            large_file = root / "large.bin"
+            large_file.write_bytes(b"x" * (10 * 1024))
+
+            rendered, truncated = preview.build_directory_preview(
+                root,
+                show_hidden=False,
+                max_depth=2,
+                max_entries=20,
+                show_size_labels=False,
+            )
+            plain = strip_ansi(rendered)
+
+            self.assertFalse(truncated)
+            self.assertIn("large.bin", plain)
+            self.assertNotIn("large.bin [10 KB]", plain)
+
     def test_build_rendered_for_path_file_returns_plain_text_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             file_path = Path(tmp) / "demo.py"

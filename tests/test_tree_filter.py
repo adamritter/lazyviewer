@@ -10,10 +10,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from lazyviewer.ansi import ANSI_ESCAPE_RE
 from lazyviewer.search.content import ContentMatch
 from lazyviewer.search.fuzzy import fuzzy_match_file_index, to_project_relative
 from lazyviewer.tree import (
     TreeEntry,
+    build_tree_entries,
     filter_tree_entries_for_content_matches,
     filter_tree_entries_for_files,
     find_content_hit_index,
@@ -26,6 +28,59 @@ from lazyviewer.tree import (
 
 
 class TreeFilterBehaviorTests(unittest.TestCase):
+    def test_format_tree_entry_appends_size_label_for_large_files_in_left_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            large_file = root / "large.bin"
+            small_file = root / "small.txt"
+            large_file.write_bytes(b"x" * (10 * 1024))
+            small_file.write_bytes(b"x" * (9 * 1024))
+
+            entries = build_tree_entries(
+                root=root,
+                expanded={root},
+                show_hidden=False,
+            )
+            large_entry = next(entry for entry in entries if entry.path.resolve() == large_file.resolve())
+            small_entry = next(entry for entry in entries if entry.path.resolve() == small_file.resolve())
+
+            rendered_large = format_tree_entry(large_entry, root=root, expanded={root})
+            rendered_small = format_tree_entry(small_entry, root=root, expanded={root})
+            rendered_large_no_sizes = format_tree_entry(
+                large_entry,
+                root=root,
+                expanded={root},
+                show_size_labels=False,
+            )
+            plain_large = ANSI_ESCAPE_RE.sub("", rendered_large)
+            plain_small = ANSI_ESCAPE_RE.sub("", rendered_small)
+            plain_large_no_sizes = ANSI_ESCAPE_RE.sub("", rendered_large_no_sizes)
+
+            self.assertIn("large.bin [10 KB]", plain_large)
+            self.assertIn("\033[38;5;109m [10 KB]\033[0m", rendered_large)
+            self.assertNotIn("small.txt [", plain_small)
+            self.assertNotIn("large.bin [10 KB]", plain_large_no_sizes)
+
+    def test_format_tree_entry_appends_size_label_for_large_files_in_filtered_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "src").mkdir()
+            large_file = root / "src" / "large.bin"
+            large_file.write_bytes(b"x" * (10 * 1024))
+
+            entries, render_expanded = filter_tree_entries_for_files(
+                root=root,
+                expanded={root},
+                show_hidden=False,
+                matched_files=[large_file],
+            )
+            large_entry = next(entry for entry in entries if entry.path.resolve() == large_file.resolve())
+
+            rendered_large = format_tree_entry(large_entry, root=root, expanded=render_expanded)
+            plain_large = ANSI_ESCAPE_RE.sub("", rendered_large)
+
+            self.assertIn("large.bin [10 KB]", plain_large)
+
     def test_filter_tree_entries_for_files_includes_ancestors(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

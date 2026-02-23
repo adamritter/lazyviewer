@@ -215,6 +215,7 @@ def run_main_loop(
                     browser_visible=state.browser_visible,
                     show_hidden=state.show_hidden,
                     show_help=state.show_help,
+                    show_tree_sizes=state.show_tree_sizes,
                     status_message=state.status_message,
                     tree_filter_active=state.tree_filter_active,
                     tree_filter_mode=state.tree_filter_mode,

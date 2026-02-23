@@ -20,10 +20,14 @@ class TreeEntry:
     path: Path
     depth: int
     is_dir: bool
+    file_size: int | None = None
     kind: str = "path"
     display: str | None = None
     line: int | None = None
     column: int | None = None
+
+
+TREE_SIZE_LABEL_MIN_BYTES = 10 * 1024
 
 
 def file_color_for(path: Path) -> str:
@@ -60,6 +64,15 @@ def clamp_left_width(total_width: int, desired_left: int) -> int:
     return max(min_left, min(desired_left, max_left))
 
 
+def _safe_file_size(path: Path, is_dir: bool) -> int | None:
+    if is_dir:
+        return None
+    try:
+        return int(path.stat().st_size)
+    except OSError:
+        return None
+
+
 def build_tree_entries(
     root: Path,
     expanded: set[Path],
@@ -82,7 +95,7 @@ def build_tree_entries(
             if ignore_matcher is not None and ignore_matcher.is_ignored(child):
                 continue
             is_dir = child.is_dir()
-            entries.append(TreeEntry(child, depth, is_dir))
+            entries.append(TreeEntry(child, depth, is_dir, file_size=_safe_file_size(child, is_dir)))
             if is_dir and child.resolve() in expanded:
                 walk(child, depth + 1)
 
@@ -142,7 +155,7 @@ def filter_tree_entries_for_files(
     def walk(directory: Path, depth: int) -> None:
         for child in children_by_parent.get(directory, []):
             is_dir = child in visible_dirs
-            filtered_entries.append(TreeEntry(child, depth, is_dir))
+            filtered_entries.append(TreeEntry(child, depth, is_dir, file_size=_safe_file_size(child, is_dir)))
             if is_dir and child in render_expanded:
                 walk(child, depth + 1)
 
@@ -213,7 +226,7 @@ def filter_tree_entries_for_content_matches(
     def walk(directory: Path, depth: int) -> None:
         for child in children_by_parent.get(directory, []):
             is_dir = child in visible_dirs
-            filtered_entries.append(TreeEntry(child, depth, is_dir))
+            filtered_entries.append(TreeEntry(child, depth, is_dir, file_size=_safe_file_size(child, is_dir)))
             if is_dir and child in render_expanded:
                 walk(child, depth + 1)
                 continue
@@ -335,6 +348,7 @@ def format_tree_entry(
     expanded: set[Path],
     git_status_overlay: dict[Path, int] | None = None,
     search_query: str = "",
+    show_size_labels: bool = True,
 ) -> str:
     if entry.kind == "search_hit":
         indent = "  " * max(0, entry.depth - 1)
@@ -351,6 +365,7 @@ def format_tree_entry(
         name = entry.path.name + ("/" if entry.is_dir else "")
     dir_color = "\033[1;34m"
     file_color = file_color_for(entry.path)
+    size_color = "\033[38;5;109m"
     marker_color = "\033[38;5;44m"
     reset = "\033[0m"
     badges = format_git_status_badges(entry.path, git_status_overlay)
@@ -361,4 +376,8 @@ def format_tree_entry(
     # Align file names under the parent directory arrow column.
     indent = "  " * max(0, entry.depth - 1)
     marker = "  "
-    return f"{indent}{marker}{file_color}{name}{reset}{badges}"
+    size_label = ""
+    if show_size_labels and entry.file_size is not None and entry.file_size >= TREE_SIZE_LABEL_MIN_BYTES:
+        size_kb = entry.file_size // 1024
+        size_label = f"{size_color} [{size_kb} KB]{reset}"
+    return f"{indent}{marker}{file_color}{name}{reset}{size_label}{badges}"

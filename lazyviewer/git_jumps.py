@@ -169,6 +169,16 @@ class GitModifiedJumpDeps:
 
         origin = self.current_jump_location()
         self.jump_to_path(target)
+        target_change_blocks: list[int] = []
+        if state.preview_is_git_diff and state.current_path.is_file():
+            target_change_blocks = _git_change_block_start_lines(state.lines)
+        if target_change_blocks:
+            target_line = target_change_blocks[0] if direction > 0 else target_change_blocks[-1]
+            state.start = _centered_scroll_start(
+                target_line,
+                state.max_start,
+                self.visible_content_rows(),
+            )
         self.record_jump_if_changed(origin)
         if wrapped_files:
             self.set_status_message("wrapped to first change" if direction > 0 else "wrapped to last change")

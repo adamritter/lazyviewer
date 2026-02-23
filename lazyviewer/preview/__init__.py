@@ -24,8 +24,9 @@ DIR_PREVIEW_HARD_MAX_ENTRIES = 20_000
 DIR_PREVIEW_CACHE_MAX = 128
 BINARY_PROBE_BYTES = 4_096
 COLORIZE_MAX_FILE_BYTES = 256_000
+TREE_SIZE_LABEL_MIN_BYTES = 10 * 1024
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-_DIR_PREVIEW_CACHE: OrderedDict[tuple[str, bool, int, int, bool, int, int], tuple[str, bool]] = OrderedDict()
+_DIR_PREVIEW_CACHE: OrderedDict[tuple[str, bool, int, int, bool, bool, int, int], tuple[str, bool]] = OrderedDict()
 
 
 @dataclass(frozen=True)
@@ -44,17 +45,27 @@ def _cache_key_for_directory(
     max_depth: int,
     max_entries: int,
     skip_gitignored: bool,
+    show_size_labels: bool,
     git_overlay_signature: int,
-) -> tuple[str, bool, int, int, bool, int, int] | None:
+) -> tuple[str, bool, int, int, bool, bool, int, int] | None:
     try:
         resolved = root_dir.resolve()
         mtime_ns = resolved.stat().st_mtime_ns
     except Exception:
         return None
-    return (str(resolved), show_hidden, max_depth, max_entries, skip_gitignored, int(mtime_ns), git_overlay_signature)
+    return (
+        str(resolved),
+        show_hidden,
+        max_depth,
+        max_entries,
+        skip_gitignored,
+        show_size_labels,
+        int(mtime_ns),
+        git_overlay_signature,
+    )
 
 
-def _cache_get(key: tuple[str, bool, int, int, bool, int, int] | None) -> tuple[str, bool] | None:
+def _cache_get(key: tuple[str, bool, int, int, bool, bool, int, int] | None) -> tuple[str, bool] | None:
     if key is None:
         return None
     cached = _DIR_PREVIEW_CACHE.get(key)
@@ -64,7 +75,7 @@ def _cache_get(key: tuple[str, bool, int, int, bool, int, int] | None) -> tuple[
     return cached
 
 
-def _cache_put(key: tuple[str, bool, int, int, bool, int, int] | None, preview: str, truncated: bool) -> None:
+def _cache_put(key: tuple[str, bool, int, int, bool, bool, int, int] | None, preview: str, truncated: bool) -> None:
     if key is None:
         return
     _DIR_PREVIEW_CACHE[key] = (preview, truncated)
@@ -119,6 +130,7 @@ def build_directory_preview(
     max_entries: int = DIR_PREVIEW_INITIAL_MAX_ENTRIES,
     skip_gitignored: bool = False,
     git_status_overlay: dict[Path, int] | None = None,
+    show_size_labels: bool = True,
 ) -> tuple[str, bool]:
     overlay_signature = _directory_overlay_signature(root_dir, git_status_overlay)
     cache_key = _cache_key_for_directory(
@@ -127,6 +139,7 @@ def build_directory_preview(
         max_depth,
         max_entries,
         skip_gitignored,
+        show_size_labels,
         overlay_signature,
     )
     cached = _cache_get(cache_key)
@@ -138,6 +151,7 @@ def build_directory_preview(
     file_color = "\033[38;5;252m"
     branch_color = "\033[2;38;5;245m"
     note_color = "\033[2;38;5;250m"
+    size_color = "\033[38;5;109m"
     reset = "\033[0m"
 
     try:
@@ -148,8 +162,8 @@ def build_directory_preview(
     lines_out: list[str] = [f"{dir_color}{root_label}{reset}{root_badges}", ""]
     emitted = 0
 
-    def iter_children(directory: Path) -> tuple[list[tuple[str, Path, bool]], Exception | None]:
-        children: list[tuple[str, Path, bool]] = []
+    def iter_children(directory: Path) -> tuple[list[tuple[str, Path, bool, int | None]], Exception | None]:
+        children: list[tuple[str, Path, bool, int | None]] = []
         try:
             with os.scandir(directory) as entries:
                 for child in entries:
@@ -163,7 +177,13 @@ def build_directory_preview(
                         is_dir = child.is_dir(follow_symlinks=False)
                     except OSError:
                         is_dir = False
-                    children.append((name, child_path, is_dir))
+                    size_bytes: int | None = None
+                    if not is_dir:
+                        try:
+                            size_bytes = int(child.stat(follow_symlinks=False).st_size)
+                        except OSError:
+                            size_bytes = None
+                    children.append((name, child_path, is_dir, size_bytes))
         except (PermissionError, OSError) as exc:
             return [], exc
 
@@ -181,15 +201,19 @@ def build_directory_preview(
             lines_out.append(f"{branch_color}{prefix}└─{reset} {note_color}<error: {exc}>{reset}")
             return
 
-        for idx, (name, child_path, is_dir) in enumerate(children):
+        for idx, (name, child_path, is_dir, size_bytes) in enumerate(children):
             if emitted >= max_entries:
                 break
             last = idx == len(children) - 1
             branch = "└─ " if last else "├─ "
             suffix = "/" if is_dir else ""
             name_color = dir_color if is_dir else file_color
+            size_label = ""
+            if show_size_labels and (not is_dir) and size_bytes is not None and size_bytes >= TREE_SIZE_LABEL_MIN_BYTES:
+                size_kb = size_bytes // 1024
+                size_label = f"{size_color} [{size_kb} KB]{reset}"
             badges = format_git_status_badges(child_path, git_status_overlay)
-            lines_out.append(f"{branch_color}{prefix}{branch}{reset}{name_color}{name}{suffix}{reset}{badges}")
+            lines_out.append(f"{branch_color}{prefix}{branch}{reset}{name_color}{name}{suffix}{reset}{size_label}{badges}")
             emitted += 1
             if is_dir:
                 walk(child_path, prefix + ("   " if last else "│  "), depth + 1)
@@ -215,6 +239,7 @@ def build_rendered_for_path(
     dir_skip_gitignored: bool = False,
     prefer_git_diff: bool = True,
     dir_git_status_overlay: dict[Path, int] | None = None,
+    dir_show_size_labels: bool = True,
 ) -> RenderedPath:
     if target.is_dir():
         preview, truncated = build_directory_preview(
@@ -224,6 +249,7 @@ def build_rendered_for_path(
             max_entries=dir_max_entries,
             skip_gitignored=dir_skip_gitignored,
             git_status_overlay=dir_git_status_overlay,
+            show_size_labels=dir_show_size_labels,
         )
         return RenderedPath(text=preview, is_directory=True, truncated=truncated)
 
