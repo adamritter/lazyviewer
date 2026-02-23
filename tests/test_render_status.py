@@ -268,7 +268,7 @@ class RenderStatusTests(unittest.TestCase):
         rendered = b"".join(writes).decode("utf-8", errors="replace")
         self.assertIn("SEARCH HITS + TEXT", rendered)
         self.assertIn("Ctrl+P", rendered)
-        self.assertIn("n/N", rendered)
+        self.assertIn("n/N/p", rendered)
         self.assertNotIn("SEARCH QUERY", rendered)
 
     def test_bottom_help_panel_handles_mismatched_line_counts(self) -> None:
@@ -865,7 +865,7 @@ class RenderStatusTests(unittest.TestCase):
         rendered = b"".join(writes).decode("utf-8", errors="replace")
         self.assertIn("\033[38;5;229mr\033[0m", rendered)
         self.assertIn("\033[38;5;229mR\033[0m", rendered)
-        self.assertIn("\033[38;5;229mn/N\033[0m", rendered)
+        self.assertIn("\033[38;5;229mn/N/p\033[0m", rendered)
         self.assertIn("Alt+Left/Right", rendered)
         self.assertIn("m{key}", rendered)
         self.assertIn("'{key}", rendered)

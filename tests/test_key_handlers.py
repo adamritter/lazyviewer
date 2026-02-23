@@ -190,6 +190,24 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         self.assertFalse(should_quit)
         self.assertEqual(called["count"], 1)
 
+    def test_p_jumps_to_previous_git_modified_when_enabled(self) -> None:
+        state = _make_state()
+        state.git_features_enabled = True
+        called = {"count": 0, "direction": 0}
+
+        should_quit = self._invoke(
+            state=state,
+            key="p",
+            toggle_git_features=lambda: None,
+            jump_to_next_git_modified=lambda direction: called.__setitem__("direction", direction)
+            or called.__setitem__("count", called["count"] + 1)
+            or True,
+        )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(called["count"], 1)
+        self.assertEqual(called["direction"], -1)
+
     def test_question_character_is_appended_while_tree_filter_editing(self) -> None:
         state = _make_state()
         state.tree_filter_active = True

@@ -624,7 +624,7 @@ def handle_normal_key(
         KeyComboBinding(("r",), reroot_to_selected_target_action),
         KeyComboBinding((".",), toggle_hidden_files_action),
         KeyComboBinding(("n",), lambda: jump_to_next_git_modified_action(1)),
-        KeyComboBinding(("N",), lambda: jump_to_next_git_modified_action(-1)),
+        KeyComboBinding(("N", "p"), lambda: jump_to_next_git_modified_action(-1)),
         KeyComboBinding(("\x03",), quit_action),
     )
     mode_lower_bindings = KeyComboRegistry(normalize=str.lower).register_bindings(
