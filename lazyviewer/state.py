@@ -15,6 +15,12 @@ from .tree import TreeEntry
 
 @dataclass
 class AppState:
+    """Mutable session state shared across input, navigation, and rendering.
+
+    The runtime treats this as a central state bag: handlers mutate fields
+    directly, and renderers read them to build each frame.
+    """
+
     current_path: Path
     tree_root: Path
     expanded: set[Path]

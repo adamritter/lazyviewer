@@ -176,6 +176,8 @@ _SYMBOL_CONTEXT_CACHE: OrderedDict[
 
 @dataclass(frozen=True)
 class SymbolEntry:
+    """Normalized symbol record used by picker and sticky-header features."""
+
     kind: str
     name: str
     line: int
@@ -184,15 +186,22 @@ class SymbolEntry:
 
 
 def _normalize_whitespace(text: str) -> str:
+    """Collapse internal whitespace to single spaces for stable labels."""
     return re.sub(r"\s+", " ", text).strip()
 
 
 def _language_for_path(path: Path) -> str | None:
+    """Map file suffix to configured Tree-sitter language key."""
     return LANGUAGE_BY_SUFFIX.get(path.suffix.lower())
 
 
 @lru_cache(maxsize=32)
 def _load_parser(language_name: str):
+    """Load a Tree-sitter parser using supported provider packages.
+
+    Tries ``tree_sitter_languages`` first, then ``tree_sitter_language_pack``.
+    Returns ``(parser, error_message)``.
+    """
     errors: list[str] = []
 
     try:
@@ -220,10 +229,12 @@ def _load_parser(language_name: str):
 
 
 def _node_text(source_bytes: bytes, node) -> str:
+    """Decode source slice covered by a Tree-sitter node."""
     return source_bytes[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
 
 
 def _name_from_node(source_bytes: bytes, node, kind: str) -> str:
+    """Extract display name for a symbol/import node."""
     if kind == "import":
         return _normalize_whitespace(_node_text(source_bytes, node))
 
@@ -244,6 +255,7 @@ def _name_from_node(source_bytes: bytes, node, kind: str) -> str:
 
 
 def _symbol_kind(node_type: str) -> str | None:
+    """Map Tree-sitter node type to normalized symbol kind."""
     if node_type in FUNCTION_NODE_TYPES:
         return "fn"
     if node_type in CLASS_NODE_TYPES:
@@ -254,11 +266,13 @@ def _symbol_kind(node_type: str) -> str | None:
 
 
 def _format_label(kind: str, name: str, line: int) -> str:
+    """Build fixed-width picker label for a symbol entry."""
     clean_name = name if len(name) <= 220 else (name[:217] + "...")
     return f"{kind:6} L{line + 1:>5}  {clean_name}"
 
 
 def _collect_symbols_fallback(source: str, language_name: str, max_symbols: int) -> list[SymbolEntry]:
+    """Collect symbols via language-specific regex patterns."""
     patterns = _FALLBACK_PATTERNS_BY_LANGUAGE.get(language_name, _GENERIC_FALLBACK_PATTERNS)
     symbols: list[SymbolEntry] = []
     seen: set[tuple[int, int, str, str]] = set()
@@ -294,6 +308,11 @@ def _collect_symbols_fallback(source: str, language_name: str, max_symbols: int)
 
 
 def collect_symbols(path: Path, max_symbols: int = 2000) -> tuple[list[SymbolEntry], str | None]:
+    """Collect outline symbols for a source file.
+
+    Returns ``(symbols, error_message)``. When parser loading/parsing fails, a
+    regex fallback is used before surfacing an error.
+    """
     target = path.resolve()
     if not target.is_file():
         return [], "Symbol outline is available for files only."
@@ -328,6 +347,7 @@ def collect_symbols(path: Path, max_symbols: int = 2000) -> tuple[list[SymbolEnt
     symbols: list[SymbolEntry] = []
 
     def walk(node) -> None:
+        """Depth-first traversal collecting symbol-bearing nodes."""
         if len(symbols) >= max_symbols:
             return
 
@@ -360,6 +380,7 @@ def collect_symbols(path: Path, max_symbols: int = 2000) -> tuple[list[SymbolEnt
 
 
 def _symbol_context_cache_key(path: Path, max_symbols: int) -> tuple[str, int, int, int] | None:
+    """Build cache key from resolved path, mtime, size, and symbol limit."""
     try:
         resolved = path.resolve()
         stat = resolved.stat()
@@ -369,6 +390,7 @@ def _symbol_context_cache_key(path: Path, max_symbols: int) -> tuple[str, int, i
 
 
 def _collect_symbols_cached(path: Path, max_symbols: int) -> tuple[list[SymbolEntry], str | None]:
+    """Collect symbols with small LRU cache keyed by file identity+mtime."""
     cache_key = _symbol_context_cache_key(path, max_symbols)
     if cache_key is not None:
         cached = _SYMBOL_CONTEXT_CACHE.get(cache_key)
@@ -389,10 +411,12 @@ def _collect_symbols_cached(path: Path, max_symbols: int) -> tuple[list[SymbolEn
 
 
 def clear_symbol_context_cache() -> None:
+    """Drop cached symbol and sticky-context entries."""
     _SYMBOL_CONTEXT_CACHE.clear()
 
 
 def _leading_indent_columns(text: str) -> int:
+    """Return leading indentation width where tabs count as four columns."""
     count = 0
     for ch in text:
         if ch == " ":
@@ -409,6 +433,7 @@ def _enclosing_sticky_symbol_chain(
     candidates: list[SymbolEntry],
     source_lines: list[str],
 ) -> list[SymbolEntry]:
+    """Reduce candidates to indentation-based enclosing symbol stack."""
     if not candidates:
         return []
 
@@ -435,6 +460,7 @@ def collect_sticky_symbol_headers(
     visible_start_line: int,
     max_headers: int = 1,
 ) -> list[SymbolEntry]:
+    """Return enclosing class/function headers above the visible top line."""
     if max_headers <= 0:
         return []
     start_line = max(1, int(visible_start_line))

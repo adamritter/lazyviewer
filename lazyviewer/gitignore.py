@@ -12,11 +12,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 def clear_gitignore_cache() -> None:
+    """Compatibility no-op for older cache-clearing call sites."""
     # Kept for API compatibility with call sites/tests.
     return
 
 
 def _is_within(path: Path, root: Path) -> bool:
+    """Return whether ``path`` is at or under ``root`` after resolution."""
     try:
         path.relative_to(root)
         return True
@@ -26,11 +28,18 @@ def _is_within(path: Path, root: Path) -> bool:
 
 @dataclass(frozen=True)
 class GitIgnoreMatcher:
+    """Resolved gitignore snapshot for a project subtree.
+
+    ``ignored_dirs`` is stored as resolved directory paths so parent checks can
+    quickly reject whole subtrees.
+    """
+
     root: Path
     ignored_files: frozenset[Path]
     ignored_dirs: tuple[Path, ...]
 
     def is_ignored(self, path: Path) -> bool:
+        """Return whether ``path`` is ignored under this matcher root."""
         resolved = path.resolve()
         if not _is_within(resolved, self.root):
             return False
@@ -43,6 +52,12 @@ class GitIgnoreMatcher:
 
 
 def _load_matcher(root: Path) -> GitIgnoreMatcher | None:
+    """Build a matcher by querying git for ignored files/directories.
+
+    Returns ``None`` when git is unavailable, ``root`` is not inside a repo, or
+    any probing command fails. The matcher only tracks ignored paths within
+    ``root`` (even when the git repo root is higher).
+    """
     if shutil.which("git") is None:
         return None
 
@@ -115,4 +130,5 @@ def _load_matcher(root: Path) -> GitIgnoreMatcher | None:
 
 
 def get_gitignore_matcher(root: Path) -> GitIgnoreMatcher | None:
+    """Return a fresh matcher for ``root`` with normalized absolute root path."""
     return _load_matcher(root.resolve())

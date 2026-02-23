@@ -15,6 +15,7 @@ from .screen_utils import (
 
 
 def _sorted_git_modified_file_paths(state: AppState) -> list[Path]:
+    """Return git-modified file paths under tree root in tree display order."""
     if not state.git_features_enabled:
         return []
     if not state.git_status_overlay:
@@ -46,6 +47,8 @@ def _sorted_git_modified_file_paths(state: AppState) -> list[Path]:
 
 @dataclass(frozen=True)
 class GitModifiedJumpDeps:
+    """Dependency bundle for jumping across git-modified locations."""
+
     state: AppState
     visible_content_rows: Callable[[], int]
     refresh_git_status_overlay: Callable[..., None]
@@ -59,6 +62,12 @@ class GitModifiedJumpDeps:
         self,
         direction: int,
     ) -> bool:
+        """Jump to next/previous git change block or modified file.
+
+        The method first tries intra-file diff blocks when viewing a git diff.
+        If no further block exists in direction, it falls back to modified-file
+        navigation, wrapping at file boundaries and reporting wrap status.
+        """
         state = self.state
         if direction == 0:
             return False

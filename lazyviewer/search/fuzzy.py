@@ -21,11 +21,13 @@ STRICT_SUBSTRING_ONLY_MIN_FILES = 1_000
 
 
 def clear_project_files_cache() -> None:
+    """Clear cached project file paths and relative-label lists."""
     _PROJECT_FILES_CACHE.clear()
     _PROJECT_FILE_LABELS_CACHE.clear()
 
 
 def _collect_project_files_walk(root: Path, show_hidden: bool, skip_gitignored: bool) -> list[Path]:
+    """Collect files via ``os.walk`` with hidden/gitignored filtering."""
     files: list[Path] = []
     ignore_matcher = get_gitignore_matcher(root) if skip_gitignored else None
     for dirpath, dirnames, filenames in os.walk(root):
@@ -46,6 +48,7 @@ def _collect_project_files_walk(root: Path, show_hidden: bool, skip_gitignored: 
 
 
 def _collect_project_files_rg(root: Path, show_hidden: bool, skip_gitignored: bool) -> list[Path] | None:
+    """Collect files using ``rg --files``; return ``None`` when unavailable/failing."""
     if shutil.which("rg") is None:
         return None
 
@@ -84,6 +87,7 @@ def _collect_project_files_rg(root: Path, show_hidden: bool, skip_gitignored: bo
 
 
 def _collect_project_file_labels_rg(root: Path, show_hidden: bool, skip_gitignored: bool) -> list[str] | None:
+    """Collect project-relative labels using ``rg --files`` output."""
     if shutil.which("rg") is None:
         return None
 
@@ -114,6 +118,7 @@ def _collect_project_file_labels_rg(root: Path, show_hidden: bool, skip_gitignor
 
 
 def collect_project_files(root: Path, show_hidden: bool, skip_gitignored: bool = False) -> list[Path]:
+    """Return cached project file paths, preferring ripgrep backend when possible."""
     root = root.resolve()
     cache_key = (root, show_hidden, skip_gitignored)
     cached = _PROJECT_FILES_CACHE.get(cache_key)
@@ -130,6 +135,7 @@ def collect_project_files(root: Path, show_hidden: bool, skip_gitignored: bool =
 
 
 def collect_project_file_labels(root: Path, show_hidden: bool, skip_gitignored: bool = False) -> list[str]:
+    """Return cached project-relative path labels for picker/filter UI."""
     root = root.resolve()
     cache_key = (root, show_hidden, skip_gitignored)
     cached = _PROJECT_FILE_LABELS_CACHE.get(cache_key)
@@ -146,6 +152,7 @@ def collect_project_file_labels(root: Path, show_hidden: bool, skip_gitignored: 
 
 
 def to_project_relative(path: Path, root: Path) -> str:
+    """Convert absolute path to project-relative POSIX label when possible."""
     try:
         relative = path.resolve().relative_to(root.resolve())
         return relative.as_posix()
@@ -154,6 +161,11 @@ def to_project_relative(path: Path, root: Path) -> str:
 
 
 def fuzzy_score(query: str, candidate: str) -> int | None:
+    """Score fuzzy match quality for ``query`` against ``candidate``.
+
+    Higher scores prefer contiguous runs and segment-boundary matches.
+    Returns ``None`` when query characters cannot be found in order.
+    """
     if not query:
         return 0
     query_folded = query.casefold()
@@ -182,6 +194,7 @@ def fuzzy_score(query: str, candidate: str) -> int | None:
 
 
 def substring_index(query: str, candidate: str) -> int | None:
+    """Case-insensitive substring index helper used before fuzzy matching."""
     if not query:
         return 0
     idx = candidate.casefold().find(query.casefold())
@@ -197,6 +210,11 @@ def fuzzy_match_label_index(
     limit: int = 200,
     strict_substring_only_min_files: int = STRICT_SUBSTRING_ONLY_MIN_FILES,
 ) -> list[tuple[int, str, int]]:
+    """Match query against labels and return ``(index, label, score)`` tuples.
+
+    For very large label sets, this switches to strict substring mode and keeps
+    input order for early-exit performance.
+    """
     if labels_folded is not None and len(labels_folded) != len(labels):
         raise ValueError("labels_folded must have the same length as labels")
 
@@ -240,6 +258,7 @@ def fuzzy_match_label_index(
             substring_scored.append((match_idx, len(label), label, idx))
     else:
         def iter_substring_matches() -> Iterator[tuple[int, int, str, int]]:
+            """Yield substring candidates lazily for bounded ``nsmallest`` selection."""
             for idx, label in enumerate(labels):
                 match_idx = labels_folded[idx].find(query_folded)
                 if match_idx < 0:
@@ -278,6 +297,7 @@ def fuzzy_match_file_index(
     limit: int = 200,
     strict_substring_only_min_files: int = STRICT_SUBSTRING_ONLY_MIN_FILES,
 ) -> list[tuple[Path, str, int]]:
+    """Match query against ``labels`` and map results back to file paths."""
     if len(files) != len(labels):
         raise ValueError("files and labels must have the same length")
 
@@ -294,11 +314,13 @@ def fuzzy_match_file_index(
 def fuzzy_match_paths(
     query: str, files: list[Path], root: Path, limit: int = 200
 ) -> list[tuple[Path, str, int]]:
+    """Convenience matcher for path lists using project-relative labels."""
     labels = [to_project_relative(path, root) for path in files]
     return fuzzy_match_file_index(query, files, labels, limit=limit)
 
 
 def fuzzy_match_labels(query: str, labels: list[str], limit: int = 200) -> list[tuple[int, str, int]]:
+    """Match query against free-form labels with substring-first strategy."""
     substring_scored: list[tuple[int, int, str, int]] = []
     for idx, label in enumerate(labels):
         substr_idx = substring_index(query, label)

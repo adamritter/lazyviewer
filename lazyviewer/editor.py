@@ -18,6 +18,13 @@ def launch_editor(
     disable_tui_mode: Callable[[], None],
     enable_tui_mode: Callable[[], None],
 ) -> str | None:
+    """Open ``target`` in ``$EDITOR`` and restore TUI mode afterward.
+
+    The caller provides mode-transition callbacks so the terminal leaves raw
+    pager mode before launching the child process and always re-enters TUI mode
+    on return. On failure, returns a user-facing error message instead of
+    raising.
+    """
     editor_env = os.environ.get("EDITOR", "").strip()
     if not editor_env:
         return "Cannot edit: $EDITOR is not set."

@@ -100,6 +100,7 @@ def help_panel_lines(
     tree_filter_mode: str = "files",
     tree_filter_editing: bool = False,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """Return contextual help-line sets for tree, text, and text-only layouts."""
     if tree_filter_active and tree_filter_mode == "content":
         if tree_filter_editing:
             return (
@@ -123,6 +124,7 @@ def help_panel_row_count(
     tree_filter_mode: str = "files",
     tree_filter_editing: bool = False,
 ) -> int:
+    """Compute visible help panel height constrained by terminal rows."""
     if not show_help:
         return 0
     if max_lines <= 1:
@@ -143,6 +145,7 @@ def help_panel_row_count(
 
 
 def render_help_page(width: int, height: int) -> None:
+    """Render the full-screen modal help page directly to stdout."""
     out: list[str] = []
     out.append("\033[H\033[J")
 

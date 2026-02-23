@@ -10,6 +10,8 @@ from .state import AppState
 
 
 class PagerLayoutOps:
+    """Layout/state helpers for pane sizing and preview geometry."""
+
     def __init__(
         self,
         state: AppState,
@@ -27,6 +29,7 @@ class PagerLayoutOps:
         content_search_left_pane_min_percent: float,
         content_search_left_pane_fallback_delta_percent: float,
     ) -> None:
+        """Bind layout operations to app state and persistence callbacks."""
         self.state = state
         self.kitty_graphics_supported = kitty_graphics_supported
         self._help_panel_row_count = help_panel_row_count
@@ -43,6 +46,7 @@ class PagerLayoutOps:
         self.content_mode_left_width_active = self.content_search_match_view_active()
 
     def effective_text_width(self, columns: int | None = None) -> int:
+        """Return preview-pane text width for current browser visibility."""
         if columns is None:
             columns = self._get_terminal_size((80, 24)).columns
         if self.state.browser_visible:
@@ -50,6 +54,7 @@ class PagerLayoutOps:
         return max(1, columns - 1)
 
     def visible_content_rows(self) -> int:
+        """Return number of content rows after reserving help panel rows."""
         help_rows = self._help_panel_row_count(
             self.state.usable,
             self.state.show_help,
@@ -61,6 +66,7 @@ class PagerLayoutOps:
         return max(1, self.state.usable - help_rows)
 
     def content_search_match_view_active(self) -> bool:
+        """Return whether content-search results are currently being shown."""
         return (
             self.state.tree_filter_active
             and self.state.tree_filter_mode == "content"
@@ -72,6 +78,7 @@ class PagerLayoutOps:
         columns: int | None = None,
         preserve_scroll: bool = True,
     ) -> None:
+        """Reflow rendered text into screen lines and clamp scroll offsets."""
         self.state.lines = self._build_screen_lines(
             self.state.rendered,
             self.effective_text_width(columns),
@@ -86,6 +93,10 @@ class PagerLayoutOps:
             self.state.text_x = 0
 
     def sync_left_width_for_tree_filter_mode(self, force: bool = False) -> None:
+        """Switch left-pane width profile when content-search view toggles.
+
+        Content-search mode can use its own persisted pane width percentage.
+        """
         use_content_mode_width = self.content_search_match_view_active()
         if not force and use_content_mode_width == self.content_mode_left_width_active:
             return
@@ -122,12 +133,14 @@ class PagerLayoutOps:
         self.state.dirty = True
 
     def save_left_pane_width_for_mode(self, total_width: int, left_width: int) -> None:
+        """Persist pane width in mode-specific config slot."""
         if self.content_search_match_view_active():
             self._save_content_search_left_pane_percent(total_width, left_width)
             return
         self._save_left_pane_percent(total_width, left_width)
 
     def show_inline_error(self, message: str) -> None:
+        """Replace preview with an inline red error message and reset media state."""
         self.state.rendered = f"\033[31m{message}\033[0m"
         self.rebuild_screen_lines(preserve_scroll=False)
         self.state.text_x = 0
@@ -138,6 +151,7 @@ class PagerLayoutOps:
         self.state.dirty = True
 
     def current_preview_image_path(self) -> Path | None:
+        """Return resolved PNG path eligible for kitty graphics rendering."""
         if not self.kitty_graphics_supported:
             return None
         if self.state.preview_image_format != "png":
@@ -153,6 +167,7 @@ class PagerLayoutOps:
         return image_path
 
     def current_preview_image_geometry(self, columns: int) -> tuple[int, int, int, int]:
+        """Return kitty image placement as ``(col, row, width_cells, height_cells)``."""
         image_rows = self.visible_content_rows()
         if self.state.browser_visible:
             image_col = self.state.left_width + 2
@@ -161,4 +176,3 @@ class PagerLayoutOps:
             image_col = 1
             image_width = max(1, columns - 1)
         return image_col, 1, image_width, image_rows
-

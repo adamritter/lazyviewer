@@ -11,6 +11,8 @@ from .state import AppState
 
 @dataclass
 class WatchRefreshContext:
+    """Polling state for tree and git watch signatures."""
+
     tree_last_poll: float = 0.0
     tree_signature: str | None = None
     git_last_poll: float = 0.0
@@ -19,6 +21,7 @@ class WatchRefreshContext:
     git_dir: Path | None = None
 
     def mark_tree_dirty(self) -> None:
+        """Force next tree poll to treat signature as unknown."""
         self.tree_signature = None
 
     def reset_git_context(
@@ -27,6 +30,7 @@ class WatchRefreshContext:
         *,
         resolve_git_paths: Callable[[Path], tuple[Path | None, Path | None]],
     ) -> None:
+        """Re-resolve repository context after tree-root changes."""
         self.git_repo_root, self.git_dir = resolve_git_paths(state.tree_root)
         self.git_last_poll = 0.0
         self.git_signature = None
@@ -40,6 +44,7 @@ class WatchRefreshContext:
         monotonic: Callable[[], float],
         tree_watch_poll_seconds: float,
     ) -> None:
+        """Poll tree signature and rebuild selection target when it changes."""
         now = monotonic()
         if (now - self.tree_last_poll) < tree_watch_poll_seconds:
             return
@@ -74,6 +79,7 @@ class WatchRefreshContext:
         monotonic: Callable[[], float],
         git_watch_poll_seconds: float,
     ) -> None:
+        """Poll git signature and refresh overlays/previews when it changes."""
         if not state.git_features_enabled:
             return
         now = monotonic()
@@ -113,6 +119,11 @@ def _refresh_git_status_overlay(
     status_refresh_seconds: float,
     force: bool = False,
 ) -> None:
+    """Refresh ``state.git_status_overlay`` on interval or when forced.
+
+    If git features are disabled, overlay state is cleared and timestamp updated
+    so callers can treat the refresh as completed.
+    """
     if not state.git_features_enabled:
         if state.git_status_overlay:
             state.git_status_overlay = {}

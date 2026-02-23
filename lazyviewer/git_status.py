@@ -13,10 +13,12 @@ GIT_STATUS_UNTRACKED = 2
 
 
 def _merge_flags(overlay: dict[Path, int], target: Path, flags: int) -> None:
+    """OR git-status flags into ``overlay[target]``."""
     overlay[target] = overlay.get(target, 0) | flags
 
 
 def format_git_status_badges(path: Path, git_status_overlay: dict[Path, int] | None) -> str:
+    """Render ANSI-colored status badges for a tree entry path."""
     if not git_status_overlay:
         return ""
 
@@ -35,6 +37,7 @@ def format_git_status_badges(path: Path, git_status_overlay: dict[Path, int] | N
 
 
 def _resolve_repo_and_git_dir(path: Path, timeout_seconds: float) -> tuple[Path | None, Path | None]:
+    """Resolve repo root and git-dir for a filesystem path."""
     try:
         proc = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--show-toplevel", "--git-dir"],
@@ -62,6 +65,7 @@ def _resolve_repo_and_git_dir(path: Path, timeout_seconds: float) -> tuple[Path 
 
 
 def _run_git(repo_root: Path, args: list[str], timeout_seconds: float) -> subprocess.CompletedProcess[str] | None:
+    """Run a git command and return ``None`` on execution failure."""
     try:
         return subprocess.run(
             ["git", "-C", str(repo_root), *args],
@@ -78,6 +82,11 @@ def _run_git(repo_root: Path, args: list[str], timeout_seconds: float) -> subpro
 
 
 def _iter_porcelain_records(output: str) -> list[tuple[str, str]]:
+    """Parse ``git status --porcelain=v1 -z`` records.
+
+    Returns ``(status, path)`` pairs and skips malformed entries. For rename/copy
+    records, the extra source-path token is consumed.
+    """
     records: list[tuple[str, str]] = []
     tokens = output.split("\0")
     index = 0
@@ -102,6 +111,11 @@ def _iter_porcelain_records(output: str) -> list[tuple[str, str]]:
 
 
 def collect_git_status_overlay(tree_root: Path, timeout_seconds: float = 0.25) -> dict[Path, int]:
+    """Collect changed/untracked flags for paths under ``tree_root``.
+
+    File-level flags are propagated upward to ancestor directories up to the
+    requested ``tree_root`` so collapsed directories can still show status badges.
+    """
     tree_root = tree_root.resolve()
     repo_root, _git_dir = _resolve_repo_and_git_dir(tree_root, timeout_seconds)
     if repo_root is None:

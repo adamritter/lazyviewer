@@ -20,6 +20,7 @@ def selected_with_ansi(text: str) -> str:
 
 
 def _display_width(text: str) -> int:
+    """Return terminal column width for ANSI-styled text."""
     plain = ANSI_ESCAPE_RE.sub("", text)
     col = 0
     for ch in plain:
@@ -34,6 +35,11 @@ def _format_tree_filter_status(
     loading: bool,
     spinner_frame: int,
 ) -> str:
+    """Build the right-side status fragment shown on the filter query row.
+
+    The label is omitted when query text is empty. While loading, a spinner is
+    shown; once loading settles, zero matches become ``no results``.
+    """
     if not query:
         return ""
 
@@ -56,6 +62,13 @@ def _format_tree_filter_status(
 
 
 class TreePaneRenderer:
+    """Render left-pane rows for tree, filter-query, and picker overlay states.
+
+    The renderer receives a snapshot of pane state at construction time and
+    precomputes derived flags (such as whether the picker overlay suppresses the
+    filter row) so each row can be rendered deterministically.
+    """
+
     def __init__(
         self,
         left_width: int,
@@ -87,6 +100,11 @@ class TreePaneRenderer:
         picker_list_start: int,
         picker_message: str,
     ) -> None:
+        """Normalize pane state used by row renderers.
+
+        The initializer clamps picker indices into valid bounds and computes row
+        offsets so later rendering does not need to repeat that bookkeeping.
+        """
         self.left_width = left_width
         self.tree_entries = tree_entries
         self.tree_start = tree_start
@@ -125,6 +143,7 @@ class TreePaneRenderer:
         self.picker_list_start = max(0, min(picker_list_start, max_picker_start))
 
     def render_row(self, row: int) -> str:
+        """Render one logical row without right-padding."""
         if self.picker_overlay_active:
             return self._render_picker_row(row)
         if self.tree_filter_row_visible and row == 0:
@@ -132,6 +151,7 @@ class TreePaneRenderer:
         return self._render_tree_row(row)
 
     def padded_row_text(self, row: int) -> str:
+        """Render one row and pad it to ``left_width`` display columns."""
         tree_text = self.render_row(row)
         tree_len = _display_width(tree_text)
         if tree_len < self.left_width:
@@ -139,6 +159,7 @@ class TreePaneRenderer:
         return tree_text
 
     def _render_picker_row(self, row: int) -> str:
+        """Render the command/symbol picker overlay row."""
         if self.picker_mode == "commands":
             query_prefix = ": "
             placeholder = "type to filter commands"
@@ -170,6 +191,7 @@ class TreePaneRenderer:
         return ""
 
     def _render_filter_row(self) -> str:
+        """Render the tree-filter query row, including cursor and match status."""
         status_label = _format_tree_filter_status(
             self.tree_filter_query,
             self.tree_filter_match_count,
@@ -199,6 +221,7 @@ class TreePaneRenderer:
         return tree_text
 
     def _render_tree_row(self, row: int) -> str:
+        """Render a regular tree entry row, applying selection highlighting."""
         tree_idx = self.tree_start + row - self.tree_row_offset
         if tree_idx >= len(self.tree_entries):
             return ""

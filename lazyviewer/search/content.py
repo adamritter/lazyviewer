@@ -15,6 +15,8 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class ContentMatch:
+    """One content-search hit from ripgrep output."""
+
     path: Path
     line: int  # 1-based
     column: int  # 1-based
@@ -22,6 +24,7 @@ class ContentMatch:
 
 
 def _preview_line(text: str, max_chars: int = 220) -> str:
+    """Normalize matched line text for compact UI display."""
     clean = text.rstrip("\r\n").replace("\t", "    ")
     if len(clean) <= max_chars:
         return clean
@@ -36,6 +39,16 @@ def search_project_content_rg(
     max_matches: int = 2_000,
     max_files: int = 500,
 ) -> tuple[dict[Path, list[ContentMatch]], bool, str | None]:
+    """Search ``root`` content with ripgrep and return grouped hits.
+
+    Returns ``(matches_by_file, truncated, error_message)`` where:
+    - ``matches_by_file`` maps absolute paths to sorted match records
+    - ``truncated`` indicates ``max_matches`` or ``max_files`` limits were hit
+    - ``error_message`` is set only when the search could not be performed
+
+    Path entries from ripgrep are validated as relative, in-root paths before
+    being accepted.
+    """
     if not query:
         return {}, False, None
     if shutil.which("rg") is None:

@@ -11,6 +11,8 @@ from .state import AppState
 
 @dataclass(frozen=True)
 class PreviewSelectionDeps:
+    """Dependencies for syncing preview content with tree selection."""
+
     state: AppState
     clear_source_selection: Callable[[], bool]
     refresh_rendered_for_current_path: Callable[..., None]
@@ -20,6 +22,11 @@ class PreviewSelectionDeps:
         self,
         force: bool = False,
     ) -> None:
+        """Update current preview target from selected tree entry.
+
+        Search-hit entries also jump to their matched source line after preview
+        content is refreshed.
+        """
         state = self.state
         if not state.tree_entries:
             return
@@ -42,6 +49,8 @@ class PreviewSelectionDeps:
 
 @dataclass(frozen=True)
 class TreeRefreshSyncDeps:
+    """Dependencies for reconciling selected path after tree rebuilds."""
+
     state: AppState
     rebuild_tree_entries: Callable[..., None]
     refresh_rendered_for_current_path: Callable[..., None]
@@ -53,6 +62,7 @@ class TreeRefreshSyncDeps:
         preferred_path: Path,
         force_rebuild: bool = False,
     ) -> None:
+        """Rebuild tree, refresh preview, and kick follow-up warm/overlay work."""
         state = self.state
         previous_current_path = state.current_path.resolve()
         self.rebuild_tree_entries(preferred_path=preferred_path)

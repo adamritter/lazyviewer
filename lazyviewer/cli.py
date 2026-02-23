@@ -14,6 +14,12 @@ from .highlight import read_text
 
 
 def main(default_path: Path | None = None) -> None:
+    """Parse CLI arguments and launch lazyviewer on a file or directory.
+
+    ``default_path`` is primarily for tests; when omitted the current working
+    directory is used. Directories launch with an empty source buffer while
+    files are loaded through ``read_text`` first.
+    """
     parser = argparse.ArgumentParser(
         description="Print file contents in a terminal pager with syntax highlighting."
     )

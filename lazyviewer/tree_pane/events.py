@@ -12,6 +12,13 @@ from ..state import AppState
 
 @dataclass(frozen=True)
 class TreePaneMouseCallbacks:
+    """Dependencies required by :class:`TreePaneMouseHandlers`.
+
+    The handlers are intentionally side-effect thin: they compute click intent and
+    delegate tree rebuild, preview, and clipboard behavior to injected callbacks so
+    runtime wiring and tests can control those effects.
+    """
+
     visible_content_rows: Callable[[], int]
     rebuild_tree_entries: Callable[..., None]
     mark_tree_watch_dirty: Callable[[], None]
@@ -23,12 +30,27 @@ class TreePaneMouseCallbacks:
 
 
 class TreePaneMouseHandlers:
+    """Interpret left-pane mouse clicks and mutate tree-selection state.
+
+    This class owns click-to-row mapping (including the optional filter query row),
+    single-vs-double click detection, and directory toggling rules for both normal
+    tree mode and content-search mode.
+    """
+
     def __init__(
         self,
         state: AppState,
         callbacks: TreePaneMouseCallbacks,
         double_click_seconds: float,
     ) -> None:
+        """Create click handlers bound to shared app state.
+
+        Args:
+            state: Mutable runtime state to update in place.
+            callbacks: Side-effect callbacks used to rebuild/preview/copy.
+            double_click_seconds: Max interval between clicks to treat as a
+                double-click on the same row.
+        """
         self._state = state
         self._visible_content_rows = callbacks.visible_content_rows
         self._rebuild_tree_entries = callbacks.rebuild_tree_entries
@@ -41,6 +63,18 @@ class TreePaneMouseHandlers:
         self._double_click_seconds = double_click_seconds
 
     def handle_click(self, col: int, row: int, is_left_down: bool) -> bool:
+        """Handle a tree-pane pointer click and always consume the event.
+
+        Behavior summary:
+        - Clicks outside the visible tree pane are ignored (but consumed).
+        - Clicking the filter query row enters query editing mode.
+        - Clicking a directory arrow toggles expand/collapse immediately on
+          press, then clears double-click history.
+        - Other clicks select + preview the target row. A second click within
+          ``double_click_seconds`` activates the selection: directories toggle,
+          files copy their basename, and active filter sessions delegate to
+          filter-activation behavior.
+        """
         state = self._state
         if not (state.browser_visible and 1 <= row <= self._visible_content_rows() and col <= state.left_width):
             return True
@@ -100,6 +134,13 @@ class TreePaneMouseHandlers:
         resolved: Path,
         content_mode_toggle: bool = False,
     ) -> None:
+        """Toggle a directory and rebuild the rendered tree snapshot.
+
+        In content-search mode with ``content_mode_toggle=True``, collapsed state
+        is tracked in ``state.tree_filter_collapsed_dirs`` so subtree visibility is
+        local to that search session. In all other cases this flips membership in
+        ``state.expanded``.
+        """
         state = self._state
         if content_mode_toggle and state.tree_filter_active and state.tree_filter_mode == "content":
             if resolved in state.tree_filter_collapsed_dirs:

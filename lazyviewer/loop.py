@@ -27,6 +27,8 @@ from .tree import clamp_left_width
 
 @dataclass(frozen=True)
 class RuntimeLoopTiming:
+    """Timing constants controlling interactive loop behavior."""
+
     double_click_seconds: float
     filter_cursor_blink_seconds: float
     tree_filter_spinner_frame_seconds: float
@@ -34,6 +36,12 @@ class RuntimeLoopTiming:
 
 @dataclass(frozen=True)
 class RuntimeLoopCallbacks:
+    """Injected operations used by ``run_main_loop``.
+
+    Keeping the loop callback-driven isolates feature logic outside the core
+    event loop and makes behavior easier to unit test.
+    """
+
     get_tree_filter_loading_until: Callable[[], float]
     tree_view_rows: Callable[[], int]
     tree_filter_prompt_prefix: Callable[[], str]
@@ -75,6 +83,11 @@ def run_main_loop(
     timing: RuntimeLoopTiming,
     callbacks: RuntimeLoopCallbacks,
 ) -> None:
+    """Run the main interactive TUI loop until a quit action occurs.
+
+    Each iteration handles terminal resize bookkeeping, optional rendering,
+    input decoding/dispatch, and periodic idle refresh hooks.
+    """
     ops = callbacks
     picker_key_callbacks = PickerKeyCallbacks(
         close_picker=ops.close_picker,
@@ -98,6 +111,7 @@ def run_main_loop(
     tree_filter_spinner_frame = 0
 
     def adjust_left_pane_width(term_columns: int, delta: int) -> None:
+        """Resize tree pane width, persist it, and reflow text if needed."""
         prev_left = state.left_width
         state.left_width = clamp_left_width(term_columns, state.left_width + delta)
         if state.left_width == prev_left:
@@ -110,6 +124,7 @@ def run_main_loop(
         state.dirty = True
 
     def toggle_tree_filter_mode(mode: str) -> None:
+        """Open/switch/close tree filter UI based on current editing state."""
         if state.tree_filter_active:
             if state.tree_filter_mode == mode and state.tree_filter_editing:
                 ops.close_tree_filter(clear_query=True)

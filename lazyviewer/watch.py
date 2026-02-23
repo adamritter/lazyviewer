@@ -13,11 +13,13 @@ from pathlib import Path
 
 
 def _update_digest(digest, token: str) -> None:
+    """Append a token plus separator byte to a hash digest."""
     digest.update(token.encode("utf-8", errors="surrogateescape"))
     digest.update(b"\0")
 
 
 def _path_stat_signature(path: Path) -> tuple[str, int, int, int]:
+    """Return a stable stat tuple describing ``path`` existence and metadata."""
     try:
         st = path.stat()
     except FileNotFoundError:
@@ -28,6 +30,11 @@ def _path_stat_signature(path: Path) -> tuple[str, int, int, int]:
 
 
 def resolve_git_paths(tree_root: Path, timeout_seconds: float = 0.15) -> tuple[Path | None, Path | None]:
+    """Resolve repository root and git-dir for ``tree_root``.
+
+    Uses ``git rev-parse --show-toplevel --git-dir`` and returns ``(None, None)``
+    if git is unavailable, the directory is not in a repo, or probing fails.
+    """
     try:
         proc = subprocess.run(
             ["git", "-C", str(tree_root), "rev-parse", "--show-toplevel", "--git-dir"],
@@ -56,6 +63,11 @@ def resolve_git_paths(tree_root: Path, timeout_seconds: float = 0.15) -> tuple[P
 
 
 def build_tree_watch_signature(root: Path, expanded: set[Path], show_hidden: bool) -> str:
+    """Build a digest for visible tree structure under expanded directories.
+
+    The signature includes root path, hidden-file mode, each watched directory's
+    own stat state, and sorted child metadata for directories currently expanded.
+    """
     root = root.resolve()
     watched_dirs: set[Path] = {root}
     for path in expanded:
@@ -119,6 +131,7 @@ def build_tree_watch_signature(root: Path, expanded: set[Path], show_hidden: boo
 
 
 def build_git_watch_signature(git_dir: Path | None) -> str:
+    """Build a digest over git metadata that signals status-relevant changes."""
     digest = hashlib.blake2b(digest_size=20)
     if git_dir is None:
         _update_digest(digest, "git:none")
@@ -128,6 +141,7 @@ def build_git_watch_signature(git_dir: Path | None) -> str:
     _update_digest(digest, f"git_dir:{git_dir}")
 
     def add_path_token(label: str, path: Path) -> None:
+        """Add stat metadata for one git control file."""
         state, mtime_ns, size, mode = _path_stat_signature(path)
         _update_digest(digest, f"{label}:{state}:{mtime_ns}:{size}:{mode}")
 

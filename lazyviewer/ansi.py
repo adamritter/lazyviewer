@@ -14,6 +14,11 @@ TAB_STOP = 8
 
 
 def char_display_width(ch: str, col: int) -> int:
+    """Return terminal column width for one character at visual column ``col``.
+
+    Tabs expand to the next 8-column stop, combining marks consume no columns,
+    and East Asian wide/fullwidth characters consume two.
+    """
     if ch == "\t":
         return TAB_STOP - (col % TAB_STOP)
     if unicodedata.combining(ch):
@@ -24,6 +29,11 @@ def char_display_width(ch: str, col: int) -> int:
 
 
 def clip_ansi_line(text: str, max_cols: int) -> str:
+    """Trim a styled line to at most ``max_cols`` display columns.
+
+    ANSI escape sequences are preserved verbatim and do not count toward width.
+    Tabs are expanded into spaces so clipping aligns with rendered terminal cells.
+    """
     if max_cols <= 0 or not text:
         return ""
 
@@ -57,6 +67,13 @@ def clip_ansi_line(text: str, max_cols: int) -> str:
 
 
 def slice_ansi_line(text: str, start_cols: int, max_cols: int) -> str:
+    """Return a horizontal viewport of a styled line.
+
+    The slice starts at ``start_cols`` display columns and includes up to
+    ``max_cols`` columns. If the viewport begins after a color/style sequence,
+    the latest pending SGR sequence is injected so visible text keeps the
+    original styling.
+    """
     if max_cols <= 0 or not text:
         return ""
     if start_cols < 0:
@@ -116,6 +133,11 @@ def slice_ansi_line(text: str, start_cols: int, max_cols: int) -> str:
 
 
 def wrap_ansi_line(text: str, width: int) -> list[str]:
+    """Wrap a styled line into chunks that fit ``width`` display columns.
+
+    Escape sequences remain attached to their surrounding chunk, and tab
+    expansion respects terminal tab-stop alignment for each wrapped segment.
+    """
     if width <= 0:
         return [""]
     if not text:
@@ -164,6 +186,12 @@ def wrap_ansi_line(text: str, width: int) -> list[str]:
 
 
 def build_screen_lines(rendered: str, width: int, wrap: bool = False) -> list[str]:
+    """Split rendered output into displayable screen lines.
+
+    When ``wrap`` is false, this mirrors ``splitlines(keepends=True)``. When
+    true, each logical line body is wrapped with :func:`wrap_ansi_line` and the
+    original newline terminator is appended to the final wrapped chunk.
+    """
     lines = rendered.splitlines(keepends=True)
     if not lines:
         return [""]

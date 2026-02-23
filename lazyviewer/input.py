@@ -14,6 +14,11 @@ _PENDING_BYTES: list[bytes] = []
 
 
 def _read_ready_byte(fd: int, timeout_ms: int) -> bytes | None:
+    """Read one byte from ``fd`` if data arrives before ``timeout_ms``.
+
+    Returns ``None`` on timeout or EOF so callers can distinguish incomplete
+    escape sequences from regular key bytes.
+    """
     ready, _, _ = select.select([fd], [], [], max(0.0, timeout_ms / 1000.0))
     if not ready:
         return None
@@ -24,6 +29,17 @@ def _read_ready_byte(fd: int, timeout_ms: int) -> bytes | None:
 
 
 def read_key(fd: int, timeout_ms: int | None = None) -> str:
+    """Decode one terminal input event into a normalized key token.
+
+    This function supports:
+    - control keys and printable UTF-8 characters
+    - arrow/modified-arrow escape sequences
+    - SGR mouse button and wheel events
+    - standalone ``ESC`` via short sequence timeout
+
+    Bytes that arrive after a lone ``ESC`` and are not part of ``ESC [`` are
+    pushed into ``_PENDING_BYTES`` so the next ``read_key`` call receives them.
+    """
     if _PENDING_BYTES:
         ch = _PENDING_BYTES.pop(0)
     else:

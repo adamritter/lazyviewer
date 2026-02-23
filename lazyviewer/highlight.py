@@ -24,6 +24,11 @@ _PYGMENTS_INVALID_STYLES: set[str] = set()
 
 
 def read_text(path: Path) -> str:
+    """Read text using tolerant encoding fallback order.
+
+    Attempts UTF-8, UTF-8 with BOM, then latin-1; as a final fallback decodes
+    raw bytes with UTF-8 replacement semantics.
+    """
     for encoding in ("utf-8", "utf-8-sig", "latin-1"):
         try:
             return path.read_text(encoding=encoding)
@@ -52,12 +57,17 @@ def sanitize_terminal_text(source: str) -> str:
 
 
 def fallback_highlight(source: str) -> str:
+    """Apply lightweight Python-token based ANSI highlighting.
+
+    Used when Pygments is unavailable or fails to colorize.
+    """
     try:
         import io
         import keyword
         import tokenize
 
         class Style:
+            """ANSI style fragments used by fallback token coloring."""
             RESET = "\033[0m"
             BOLD = "\033[1m"
             BLUE = "\033[34m"
@@ -68,6 +78,7 @@ def fallback_highlight(source: str) -> str:
             GRAY = "\033[90m"
 
         def style_for_token(tok_type: int, value: str) -> str:
+            """Map tokenize token types/values to ANSI style fragments."""
             if tok_type == tokenize.STRING:
                 return Style.GREEN
             if tok_type == tokenize.COMMENT:
@@ -88,6 +99,7 @@ def fallback_highlight(source: str) -> str:
             line_offsets.append(line_offsets[-1] + len(line))
 
         def pos_to_offset(position: tuple[int, int]) -> int:
+            """Convert tokenize ``(line, col)`` into absolute source offset."""
             line_no, col_no = position
             if line_no <= 0:
                 return 0
@@ -125,6 +137,10 @@ def fallback_highlight(source: str) -> str:
 
 
 def _ensure_pygments_loaded() -> bool:
+    """Lazily import and cache Pygments callables.
+
+    Returns whether Pygments is available in the runtime environment.
+    """
     global _PYGMENTS_READY
     global _PYGMENTS_AVAILABLE
     global _PYGMENTS_HIGHLIGHT
@@ -156,6 +172,7 @@ def _ensure_pygments_loaded() -> bool:
 
 
 def _normalize_style(style: str) -> str:
+    """Validate/canonicalize requested style name with cache-backed checks."""
     if style in _PYGMENTS_VALID_STYLES:
         return style
     if style in _PYGMENTS_INVALID_STYLES:
@@ -172,6 +189,7 @@ def _normalize_style(style: str) -> str:
 
 
 def _formatter_for_style(style: str):
+    """Return cached Pygments terminal formatter for style name."""
     formatter = _PYGMENTS_FORMATTERS.get(style)
     if formatter is not None:
         return formatter
@@ -182,6 +200,7 @@ def _formatter_for_style(style: str):
 
 
 def pygments_highlight(source: str, path: Path, style: str = "monokai") -> str | None:
+    """Highlight source with Pygments, returning ``None`` on any failure."""
     if not _ensure_pygments_loaded():
         return None
 
@@ -203,6 +222,10 @@ def pygments_highlight(source: str, path: Path, style: str = "monokai") -> str |
 
 
 def colorize_source(source: str, path: Path, style: str = "monokai") -> str:
+    """Colorize source preferring Pygments, then tokenizer fallback.
+
+    Returns original source if neither highlighter produces ANSI output.
+    """
     rendered = pygments_highlight(source, path, style)
     if rendered and "\x1b[" in rendered:
         return rendered

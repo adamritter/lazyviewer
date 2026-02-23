@@ -17,6 +17,8 @@ from .search.content import ContentMatch
 
 @dataclass(frozen=True)
 class TreeEntry:
+    """One rendered row in the tree pane (path row or synthetic search-hit row)."""
+
     path: Path
     depth: int
     is_dir: bool
@@ -31,6 +33,7 @@ TREE_SIZE_LABEL_MIN_BYTES = 10 * 1024
 
 
 def file_color_for(path: Path) -> str:
+    """Return ANSI color used for file names based on suffix."""
     suffix = path.suffix.lower()
     if suffix in {".py", ".pyi", ".pyw"}:
         return "\033[38;5;110m"
@@ -38,6 +41,7 @@ def file_color_for(path: Path) -> str:
 
 
 def _highlight_substring(text: str, query: str) -> str:
+    """Highlight first case-insensitive substring match in ``text``."""
     if not query:
         return text
     folded_text = text.casefold()
@@ -50,12 +54,14 @@ def _highlight_substring(text: str, query: str) -> str:
 
 
 def compute_left_width(total_width: int) -> int:
+    """Choose default tree-pane width from total terminal width."""
     if total_width <= 60:
         return max(16, total_width // 2)
     return max(20, min(40, total_width // 3))
 
 
 def clamp_left_width(total_width: int, desired_left: int) -> int:
+    """Clamp requested tree-pane width to safe viewport bounds."""
     max_possible = max(1, total_width - 2)
     min_left = max(12, min(20, total_width - 12))
     max_left = max(min_left, total_width - 12)
@@ -65,6 +71,7 @@ def clamp_left_width(total_width: int, desired_left: int) -> int:
 
 
 def _safe_file_size(path: Path, is_dir: bool) -> int | None:
+    """Return file size for files, otherwise ``None`` or on stat failure."""
     if is_dir:
         return None
     try:
@@ -79,11 +86,13 @@ def build_tree_entries(
     show_hidden: bool,
     skip_gitignored: bool = False,
 ) -> list[TreeEntry]:
+    """Build full tree-entry list rooted at ``root`` honoring expansion state."""
     root = root.resolve()
     entries: list[TreeEntry] = [TreeEntry(root, 0, True)]
     ignore_matcher = get_gitignore_matcher(root) if skip_gitignored else None
 
     def walk(directory: Path, depth: int) -> None:
+        """Depth-first traversal adding visible children for expanded directories."""
         try:
             children = list(directory.iterdir())
         except (PermissionError, OSError):
@@ -111,6 +120,7 @@ def filter_tree_entries_for_files(
     matched_files: Iterable[Path],
     skip_gitignored: bool = False,
 ) -> tuple[list[TreeEntry], set[Path]]:
+    """Build filtered tree for matched files and their ancestor directories."""
     root = root.resolve()
     visible_dirs: set[Path] = {root}
     visible_files: set[Path] = set()
@@ -144,6 +154,7 @@ def filter_tree_entries_for_files(
         children_by_parent.setdefault(parent, []).append(path)
 
     def child_sort_key(path: Path) -> tuple[bool, str]:
+        """Sort directories before files and then by lowercase name."""
         is_dir = path in visible_dirs
         return (not is_dir, path.name.lower())
 
@@ -153,6 +164,7 @@ def filter_tree_entries_for_files(
     filtered_entries: list[TreeEntry] = [TreeEntry(root, 0, True)]
 
     def walk(directory: Path, depth: int) -> None:
+        """Emit filtered directory/file rows recursively."""
         for child in children_by_parent.get(directory, []):
             is_dir = child in visible_dirs
             filtered_entries.append(TreeEntry(child, depth, is_dir, file_size=_safe_file_size(child, is_dir)))
@@ -173,6 +185,7 @@ def filter_tree_entries_for_content_matches(
     matches_by_file: dict[Path, list[ContentMatch]],
     collapsed_dirs: set[Path] | None = None,
 ) -> tuple[list[TreeEntry], set[Path]]:
+    """Build content-search tree including synthetic hit rows under files."""
     root = root.resolve()
     visible_dirs: set[Path] = {root}
     visible_files: set[Path] = set()
@@ -215,6 +228,7 @@ def filter_tree_entries_for_content_matches(
         children_by_parent.setdefault(parent, []).append(path)
 
     def child_sort_key(path: Path) -> tuple[bool, str]:
+        """Sort directories before files and then by lowercase name."""
         is_dir = path in visible_dirs
         return (not is_dir, path.name.lower())
 
@@ -224,6 +238,7 @@ def filter_tree_entries_for_content_matches(
     filtered_entries: list[TreeEntry] = [TreeEntry(root, 0, True)]
 
     def walk(directory: Path, depth: int) -> None:
+        """Emit directory/file rows and content-hit children for visible files."""
         for child in children_by_parent.get(directory, []):
             is_dir = child in visible_dirs
             filtered_entries.append(TreeEntry(child, depth, is_dir, file_size=_safe_file_size(child, is_dir)))
@@ -259,6 +274,7 @@ def find_content_hit_index(
     preferred_line: int | None = None,
     preferred_column: int | None = None,
 ) -> int | None:
+    """Find best hit index for a file, preferring exact line/column when given."""
     preferred_resolved = preferred_path.resolve()
     first_hit_in_file: int | None = None
     for idx, entry in enumerate(entries):
@@ -282,6 +298,7 @@ def next_file_entry_index(
     selected_idx: int,
     direction: int,
 ) -> int | None:
+    """Return next non-directory entry index in the requested direction."""
     if not entries or direction == 0:
         return None
     step = 1 if direction > 0 else -1
@@ -298,6 +315,7 @@ def next_directory_entry_index(
     selected_idx: int,
     direction: int,
 ) -> int | None:
+    """Return next directory entry index in the requested direction."""
     if not entries or direction == 0:
         return None
     step = 1 if direction > 0 else -1
@@ -315,6 +333,7 @@ def next_opened_directory_entry_index(
     direction: int,
     expanded: set[Path],
 ) -> int | None:
+    """Return next expanded-directory entry index in the requested direction."""
     if not entries or direction == 0:
         return None
     step = 1 if direction > 0 else -1
@@ -328,6 +347,7 @@ def next_opened_directory_entry_index(
 
 
 def next_index_after_directory_subtree(entries: list[TreeEntry], directory_idx: int) -> int | None:
+    """Return first index after the subtree rooted at ``directory_idx``."""
     if not entries or directory_idx < 0 or directory_idx >= len(entries):
         return None
     directory_entry = entries[directory_idx]
@@ -350,6 +370,7 @@ def format_tree_entry(
     search_query: str = "",
     show_size_labels: bool = True,
 ) -> str:
+    """Render one tree/search-hit row as ANSI-styled display text."""
     if entry.kind == "search_hit":
         indent = "  " * max(0, entry.depth - 1)
         marker_color = "\033[38;5;44m"
