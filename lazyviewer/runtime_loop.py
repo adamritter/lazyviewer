@@ -329,31 +329,21 @@ def run_main_loop(
                     state.dirty = True
                 continue
 
-            if key == "ALT_LEFT" and not state.picker_active and not (
-                state.tree_filter_active and state.tree_filter_editing
-            ):
+            tree_filter_editing_active = state.tree_filter_active and state.tree_filter_editing
+            nav_hotkeys_enabled = not state.picker_active and not tree_filter_editing_active
+
+            if key in {"ALT_LEFT", "ALT_RIGHT"} and nav_hotkeys_enabled:
                 state.count_buffer = ""
-                if ops.jump_back_in_history():
+                moved = ops.jump_back_in_history() if key == "ALT_LEFT" else ops.jump_forward_in_history()
+                if moved:
                     state.dirty = True
                 continue
 
-            if key == "ALT_RIGHT" and not state.picker_active and not (
-                state.tree_filter_active and state.tree_filter_editing
-            ):
-                state.count_buffer = ""
-                if ops.jump_forward_in_history():
-                    state.dirty = True
-                continue
-
-            if key == "CTRL_P" and not state.picker_active:
-                state.count_buffer = ""
-                toggle_tree_filter_mode("files")
-                continue
-
-            if key == "/" and not state.picker_active and not (state.tree_filter_active and state.tree_filter_editing):
-                state.count_buffer = ""
-                toggle_tree_filter_mode("content")
-                continue
+            if key in {"CTRL_P", "/"} and not state.picker_active:
+                if not (key == "/" and tree_filter_editing_active):
+                    state.count_buffer = ""
+                    toggle_tree_filter_mode("files" if key == "CTRL_P" else "content")
+                    continue
 
             if key == ":" and not state.picker_active:
                 state.count_buffer = ""
