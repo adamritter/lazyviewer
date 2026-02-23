@@ -759,6 +759,586 @@ def _toggle_git_features(
     state.dirty = True
 
 
+def _preview_selected_entry(
+    *,
+    state: AppState,
+    clear_source_selection: Callable[[], bool],
+    refresh_rendered_for_current_path: Callable[..., None],
+    jump_to_line: Callable[[int], None],
+    force: bool = False,
+) -> None:
+    if not state.tree_entries:
+        return
+    entry = state.tree_entries[state.selected_idx]
+    selected_target = entry.path.resolve()
+    if clear_source_selection():
+        state.dirty = True
+    if entry.kind == "search_hit":
+        if force or selected_target != state.current_path.resolve():
+            state.current_path = selected_target
+            refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
+        if entry.line is not None:
+            jump_to_line(max(0, entry.line - 1))
+        return
+    if not force and selected_target == state.current_path.resolve():
+        return
+    state.current_path = selected_target
+    refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
+
+
+def _sync_selected_target_after_tree_refresh(
+    *,
+    state: AppState,
+    rebuild_tree_entries: Callable[..., None],
+    refresh_rendered_for_current_path: Callable[..., None],
+    schedule_tree_filter_index_warmup: Callable[..., None],
+    refresh_git_status_overlay: Callable[..., None],
+    preferred_path: Path,
+    force_rebuild: bool = False,
+) -> None:
+    previous_current_path = state.current_path.resolve()
+    rebuild_tree_entries(preferred_path=preferred_path)
+    if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
+        selected_target = state.tree_entries[state.selected_idx].path.resolve()
+    else:
+        selected_target = state.tree_root.resolve()
+
+    changed_target = selected_target != previous_current_path
+    if changed_target:
+        state.current_path = selected_target
+    refresh_rendered_for_current_path(
+        reset_scroll=changed_target,
+        reset_dir_budget=changed_target,
+        force_rebuild=force_rebuild,
+    )
+    schedule_tree_filter_index_warmup()
+    refresh_git_status_overlay(force=True)
+    state.dirty = True
+
+
+def _jump_to_next_git_modified(
+    direction: int,
+    *,
+    state: AppState,
+    visible_content_rows: Callable[[], int],
+    refresh_git_status_overlay: Callable[..., None],
+    sorted_git_modified_file_paths: Callable[[], list[Path]],
+    current_jump_location: Callable[[], object],
+    jump_to_path: Callable[[Path], None],
+    record_jump_if_changed: Callable[[object], None],
+) -> bool:
+    if direction == 0:
+        return False
+    _clear_status_message(state)
+
+    same_file_change_blocks: list[int] = []
+    if state.preview_is_git_diff and state.current_path.is_file():
+        same_file_change_blocks = _git_change_block_start_lines(state.lines)
+        if same_file_change_blocks:
+            probe_line = state.start + max(0, visible_content_rows() // 3)
+            current_block: int | None = None
+            for line_idx in same_file_change_blocks:
+                if line_idx <= probe_line:
+                    current_block = line_idx
+                else:
+                    break
+
+            target_line: int | None = None
+            if direction > 0:
+                if current_block is None:
+                    target_line = same_file_change_blocks[0]
+                else:
+                    for line_idx in same_file_change_blocks:
+                        if line_idx > current_block:
+                            target_line = line_idx
+                            break
+            else:
+                if current_block is not None:
+                    for line_idx in reversed(same_file_change_blocks):
+                        if line_idx < current_block:
+                            target_line = line_idx
+                            break
+
+            if target_line is not None:
+                next_start = _centered_scroll_start(
+                    target_line,
+                    state.max_start,
+                    visible_content_rows(),
+                )
+                if next_start != state.start:
+                    state.start = next_start
+                    return True
+
+    refresh_git_status_overlay()
+    modified_paths = sorted_git_modified_file_paths()
+    if not modified_paths:
+        return False
+
+    root = state.tree_root.resolve()
+    if state.browser_visible and state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
+        anchor_path = state.tree_entries[state.selected_idx].path.resolve()
+    else:
+        anchor_path = state.current_path.resolve()
+
+    ordered_items: list[tuple[tuple[tuple[int, str, str], ...], Path]] = []
+    for path in modified_paths:
+        rel_path = path.relative_to(root)
+        ordered_items.append((_tree_order_key_for_relative_path(rel_path), path))
+
+    try:
+        anchor_rel_path = anchor_path.relative_to(root)
+        anchor_key: tuple[tuple[int, str, str], ...] | None = _tree_order_key_for_relative_path(
+            anchor_rel_path,
+            is_dir=anchor_path.is_dir(),
+        )
+    except Exception:
+        anchor_key = None
+
+    target: Path | None = None
+    wrapped_files = False
+    if direction > 0:
+        if anchor_key is not None:
+            for item_key, path in ordered_items:
+                if item_key > anchor_key:
+                    target = path
+                    break
+            if target is None:
+                wrapped_files = True
+        if target is None:
+            target = ordered_items[0][1]
+    else:
+        if anchor_key is not None:
+            for item_key, path in reversed(ordered_items):
+                if item_key < anchor_key:
+                    target = path
+                    break
+            if target is None:
+                wrapped_files = True
+        if target is None:
+            target = ordered_items[-1][1]
+
+    if target is None:
+        return False
+
+    if target == anchor_path and same_file_change_blocks:
+        wrap_line = same_file_change_blocks[0] if direction > 0 else same_file_change_blocks[-1]
+        next_start = _centered_scroll_start(
+            wrap_line,
+            state.max_start,
+            visible_content_rows(),
+        )
+        state.start = next_start
+        _set_status_message(
+            state,
+            "wrapped to first change" if direction > 0 else "wrapped to last change",
+        )
+        return True
+
+    if target == anchor_path:
+        return False
+
+    origin = current_jump_location()
+    jump_to_path(target)
+    record_jump_if_changed(origin)
+    if wrapped_files:
+        _set_status_message(
+            state,
+            "wrapped to first change" if direction > 0 else "wrapped to last change",
+    )
+    return True
+
+
+def _copy_selected_source_range(
+    *,
+    state: AppState,
+    start_pos: tuple[int, int],
+    end_pos: tuple[int, int],
+) -> bool:
+    if not state.lines:
+        return False
+
+    start_line, start_col = start_pos
+    end_line, end_col = end_pos
+    if (end_line, end_col) < (start_line, start_col):
+        start_line, start_col, end_line, end_col = end_line, end_col, start_line, start_col
+
+    start_line = max(0, min(start_line, len(state.lines) - 1))
+    end_line = max(0, min(end_line, len(state.lines) - 1))
+
+    selected_parts: list[str] = []
+    for idx in range(start_line, end_line + 1):
+        plain = ANSI_ESCAPE_RE.sub("", state.lines[idx]).rstrip("\r\n")
+        if idx == start_line and idx == end_line:
+            left = max(0, min(start_col, len(plain)))
+            right = max(left, min(end_col, len(plain)))
+            selected_parts.append(plain[left:right])
+        elif idx == start_line:
+            left = max(0, min(start_col, len(plain)))
+            selected_parts.append(plain[left:])
+        elif idx == end_line:
+            right = max(0, min(end_col, len(plain)))
+            selected_parts.append(plain[:right])
+        else:
+            selected_parts.append(plain)
+
+    selected_text = "\n".join(selected_parts)
+    if not selected_text:
+        fallback = ANSI_ESCAPE_RE.sub("", state.lines[start_line]).rstrip("\r\n")
+        selected_text = fallback
+    if not selected_text:
+        return False
+    return _copy_text_to_clipboard(selected_text)
+
+
+def _handle_tree_mouse_wheel(
+    mouse_key: str,
+    *,
+    state: AppState,
+    move_tree_selection: Callable[[int], bool],
+    maybe_grow_directory_preview: Callable[[], bool],
+    max_horizontal_text_offset: Callable[[], int],
+) -> bool:
+    is_vertical = mouse_key.startswith("MOUSE_WHEEL_UP:") or mouse_key.startswith("MOUSE_WHEEL_DOWN:")
+    is_horizontal = mouse_key.startswith("MOUSE_WHEEL_LEFT:") or mouse_key.startswith("MOUSE_WHEEL_RIGHT:")
+    if not (is_vertical or is_horizontal):
+        return False
+
+    col, _row = _parse_mouse_col_row(mouse_key)
+    in_tree_pane = state.browser_visible and col is not None and col <= state.left_width
+
+    if is_horizontal:
+        if in_tree_pane:
+            return True
+        prev_text_x = state.text_x
+        if mouse_key.startswith("MOUSE_WHEEL_LEFT:"):
+            state.text_x = max(0, state.text_x - 4)
+        else:
+            state.text_x = min(max_horizontal_text_offset(), state.text_x + 4)
+        if state.text_x != prev_text_x:
+            state.dirty = True
+        return True
+
+    direction = -1 if mouse_key.startswith("MOUSE_WHEEL_UP:") else 1
+    if in_tree_pane:
+        if move_tree_selection(direction):
+            state.dirty = True
+        return True
+
+    prev_start = state.start
+    state.start += direction * 3
+    state.start = max(0, min(state.start, state.max_start))
+    grew_preview = direction > 0 and maybe_grow_directory_preview()
+    if state.start != prev_start or grew_preview:
+        state.dirty = True
+    return True
+
+
+@dataclass
+class _SourceSelectionDragState:
+    active: bool = False
+    pointer: tuple[int, int] | None = None
+    vertical_edge: str | None = None
+    horizontal_edge: str | None = None
+
+    def reset(self) -> None:
+        self.active = False
+        self.pointer = None
+        self.vertical_edge = None
+        self.horizontal_edge = None
+
+
+class _TreeMouseHandlers:
+    def __init__(
+        self,
+        *,
+        state: AppState,
+        visible_content_rows: Callable[[], int],
+        source_pane_col_bounds: Callable[[], tuple[int, int]],
+        source_selection_position: Callable[[int, int], tuple[int, int] | None],
+        directory_preview_target_for_display_line: Callable[[int], Path | None],
+        max_horizontal_text_offset: Callable[[], int],
+        maybe_grow_directory_preview: Callable[[], bool],
+        clear_source_selection: Callable[[], bool],
+        copy_selected_source_range: Callable[..., bool],
+        rebuild_tree_entries: Callable[..., None],
+        mark_tree_watch_dirty: Callable[[], None],
+        coerce_tree_filter_result_index: Callable[[int], int | None],
+        preview_selected_entry: Callable[..., None],
+        activate_tree_filter_selection: Callable[[], None],
+        open_tree_filter: Callable[[str], bool],
+        apply_tree_filter_query: Callable[..., None],
+        jump_to_path: Callable[[Path], None],
+    ) -> None:
+        self._state = state
+        self._visible_content_rows = visible_content_rows
+        self._source_pane_col_bounds = source_pane_col_bounds
+        self._source_selection_position = source_selection_position
+        self._directory_preview_target_for_display_line = directory_preview_target_for_display_line
+        self._max_horizontal_text_offset = max_horizontal_text_offset
+        self._maybe_grow_directory_preview = maybe_grow_directory_preview
+        self._clear_source_selection = clear_source_selection
+        self._copy_selected_source_range = copy_selected_source_range
+        self._rebuild_tree_entries = rebuild_tree_entries
+        self._mark_tree_watch_dirty = mark_tree_watch_dirty
+        self._coerce_tree_filter_result_index = coerce_tree_filter_result_index
+        self._preview_selected_entry = preview_selected_entry
+        self._activate_tree_filter_selection = activate_tree_filter_selection
+        self._open_tree_filter = open_tree_filter
+        self._apply_tree_filter_query = apply_tree_filter_query
+        self._jump_to_path = jump_to_path
+        self._drag = _SourceSelectionDragState()
+
+    def _reset_source_selection_drag_state(self) -> None:
+        self._drag.reset()
+
+    def _update_drag_pointer(self, col: int, row: int) -> None:
+        visible_rows = self._visible_content_rows()
+        previous_row = self._drag.pointer[1] if self._drag.pointer is not None else row
+        previous_col = self._drag.pointer[0] if self._drag.pointer is not None else col
+        self._drag.pointer = (col, row)
+
+        if row < 1:
+            self._drag.vertical_edge = "top"
+        elif row > visible_rows:
+            self._drag.vertical_edge = "bottom"
+        elif row == 1 and (previous_row > row or self._drag.vertical_edge == "top"):
+            self._drag.vertical_edge = "top"
+        elif row == visible_rows and (previous_row < row or self._drag.vertical_edge == "bottom"):
+            self._drag.vertical_edge = "bottom"
+        else:
+            self._drag.vertical_edge = None
+
+        min_source_col, max_source_col = self._source_pane_col_bounds()
+        if col < min_source_col:
+            self._drag.horizontal_edge = "left"
+        elif col > max_source_col:
+            self._drag.horizontal_edge = "right"
+        elif col == min_source_col and (previous_col > col or self._drag.horizontal_edge == "left"):
+            self._drag.horizontal_edge = "left"
+        elif col == max_source_col and (previous_col < col or self._drag.horizontal_edge == "right"):
+            self._drag.horizontal_edge = "right"
+        else:
+            self._drag.horizontal_edge = None
+
+    def tick_source_selection_drag(self) -> None:
+        state = self._state
+        if not self._drag.active or state.source_selection_anchor is None:
+            return
+        if self._drag.pointer is None:
+            return
+
+        col, row = self._drag.pointer
+        visible_rows = self._visible_content_rows()
+        if visible_rows <= 0:
+            return
+
+        min_source_col, max_source_col = self._source_pane_col_bounds()
+        target_col = max(min_source_col, min(col, max_source_col))
+        changed = False
+
+        top_edge_active = row < 1 or (row == 1 and self._drag.vertical_edge == "top")
+        bottom_edge_active = row > visible_rows or (row == visible_rows and self._drag.vertical_edge == "bottom")
+        left_edge_active = col < min_source_col or (col == min_source_col and self._drag.horizontal_edge == "left")
+        right_edge_active = col > max_source_col or (
+            col == max_source_col and self._drag.horizontal_edge == "right"
+        )
+
+        if top_edge_active:
+            overshoot = 1 - row
+            step = _drag_scroll_step(overshoot, visible_rows)
+            previous_start = state.start
+            state.start = max(0, state.start - step)
+            changed = state.start != previous_start
+            target_row = 1
+        elif bottom_edge_active:
+            overshoot = row - visible_rows
+            step = _drag_scroll_step(overshoot, visible_rows)
+            previous_start = state.start
+            state.start = min(state.max_start, state.start + step)
+            grew_preview = False
+            if state.start == previous_start:
+                grew_preview = self._maybe_grow_directory_preview()
+                if grew_preview:
+                    state.start = min(state.max_start, state.start + step)
+            changed = state.start != previous_start or grew_preview
+            target_row = visible_rows
+        else:
+            target_row = row
+
+        if left_edge_active:
+            overshoot = min_source_col - col
+            step = _drag_scroll_step(overshoot, max_source_col - min_source_col + 1)
+            previous_text_x = state.text_x
+            state.text_x = max(0, state.text_x - step)
+            if state.text_x != previous_text_x:
+                changed = True
+        elif right_edge_active:
+            overshoot = col - max_source_col
+            step = _drag_scroll_step(overshoot, max_source_col - min_source_col + 1)
+            previous_text_x = state.text_x
+            state.text_x = min(self._max_horizontal_text_offset(), state.text_x + step)
+            if state.text_x != previous_text_x:
+                changed = True
+
+        target_pos = self._source_selection_position(target_col, target_row)
+        if target_pos is not None and target_pos != state.source_selection_focus:
+            state.source_selection_focus = target_pos
+            changed = True
+
+        if changed:
+            state.dirty = True
+
+    def _toggle_directory_entry(
+        self,
+        resolved: Path,
+        *,
+        content_mode_toggle: bool = False,
+    ) -> None:
+        state = self._state
+        if content_mode_toggle and state.tree_filter_active and state.tree_filter_mode == "content":
+            if resolved in state.tree_filter_collapsed_dirs:
+                state.tree_filter_collapsed_dirs.remove(resolved)
+                state.expanded.add(resolved)
+            else:
+                if resolved != state.tree_root:
+                    state.tree_filter_collapsed_dirs.add(resolved)
+                state.expanded.discard(resolved)
+        else:
+            state.expanded.symmetric_difference_update({resolved})
+        self._rebuild_tree_entries(preferred_path=resolved)
+        self._mark_tree_watch_dirty()
+        state.dirty = True
+
+    def handle_tree_mouse_click(self, mouse_key: str) -> bool:
+        state = self._state
+        is_left_down = mouse_key.startswith("MOUSE_LEFT_DOWN:")
+        is_left_up = mouse_key.startswith("MOUSE_LEFT_UP:")
+        if not (is_left_down or is_left_up):
+            return False
+
+        col, row = _parse_mouse_col_row(mouse_key)
+        if col is None or row is None:
+            return True
+
+        if self._drag.active and is_left_down:
+            self._update_drag_pointer(col, row)
+            self.tick_source_selection_drag()
+            return True
+
+        selection_pos = self._source_selection_position(col, row)
+        if selection_pos is not None:
+            if is_left_down:
+                if not self._drag.active:
+                    state.source_selection_anchor = selection_pos
+                state.source_selection_focus = selection_pos
+                self._drag.active = True
+                self._drag.pointer = (col, row)
+                self._drag.vertical_edge = None
+                self._drag.horizontal_edge = None
+                state.dirty = True
+                return True
+            if state.source_selection_anchor is None:
+                self._reset_source_selection_drag_state()
+                return True
+            state.source_selection_focus = selection_pos
+            same_selection_pos = state.source_selection_anchor == selection_pos
+            if same_selection_pos and state.dir_preview_path is not None:
+                preview_target = self._directory_preview_target_for_display_line(selection_pos[0])
+                if preview_target is not None:
+                    self._clear_source_selection()
+                    self._reset_source_selection_drag_state()
+                    self._jump_to_path(preview_target)
+                    state.dirty = True
+                    return True
+            if same_selection_pos:
+                clicked_token = _clicked_preview_search_token(state.lines, selection_pos)
+                if clicked_token is not None:
+                    self._clear_source_selection()
+                    self._reset_source_selection_drag_state()
+                    return _open_content_search_for_token(
+                        state=state,
+                        query=clicked_token,
+                        open_tree_filter=self._open_tree_filter,
+                        apply_tree_filter_query=self._apply_tree_filter_query,
+                    )
+            self._copy_selected_source_range(start_pos=state.source_selection_anchor, end_pos=selection_pos)
+            self._reset_source_selection_drag_state()
+            state.dirty = True
+            return True
+
+        if is_left_up:
+            if self._drag.active and state.source_selection_anchor is not None:
+                self._drag.pointer = (col, row)
+                self.tick_source_selection_drag()
+                end_pos = state.source_selection_focus or state.source_selection_anchor
+                self._copy_selected_source_range(start_pos=state.source_selection_anchor, end_pos=end_pos)
+                state.source_selection_focus = end_pos
+                state.dirty = True
+            self._reset_source_selection_drag_state()
+            return True
+
+        if self._drag.active:
+            # Keep live selection while dragging, even if pointer briefly leaves source pane.
+            return True
+
+        if self._clear_source_selection():
+            state.dirty = True
+        self._reset_source_selection_drag_state()
+
+        if not (state.browser_visible and 1 <= row <= self._visible_content_rows() and col <= state.left_width):
+            return True
+
+        query_row_visible = state.tree_filter_active
+        if query_row_visible and row == 1:
+            state.tree_filter_editing = True
+            state.dirty = True
+            return True
+
+        raw_clicked_idx = state.tree_start + (row - 1 - (1 if query_row_visible else 0))
+        if not (0 <= raw_clicked_idx < len(state.tree_entries)):
+            return True
+
+        raw_clicked_entry = state.tree_entries[raw_clicked_idx]
+        raw_arrow_col = 1 + (raw_clicked_entry.depth * 2)
+        if is_left_down and raw_clicked_entry.is_dir and raw_arrow_col <= col <= (raw_arrow_col + 1):
+            resolved = raw_clicked_entry.path.resolve()
+            self._toggle_directory_entry(resolved, content_mode_toggle=True)
+            state.last_click_idx = -1
+            state.last_click_time = 0.0
+            return True
+
+        clicked_idx = self._coerce_tree_filter_result_index(raw_clicked_idx)
+        if clicked_idx is None:
+            return True
+
+        prev_selected = state.selected_idx
+        state.selected_idx = clicked_idx
+        self._preview_selected_entry()
+        if state.selected_idx != prev_selected:
+            state.dirty = True
+
+        now = time.monotonic()
+        is_double = clicked_idx == state.last_click_idx and (now - state.last_click_time) <= DOUBLE_CLICK_SECONDS
+        state.last_click_idx = clicked_idx
+        state.last_click_time = now
+        if not is_double:
+            return True
+
+        if state.tree_filter_active and state.tree_filter_query:
+            self._activate_tree_filter_selection()
+            return True
+
+        entry = state.tree_entries[state.selected_idx]
+        if entry.is_dir:
+            resolved = entry.path.resolve()
+            self._toggle_directory_entry(resolved)
+            return True
+
+        _copy_text_to_clipboard(entry.path.name)
+        state.dirty = True
+        return True
+
+
 def _launch_lazygit(
     *,
     state: AppState,
@@ -802,6 +1382,30 @@ class _WatchRefreshContext:
     git_signature: str | None = None
     git_repo_root: Path | None = None
     git_dir: Path | None = None
+
+
+class _NavigationProxy:
+    def __init__(self) -> None:
+        self._ops: NavigationPickerOps | None = None
+
+    def bind(self, ops: NavigationPickerOps) -> None:
+        self._ops = ops
+
+    def current_jump_location(self):
+        assert self._ops is not None
+        return self._ops.current_jump_location()
+
+    def record_jump_if_changed(self, origin: object) -> None:
+        assert self._ops is not None
+        self._ops.record_jump_if_changed(origin)
+
+    def jump_to_path(self, target: Path) -> None:
+        assert self._ops is not None
+        self._ops.jump_to_path(target)
+
+    def jump_to_line(self, line_number: int) -> None:
+        assert self._ops is not None
+        self._ops.jump_to_line(line_number)
 
 
 def _refresh_git_status_overlay(
@@ -906,6 +1510,10 @@ def _maybe_refresh_git_watch(
         or state.max_start != previous_max_start
     ):
         state.dirty = True
+
+
+def _mark_tree_watch_dirty(watch_context: _WatchRefreshContext) -> None:
+    watch_context.tree_signature = None
 
 
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
@@ -1013,18 +1621,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     current_preview_image_path = layout_ops.current_preview_image_path
     current_preview_image_geometry = layout_ops.current_preview_image_geometry
     watch_refresh = _WatchRefreshContext()
-    source_selection_drag_active = False
-    source_selection_drag_pointer: tuple[int, int] | None = None
-    source_selection_drag_edge: str | None = None
-    source_selection_drag_h_edge: str | None = None
-
-    def reset_source_selection_drag_state() -> None:
-        nonlocal source_selection_drag_active, source_selection_drag_pointer
-        nonlocal source_selection_drag_edge, source_selection_drag_h_edge
-        source_selection_drag_active = False
-        source_selection_drag_pointer = None
-        source_selection_drag_edge = None
-        source_selection_drag_h_edge = None
+    mark_tree_watch_dirty = partial(_mark_tree_watch_dirty, watch_refresh)
 
     sorted_git_modified_file_paths = partial(_sorted_git_modified_file_paths, state)
     refresh_rendered_for_current_path = partial(
@@ -1046,15 +1643,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state=state,
         watch_context=watch_refresh,
     )
-    sync_selected_target_after_tree_refresh_proxy = lambda **kwargs: sync_selected_target_after_tree_refresh(
-        **kwargs
-    )
-    maybe_refresh_tree_watch = partial(
-        _maybe_refresh_tree_watch,
-        state=state,
-        watch_context=watch_refresh,
-        sync_selected_target_after_tree_refresh=sync_selected_target_after_tree_refresh_proxy,
-    )
+    maybe_refresh_tree_watch: Callable[[], None]
     maybe_refresh_git_watch = partial(
         _maybe_refresh_git_watch,
         state=state,
@@ -1070,25 +1659,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         refresh_git_status_overlay=refresh_git_status_overlay,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
     )
-
-    def preview_selected_entry(force: bool = False) -> None:
-        if not state.tree_entries:
-            return
-        entry = state.tree_entries[state.selected_idx]
-        selected_target = entry.path.resolve()
-        if clear_source_selection():
-            state.dirty = True
-        if entry.kind == "search_hit":
-            if force or selected_target != state.current_path.resolve():
-                state.current_path = selected_target
-                refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
-            if entry.line is not None:
-                jump_to_line_proxy(max(0, entry.line - 1))
-            return
-        if not force and selected_target == state.current_path.resolve():
-            return
-        state.current_path = selected_target
-        refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
+    preview_selected_entry: Callable[..., None]
 
     maybe_grow_directory_preview = partial(
         _maybe_grow_directory_preview,
@@ -1107,384 +1678,31 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     source_selection_position = source_pane_ops.source_selection_position
     display_line_to_source_line = source_pane_ops.display_line_to_source_line
     directory_preview_target_for_display_line = source_pane_ops.directory_preview_target_for_display_line
+    copy_selected_source_range = partial(_copy_selected_source_range, state=state)
+    handle_tree_mouse_wheel: Callable[[str], bool]
+    handle_tree_mouse_click: Callable[[str], bool]
+    tick_source_selection_drag: Callable[[], None]
 
-    def tick_source_selection_drag() -> None:
-        if not source_selection_drag_active or state.source_selection_anchor is None:
-            return
-        if source_selection_drag_pointer is None:
-            return
+    sync_selected_target_after_tree_refresh: Callable[..., None]
+    navigation_proxy = _NavigationProxy()
 
-        col, row = source_selection_drag_pointer
-        visible_rows = visible_content_rows()
-        if visible_rows <= 0:
-            return
-
-        min_source_col, max_source_col = source_pane_col_bounds()
-        target_col = max(min_source_col, min(col, max_source_col))
-        changed = False
-
-        top_edge_active = row < 1 or (row == 1 and source_selection_drag_edge == "top")
-        bottom_edge_active = row > visible_rows or (
-            row == visible_rows and source_selection_drag_edge == "bottom"
-        )
-        left_edge_active = col < min_source_col or (col == min_source_col and source_selection_drag_h_edge == "left")
-        right_edge_active = col > max_source_col or (
-            col == max_source_col and source_selection_drag_h_edge == "right"
-        )
-
-        if top_edge_active:
-            overshoot = 1 - row
-            step = _drag_scroll_step(overshoot, visible_rows)
-            previous_start = state.start
-            state.start = max(0, state.start - step)
-            changed = state.start != previous_start
-            target_row = 1
-        elif bottom_edge_active:
-            overshoot = row - visible_rows
-            step = _drag_scroll_step(overshoot, visible_rows)
-            previous_start = state.start
-            state.start = min(state.max_start, state.start + step)
-            grew_preview = False
-            if state.start == previous_start:
-                grew_preview = maybe_grow_directory_preview()
-                if grew_preview:
-                    state.start = min(state.max_start, state.start + step)
-            changed = state.start != previous_start or grew_preview
-            target_row = visible_rows
-        else:
-            target_row = row
-
-        if left_edge_active:
-            overshoot = min_source_col - col
-            step = _drag_scroll_step(overshoot, max_source_col - min_source_col + 1)
-            previous_text_x = state.text_x
-            state.text_x = max(0, state.text_x - step)
-            if state.text_x != previous_text_x:
-                changed = True
-        elif right_edge_active:
-            overshoot = col - max_source_col
-            step = _drag_scroll_step(overshoot, max_source_col - min_source_col + 1)
-            previous_text_x = state.text_x
-            state.text_x = min(max_horizontal_text_offset(), state.text_x + step)
-            if state.text_x != previous_text_x:
-                changed = True
-
-        target_pos = source_selection_position(target_col, target_row)
-        if target_pos is not None and target_pos != state.source_selection_focus:
-            state.source_selection_focus = target_pos
-            changed = True
-
-        if changed:
-            state.dirty = True
-
-    def copy_selected_source_range(
-        start_pos: tuple[int, int],
-        end_pos: tuple[int, int],
-    ) -> bool:
-        if not state.lines:
-            return False
-
-        start_line, start_col = start_pos
-        end_line, end_col = end_pos
-        if (end_line, end_col) < (start_line, start_col):
-            start_line, start_col, end_line, end_col = end_line, end_col, start_line, start_col
-
-        start_line = max(0, min(start_line, len(state.lines) - 1))
-        end_line = max(0, min(end_line, len(state.lines) - 1))
-
-        selected_parts: list[str] = []
-        for idx in range(start_line, end_line + 1):
-            plain = ANSI_ESCAPE_RE.sub("", state.lines[idx]).rstrip("\r\n")
-            if idx == start_line and idx == end_line:
-                left = max(0, min(start_col, len(plain)))
-                right = max(left, min(end_col, len(plain)))
-                selected_parts.append(plain[left:right])
-            elif idx == start_line:
-                left = max(0, min(start_col, len(plain)))
-                selected_parts.append(plain[left:])
-            elif idx == end_line:
-                right = max(0, min(end_col, len(plain)))
-                selected_parts.append(plain[:right])
-            else:
-                selected_parts.append(plain)
-
-        selected_text = "\n".join(selected_parts)
-        if not selected_text:
-            fallback = ANSI_ESCAPE_RE.sub("", state.lines[start_line]).rstrip("\r\n")
-            selected_text = fallback
-        if not selected_text:
-            return False
-        return _copy_text_to_clipboard(selected_text)
-
-    def handle_tree_mouse_wheel(mouse_key: str) -> bool:
-        is_vertical = mouse_key.startswith("MOUSE_WHEEL_UP:") or mouse_key.startswith("MOUSE_WHEEL_DOWN:")
-        is_horizontal = mouse_key.startswith("MOUSE_WHEEL_LEFT:") or mouse_key.startswith("MOUSE_WHEEL_RIGHT:")
-        if not (is_vertical or is_horizontal):
-            return False
-
-        col, _row = _parse_mouse_col_row(mouse_key)
-        in_tree_pane = state.browser_visible and col is not None and col <= state.left_width
-
-        if is_horizontal:
-            if in_tree_pane:
-                return True
-            prev_text_x = state.text_x
-            if mouse_key.startswith("MOUSE_WHEEL_LEFT:"):
-                state.text_x = max(0, state.text_x - 4)
-            else:
-                state.text_x = min(max_horizontal_text_offset(), state.text_x + 4)
-            if state.text_x != prev_text_x:
-                state.dirty = True
-            return True
-
-        direction = -1 if mouse_key.startswith("MOUSE_WHEEL_UP:") else 1
-        if in_tree_pane:
-            if move_tree_selection(direction):
-                state.dirty = True
-            return True
-
-        prev_start = state.start
-        state.start += direction * 3
-        state.start = max(0, min(state.start, state.max_start))
-        grew_preview = direction > 0 and maybe_grow_directory_preview()
-        if state.start != prev_start or grew_preview:
-            state.dirty = True
-        return True
-
-    def handle_tree_mouse_click(mouse_key: str) -> bool:
-        nonlocal source_selection_drag_active, source_selection_drag_pointer
-        nonlocal source_selection_drag_edge, source_selection_drag_h_edge
-        is_left_down = mouse_key.startswith("MOUSE_LEFT_DOWN:")
-        is_left_up = mouse_key.startswith("MOUSE_LEFT_UP:")
-        if not (is_left_down or is_left_up):
-            return False
-
-        col, row = _parse_mouse_col_row(mouse_key)
-        if col is None or row is None:
-            return True
-
-        def toggle_directory_entry(
-            resolved: Path,
-            *,
-            content_mode_toggle: bool = False,
-        ) -> None:
-            if content_mode_toggle and state.tree_filter_active and state.tree_filter_mode == "content":
-                if resolved in state.tree_filter_collapsed_dirs:
-                    state.tree_filter_collapsed_dirs.remove(resolved)
-                    state.expanded.add(resolved)
-                else:
-                    if resolved != state.tree_root:
-                        state.tree_filter_collapsed_dirs.add(resolved)
-                    state.expanded.discard(resolved)
-            else:
-                state.expanded.symmetric_difference_update({resolved})
-            rebuild_tree_entries(preferred_path=resolved)
-            watch_refresh.tree_signature = None
-            state.dirty = True
-
-        if source_selection_drag_active and is_left_down:
-            visible_rows = visible_content_rows()
-            previous_row = source_selection_drag_pointer[1] if source_selection_drag_pointer is not None else row
-            previous_col = source_selection_drag_pointer[0] if source_selection_drag_pointer is not None else col
-            source_selection_drag_pointer = (col, row)
-            if row < 1:
-                source_selection_drag_edge = "top"
-            elif row > visible_rows:
-                source_selection_drag_edge = "bottom"
-            elif row == 1 and (previous_row > row or source_selection_drag_edge == "top"):
-                source_selection_drag_edge = "top"
-            elif row == visible_rows and (
-                previous_row < row or source_selection_drag_edge == "bottom"
-            ):
-                source_selection_drag_edge = "bottom"
-            else:
-                source_selection_drag_edge = None
-
-            min_source_col, max_source_col = source_pane_col_bounds()
-            if col < min_source_col:
-                source_selection_drag_h_edge = "left"
-            elif col > max_source_col:
-                source_selection_drag_h_edge = "right"
-            elif col == min_source_col and (previous_col > col or source_selection_drag_h_edge == "left"):
-                source_selection_drag_h_edge = "left"
-            elif col == max_source_col and (previous_col < col or source_selection_drag_h_edge == "right"):
-                source_selection_drag_h_edge = "right"
-            else:
-                source_selection_drag_h_edge = None
-            tick_source_selection_drag()
-            return True
-
-        selection_pos = source_selection_position(col, row)
-        if selection_pos is not None:
-            if is_left_down:
-                if not source_selection_drag_active:
-                    state.source_selection_anchor = selection_pos
-                state.source_selection_focus = selection_pos
-                source_selection_drag_active = True
-                source_selection_drag_pointer = (col, row)
-                source_selection_drag_edge = None
-                source_selection_drag_h_edge = None
-                state.dirty = True
-                return True
-            if state.source_selection_anchor is None:
-                reset_source_selection_drag_state()
-                return True
-            state.source_selection_focus = selection_pos
-            same_selection_pos = state.source_selection_anchor == selection_pos
-            if same_selection_pos and state.dir_preview_path is not None:
-                preview_target = directory_preview_target_for_display_line(selection_pos[0])
-                if preview_target is not None:
-                    clear_source_selection()
-                    reset_source_selection_drag_state()
-                    jump_to_path_proxy(preview_target)
-                    state.dirty = True
-                    return True
-            if same_selection_pos:
-                clicked_token = _clicked_preview_search_token(state.lines, selection_pos)
-                if clicked_token is not None:
-                    clear_source_selection()
-                    reset_source_selection_drag_state()
-                    return _open_content_search_for_token(
-                        state=state,
-                        query=clicked_token,
-                        open_tree_filter=open_tree_filter,
-                        apply_tree_filter_query=apply_tree_filter_query,
-                    )
-            copy_selected_source_range(state.source_selection_anchor, selection_pos)
-            reset_source_selection_drag_state()
-            state.dirty = True
-            return True
-
-        if is_left_up:
-            if source_selection_drag_active and state.source_selection_anchor is not None:
-                source_selection_drag_pointer = (col, row)
-                tick_source_selection_drag()
-                end_pos = state.source_selection_focus or state.source_selection_anchor
-                copy_selected_source_range(state.source_selection_anchor, end_pos)
-                state.source_selection_focus = end_pos
-                state.dirty = True
-            reset_source_selection_drag_state()
-            return True
-
-        if source_selection_drag_active:
-            # Keep live selection while dragging, even if pointer briefly leaves source pane.
-            return True
-
-        if clear_source_selection():
-            state.dirty = True
-        reset_source_selection_drag_state()
-
-        if not (
-            state.browser_visible
-            and 1 <= row <= visible_content_rows()
-            and col <= state.left_width
-        ):
-            return True
-
-        query_row_visible = state.tree_filter_active
-        if query_row_visible and row == 1:
-            state.tree_filter_editing = True
-            state.dirty = True
-            return True
-
-        raw_clicked_idx = state.tree_start + (row - 1 - (1 if query_row_visible else 0))
-        if not (0 <= raw_clicked_idx < len(state.tree_entries)):
-            return True
-
-        raw_clicked_entry = state.tree_entries[raw_clicked_idx]
-        raw_arrow_col = 1 + (raw_clicked_entry.depth * 2)
-        if is_left_down and raw_clicked_entry.is_dir and raw_arrow_col <= col <= (raw_arrow_col + 1):
-            resolved = raw_clicked_entry.path.resolve()
-            toggle_directory_entry(resolved, content_mode_toggle=True)
-            state.last_click_idx = -1
-            state.last_click_time = 0.0
-            return True
-
-        clicked_idx = coerce_tree_filter_result_index(raw_clicked_idx)
-        if clicked_idx is None:
-            return True
-
-        prev_selected = state.selected_idx
-        state.selected_idx = clicked_idx
-        preview_selected_entry()
-        if state.selected_idx != prev_selected:
-            state.dirty = True
-
-        now = time.monotonic()
-        is_double = clicked_idx == state.last_click_idx and (now - state.last_click_time) <= DOUBLE_CLICK_SECONDS
-        state.last_click_idx = clicked_idx
-        state.last_click_time = now
-        if not is_double:
-            return True
-
-        if state.tree_filter_active and state.tree_filter_query:
-            activate_tree_filter_selection()
-            return True
-
-        entry = state.tree_entries[state.selected_idx]
-        if entry.is_dir:
-            resolved = entry.path.resolve()
-            toggle_directory_entry(resolved)
-            return True
-
-        _copy_text_to_clipboard(entry.path.name)
-        state.dirty = True
-        return True
-
-    def mark_tree_watch_dirty() -> None:
-        watch_refresh.tree_signature = None
-
-    def sync_selected_target_after_tree_refresh(
-        *,
-        preferred_path: Path,
-        force_rebuild: bool = False,
-    ) -> None:
-        previous_current_path = state.current_path.resolve()
-        rebuild_tree_entries(preferred_path=preferred_path)
-        if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
-            selected_target = state.tree_entries[state.selected_idx].path.resolve()
-        else:
-            selected_target = state.tree_root.resolve()
-
-        changed_target = selected_target != previous_current_path
-        if changed_target:
-            state.current_path = selected_target
-        refresh_rendered_for_current_path(
-            reset_scroll=changed_target,
-            reset_dir_budget=changed_target,
-            force_rebuild=force_rebuild,
-        )
-        schedule_tree_filter_index_warmup()
-        refresh_git_status_overlay(force=True)
-        state.dirty = True
-
-    navigation_ops: NavigationPickerOps | None = None
-
-    def current_jump_location_proxy():
-        assert navigation_ops is not None
-        return navigation_ops.current_jump_location()
-
-    def record_jump_if_changed_proxy(origin):
-        assert navigation_ops is not None
-        return navigation_ops.record_jump_if_changed(origin)
-
-    def jump_to_path_proxy(target: Path) -> None:
-        assert navigation_ops is not None
-        navigation_ops.jump_to_path(target)
-
-    def jump_to_line_proxy(line_number: int) -> None:
-        assert navigation_ops is not None
-        navigation_ops.jump_to_line(line_number)
+    preview_selected_entry = partial(
+        _preview_selected_entry,
+        state=state,
+        clear_source_selection=clear_source_selection,
+        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+        jump_to_line=navigation_proxy.jump_to_line,
+    )
 
     tree_filter_ops = TreeFilterOps(
         state=state,
         visible_content_rows=visible_content_rows,
         rebuild_screen_lines=rebuild_screen_lines,
         preview_selected_entry=preview_selected_entry,
-        current_jump_location=current_jump_location_proxy,
-        record_jump_if_changed=record_jump_if_changed_proxy,
-        jump_to_path=jump_to_path_proxy,
-        jump_to_line=jump_to_line_proxy,
+        current_jump_location=navigation_proxy.current_jump_location,
+        record_jump_if_changed=navigation_proxy.record_jump_if_changed,
+        jump_to_path=navigation_proxy.jump_to_path,
+        jump_to_line=navigation_proxy.jump_to_line,
         on_tree_filter_state_change=sync_left_width_for_tree_filter_mode,
     )
 
@@ -1496,6 +1714,27 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     close_tree_filter = tree_filter_ops.close_tree_filter
     activate_tree_filter_selection = tree_filter_ops.activate_tree_filter_selection
     jump_to_next_content_hit = tree_filter_ops.jump_to_next_content_hit
+    sync_selected_target_after_tree_refresh = partial(
+        _sync_selected_target_after_tree_refresh,
+        state=state,
+        rebuild_tree_entries=rebuild_tree_entries,
+        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+        schedule_tree_filter_index_warmup=schedule_tree_filter_index_warmup,
+        refresh_git_status_overlay=refresh_git_status_overlay,
+    )
+    maybe_refresh_tree_watch = partial(
+        _maybe_refresh_tree_watch,
+        state=state,
+        watch_context=watch_refresh,
+        sync_selected_target_after_tree_refresh=sync_selected_target_after_tree_refresh,
+    )
+    handle_tree_mouse_wheel = partial(
+        _handle_tree_mouse_wheel,
+        state=state,
+        move_tree_selection=move_tree_selection,
+        maybe_grow_directory_preview=maybe_grow_directory_preview,
+        max_horizontal_text_offset=max_horizontal_text_offset,
+    )
 
     navigation_ops = NavigationPickerOps(
         state=state,
@@ -1510,131 +1749,42 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         visible_content_rows=visible_content_rows,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
     )
+    navigation_proxy.bind(navigation_ops)
     navigation_ops.set_open_tree_filter(open_tree_filter)
+    mouse_handlers = _TreeMouseHandlers(
+        state=state,
+        visible_content_rows=visible_content_rows,
+        source_pane_col_bounds=source_pane_col_bounds,
+        source_selection_position=source_selection_position,
+        directory_preview_target_for_display_line=directory_preview_target_for_display_line,
+        max_horizontal_text_offset=max_horizontal_text_offset,
+        maybe_grow_directory_preview=maybe_grow_directory_preview,
+        clear_source_selection=clear_source_selection,
+        copy_selected_source_range=copy_selected_source_range,
+        rebuild_tree_entries=rebuild_tree_entries,
+        mark_tree_watch_dirty=mark_tree_watch_dirty,
+        coerce_tree_filter_result_index=coerce_tree_filter_result_index,
+        preview_selected_entry=preview_selected_entry,
+        activate_tree_filter_selection=activate_tree_filter_selection,
+        open_tree_filter=open_tree_filter,
+        apply_tree_filter_query=apply_tree_filter_query,
+        jump_to_path=navigation_proxy.jump_to_path,
+    )
+    handle_tree_mouse_click = mouse_handlers.handle_tree_mouse_click
+    tick_source_selection_drag = mouse_handlers.tick_source_selection_drag
 
     current_jump_location = navigation_ops.current_jump_location
     record_jump_if_changed = navigation_ops.record_jump_if_changed
-
-    def jump_to_next_git_modified(direction: int) -> bool:
-        if direction == 0:
-            return False
-        _clear_status_message(state)
-
-        same_file_change_blocks: list[int] = []
-        if state.preview_is_git_diff and state.current_path.is_file():
-            same_file_change_blocks = _git_change_block_start_lines(state.lines)
-            if same_file_change_blocks:
-                probe_line = state.start + max(0, visible_content_rows() // 3)
-                current_block: int | None = None
-                for line_idx in same_file_change_blocks:
-                    if line_idx <= probe_line:
-                        current_block = line_idx
-                    else:
-                        break
-
-                target_line: int | None = None
-                if direction > 0:
-                    if current_block is None:
-                        target_line = same_file_change_blocks[0]
-                    else:
-                        for line_idx in same_file_change_blocks:
-                            if line_idx > current_block:
-                                target_line = line_idx
-                                break
-                else:
-                    if current_block is not None:
-                        for line_idx in reversed(same_file_change_blocks):
-                            if line_idx < current_block:
-                                target_line = line_idx
-                                break
-
-                if target_line is not None:
-                    next_start = _centered_scroll_start(
-                        target_line,
-                        state.max_start,
-                        visible_content_rows(),
-                    )
-                    if next_start != state.start:
-                        state.start = next_start
-                        return True
-
-        refresh_git_status_overlay()
-        modified_paths = sorted_git_modified_file_paths()
-        if not modified_paths:
-            return False
-
-        root = state.tree_root.resolve()
-        if state.browser_visible and state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
-            anchor_path = state.tree_entries[state.selected_idx].path.resolve()
-        else:
-            anchor_path = state.current_path.resolve()
-
-        ordered_items: list[tuple[tuple[tuple[int, str, str], ...], Path]] = []
-        for path in modified_paths:
-            rel_path = path.relative_to(root)
-            ordered_items.append((_tree_order_key_for_relative_path(rel_path), path))
-
-        try:
-            anchor_rel_path = anchor_path.relative_to(root)
-            anchor_key: tuple[tuple[int, str, str], ...] | None = _tree_order_key_for_relative_path(
-                anchor_rel_path,
-                is_dir=anchor_path.is_dir(),
-            )
-        except Exception:
-            anchor_key = None
-
-        target: Path | None = None
-        wrapped_files = False
-        if direction > 0:
-            if anchor_key is not None:
-                for item_key, path in ordered_items:
-                    if item_key > anchor_key:
-                        target = path
-                        break
-                if target is None:
-                    wrapped_files = True
-            if target is None:
-                target = ordered_items[0][1]
-        else:
-            if anchor_key is not None:
-                for item_key, path in reversed(ordered_items):
-                    if item_key < anchor_key:
-                        target = path
-                        break
-                if target is None:
-                    wrapped_files = True
-            if target is None:
-                target = ordered_items[-1][1]
-
-        if target is None:
-            return False
-
-        if target == anchor_path and same_file_change_blocks:
-            wrap_line = same_file_change_blocks[0] if direction > 0 else same_file_change_blocks[-1]
-            next_start = _centered_scroll_start(
-                wrap_line,
-                state.max_start,
-                visible_content_rows(),
-            )
-            state.start = next_start
-            _set_status_message(
-                state,
-                "wrapped to first change" if direction > 0 else "wrapped to last change",
-            )
-            return True
-
-        if target == anchor_path:
-            return False
-
-        origin = current_jump_location()
-        navigation_ops.jump_to_path(target)
-        record_jump_if_changed(origin)
-        if wrapped_files:
-            _set_status_message(
-                state,
-                "wrapped to first change" if direction > 0 else "wrapped to last change",
-            )
-        return True
+    jump_to_next_git_modified = partial(
+        _jump_to_next_git_modified,
+        state=state,
+        visible_content_rows=visible_content_rows,
+        refresh_git_status_overlay=refresh_git_status_overlay,
+        sorted_git_modified_file_paths=sorted_git_modified_file_paths,
+        current_jump_location=current_jump_location,
+        jump_to_path=navigation_ops.jump_to_path,
+        record_jump_if_changed=record_jump_if_changed,
+    )
 
     schedule_tree_filter_index_warmup()
     watch_refresh.tree_signature = build_tree_watch_signature(
