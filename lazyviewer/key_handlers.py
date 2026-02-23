@@ -59,29 +59,29 @@ def _handle_picker_mouse_wheel(state: AppState, key: str) -> None:
         state.dirty = True
 
 
-def _is_picker_tree_click(
+def _handle_picker_mouse_click(
     state: AppState,
     *,
-    col: int | None,
-    row: int | None,
+    key: str,
     visible_rows: int,
+    double_click_seconds: float,
+    activate_picker_selection: Callable[[], bool],
+    focus_query_row: bool,
 ) -> bool:
-    return (
+    col, row = _parse_mouse_col_row(key)
+    if not (
         state.browser_visible
         and col is not None
         and row is not None
         and 1 <= row <= visible_rows
         and col <= state.left_width
-    )
-
-
-def _handle_picker_list_click(
-    state: AppState,
-    *,
-    row: int,
-    double_click_seconds: float,
-    activate_picker_selection: Callable[[], bool],
-) -> bool:
+    ):
+        return False
+    if row == 1:
+        if focus_query_row:
+            state.picker_focus = "query"
+            state.dirty = True
+        return False
     clicked_idx = state.picker_list_start + (row - 2)
     if not (0 <= clicked_idx < len(state.picker_match_labels)):
         return False
@@ -152,18 +152,16 @@ def handle_picker_key(
             _handle_picker_mouse_wheel(state, key)
             return True, False
         if key.startswith("MOUSE_LEFT_DOWN:"):
-            col, row = _parse_mouse_col_row(key)
-            if not _is_picker_tree_click(state, col=col, row=row, visible_rows=visible_content_rows()):
-                return True, False
-            if row is not None and row > 1:
-                should_quit = _handle_picker_list_click(
-                    state,
-                    row=row,
-                    double_click_seconds=double_click_seconds,
-                    activate_picker_selection=activate_picker_selection,
-                )
-                if should_quit:
-                    return True, True
+            should_quit = _handle_picker_mouse_click(
+                state,
+                key=key,
+                visible_rows=visible_content_rows(),
+                double_click_seconds=double_click_seconds,
+                activate_picker_selection=activate_picker_selection,
+                focus_query_row=False,
+            )
+            if should_quit:
+                return True, True
             return True, False
         return True, False
 
@@ -205,22 +203,16 @@ def handle_picker_key(
         _handle_picker_mouse_wheel(state, key)
         return True, False
     if key.startswith("MOUSE_LEFT_DOWN:"):
-        col, row = _parse_mouse_col_row(key)
-        if not _is_picker_tree_click(state, col=col, row=row, visible_rows=visible_content_rows()):
-            return True, False
-        if row == 1:
-            state.picker_focus = "query"
-            state.dirty = True
-            return True, False
-        if row is not None:
-            should_quit = _handle_picker_list_click(
-                state,
-                row=row,
-                double_click_seconds=double_click_seconds,
-                activate_picker_selection=activate_picker_selection,
-            )
-            if should_quit:
-                return True, True
+        should_quit = _handle_picker_mouse_click(
+            state,
+            key=key,
+            visible_rows=visible_content_rows(),
+            double_click_seconds=double_click_seconds,
+            activate_picker_selection=activate_picker_selection,
+            focus_query_row=True,
+        )
+        if should_quit:
+            return True, True
         return True, False
     return True, False
 
