@@ -13,6 +13,7 @@ import shutil
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from .ansi import ANSI_ESCAPE_RE, build_screen_lines, char_display_width
@@ -174,6 +175,107 @@ def _copy_text_to_clipboard(text: str) -> bool:
         if proc.returncode == 0:
             return True
     return False
+
+
+def _parse_mouse_col_row(mouse_key: str) -> tuple[int | None, int | None]:
+    parts = mouse_key.split(":")
+    if len(parts) < 3:
+        return None, None
+    try:
+        return int(parts[1]), int(parts[2])
+    except Exception:
+        return None, None
+
+
+def _rendered_line_display_width(line: str) -> int:
+    plain = ANSI_ESCAPE_RE.sub("", line).rstrip("\r\n")
+    col = 0
+    for ch in plain:
+        col += char_display_width(ch, col)
+    return col
+
+
+def _drag_scroll_step(overshoot: int, span: int) -> int:
+    if overshoot < 1:
+        overshoot = 1
+    base_step = max(1, min(max(1, span // 2), overshoot))
+    return max(
+        1,
+        (
+            base_step * SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR
+            + SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR
+            - 1
+        )
+        // SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR,
+    )
+
+
+def _display_col_to_text_index(text: str, display_col: int) -> int:
+    if display_col <= 0:
+        return 0
+    col = 0
+    for idx, ch in enumerate(text):
+        width = char_display_width(ch, col)
+        next_col = col + width
+        if display_col < next_col:
+            return idx
+        col = next_col
+    return len(text)
+
+
+def _clicked_preview_search_token(
+    lines: list[str],
+    selection_pos: tuple[int, int],
+) -> str | None:
+    if not lines:
+        return None
+
+    line_idx, text_col = selection_pos
+    if line_idx < 0 or line_idx >= len(lines):
+        return None
+
+    plain_line = ANSI_ESCAPE_RE.sub("", lines[line_idx]).rstrip("\r\n")
+    if not plain_line:
+        return None
+
+    clicked_index = _display_col_to_text_index(plain_line, text_col)
+    candidate_indices = [clicked_index]
+    if clicked_index > 0:
+        candidate_indices.append(clicked_index - 1)
+
+    for candidate in candidate_indices:
+        if candidate < 0 or candidate >= len(plain_line):
+            continue
+        for match in _CLICK_SEARCH_TOKEN_RE.finditer(plain_line):
+            if match.start() <= candidate < match.end():
+                token = match.group(0)
+                return token if token else None
+    return None
+
+
+def _open_content_search_for_token(
+    *,
+    state: AppState,
+    query: str,
+    open_tree_filter: Callable[[str], None],
+    apply_tree_filter_query: Callable[..., None],
+) -> bool:
+    token = query.strip()
+    if not token:
+        return False
+    open_tree_filter("content")
+    apply_tree_filter_query(
+        token,
+        preview_selection=True,
+        select_first_file=True,
+    )
+    state.tree_filter_editing = False
+    state.dirty = True
+    return True
+
+
+def _line_has_newline_terminator(line: str) -> bool:
+    return line.endswith("\n") or line.endswith("\r")
 
 
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
@@ -676,27 +778,11 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         refresh_rendered_for_current_path(reset_scroll=False, reset_dir_budget=False)
         return len(state.lines) > previous_line_count
 
-    def parse_mouse_col_row(mouse_key: str) -> tuple[int | None, int | None]:
-        parts = mouse_key.split(":")
-        if len(parts) < 3:
-            return None, None
-        try:
-            return int(parts[1]), int(parts[2])
-        except Exception:
-            return None, None
-
     def preview_pane_width() -> int:
         if state.browser_visible:
             return max(1, state.right_width)
         term = shutil.get_terminal_size((80, 24))
         return max(1, term.columns - 1)
-
-    def rendered_line_display_width(line: str) -> int:
-        plain = ANSI_ESCAPE_RE.sub("", line).rstrip("\r\n")
-        col = 0
-        for ch in plain:
-            col += char_display_width(ch, col)
-        return col
 
     def max_horizontal_text_offset() -> int:
         if state.wrap_text or not state.lines:
@@ -704,7 +790,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         viewport_width = preview_pane_width()
         max_width = 0
         for line in state.lines:
-            max_width = max(max_width, rendered_line_display_width(line))
+            max_width = max(max_width, _rendered_line_display_width(line))
         return max(0, max_width - viewport_width)
 
     def source_pane_col_bounds() -> tuple[int, int]:
@@ -716,20 +802,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             pane_width = preview_pane_width()
         max_col = min_col + pane_width - 1
         return min_col, max_col
-
-    def _drag_scroll_step(overshoot: int, span: int) -> int:
-        if overshoot < 1:
-            overshoot = 1
-        base_step = max(1, min(max(1, span // 2), overshoot))
-        return max(
-            1,
-            (
-                base_step * SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR
-                + SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR
-                - 1
-            )
-            // SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR,
-        )
 
     def source_selection_position(col: int, row: int) -> tuple[int, int] | None:
         visible_rows = visible_content_rows()
@@ -751,61 +823,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             return None
         line_idx = max(0, min(state.start + row - 1, len(state.lines) - 1))
         return line_idx, text_col
-
-    def _display_col_to_text_index(text: str, display_col: int) -> int:
-        if display_col <= 0:
-            return 0
-        col = 0
-        for idx, ch in enumerate(text):
-            width = char_display_width(ch, col)
-            next_col = col + width
-            if display_col < next_col:
-                return idx
-            col = next_col
-        return len(text)
-
-    def clicked_preview_search_token(selection_pos: tuple[int, int]) -> str | None:
-        if not state.lines:
-            return None
-
-        line_idx, text_col = selection_pos
-        if line_idx < 0 or line_idx >= len(state.lines):
-            return None
-
-        plain_line = ANSI_ESCAPE_RE.sub("", state.lines[line_idx]).rstrip("\r\n")
-        if not plain_line:
-            return None
-
-        clicked_index = _display_col_to_text_index(plain_line, text_col)
-        candidate_indices = [clicked_index]
-        if clicked_index > 0:
-            candidate_indices.append(clicked_index - 1)
-
-        for candidate in candidate_indices:
-            if candidate < 0 or candidate >= len(plain_line):
-                continue
-            for match in _CLICK_SEARCH_TOKEN_RE.finditer(plain_line):
-                if match.start() <= candidate < match.end():
-                    token = match.group(0)
-                    return token if token else None
-        return None
-
-    def open_content_search_for_token(query: str) -> bool:
-        token = query.strip()
-        if not token:
-            return False
-        open_tree_filter("content")
-        apply_tree_filter_query(
-            token,
-            preview_selection=True,
-            select_first_file=True,
-        )
-        state.tree_filter_editing = False
-        state.dirty = True
-        return True
-
-    def _line_has_newline_terminator(line: str) -> bool:
-        return line.endswith("\n") or line.endswith("\r")
 
     def display_line_to_source_line(display_idx: int) -> int | None:
         if display_idx < 0 or display_idx >= len(state.lines):
@@ -986,7 +1003,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         if not (is_vertical or is_horizontal):
             return False
 
-        col, _row = parse_mouse_col_row(mouse_key)
+        col, _row = _parse_mouse_col_row(mouse_key)
 
         if is_horizontal:
             if state.browser_visible and col is not None and col <= state.left_width:
@@ -1023,7 +1040,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         if not (is_left_down or is_left_up):
             return False
 
-        col, row = parse_mouse_col_row(mouse_key)
+        col, row = _parse_mouse_col_row(mouse_key)
         if col is None or row is None:
             return True
 
@@ -1104,11 +1121,16 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     state.dirty = True
                     return True
             if state.source_selection_anchor == selection_pos:
-                clicked_token = clicked_preview_search_token(selection_pos)
+                clicked_token = _clicked_preview_search_token(state.lines, selection_pos)
                 if clicked_token is not None:
                     clear_source_selection()
                     reset_source_selection_drag_state()
-                    return open_content_search_for_token(clicked_token)
+                    return _open_content_search_for_token(
+                        state=state,
+                        query=clicked_token,
+                        open_tree_filter=open_tree_filter,
+                        apply_tree_filter_query=apply_tree_filter_query,
+                    )
             copy_selected_source_range(state.source_selection_anchor, selection_pos)
             reset_source_selection_drag_state()
             state.dirty = True
