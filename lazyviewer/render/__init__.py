@@ -11,9 +11,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line, slice_ansi_line
+from ..ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line
 from ..preview import rendering as preview_rendering
-from ..symbols import SymbolEntry
 from .help import (
     help_panel_lines,
     help_panel_row_count,
@@ -22,8 +21,6 @@ from .help import (
 from ..tree import TreeEntry, clamp_left_width, format_tree_entry
 
 FILTER_SPINNER_FRAMES: tuple[str, ...] = ("|", "/", "-", "\\")
-SOURCE_SELECTION_BG_SGR = "48;2;58;92;188"
-DIFF_REMOVED_BG_SGR = preview_rendering.DIFF_REMOVED_BG_SGR
 
 
 @dataclass
@@ -138,42 +135,6 @@ def _help_line(lines: tuple[str, ...], row: int) -> str:
     return ""
 
 
-def _plain_display_width(text: str) -> int:
-    return sum(char_display_width(ch, 0) for ch in text)
-
-
-def _ansi_display_width(text: str) -> int:
-    return _plain_display_width(ANSI_ESCAPE_RE.sub("", text))
-
-
-def _underline_with_ansi(text: str) -> str:
-    if not text:
-        return text
-
-    out: list[str] = ["\033[4m"]
-    idx = 0
-    while idx < len(text):
-        if text[idx] == "\x1b":
-            match = ANSI_ESCAPE_RE.match(text, idx)
-            if match is not None:
-                seq = match.group(0)
-                if seq.endswith("m"):
-                    params = seq[2:-1]
-                    if params:
-                        out.append(f"\033[{params};4m")
-                    else:
-                        out.append("\033[4m")
-                else:
-                    out.append(seq)
-                idx = match.end()
-                continue
-        out.append(text[idx])
-        idx += 1
-
-    out.append("\033[24m")
-    return "".join(out)
-
-
 def build_status_line(left_text: str, width: int, right_text: str = "│ ? Help") -> str:
     usable = max(1, width - 1)
     if usable <= len(right_text):
@@ -198,448 +159,9 @@ def _compose_status_left_text(
     return f"{base} · {status_message}"
 
 
-def _format_sticky_header_line(source_line: str, width: int) -> str:
-    if width <= 0:
-        return ""
-
-    line_text = clip_ansi_line(source_line, width)
-    underlined_line = _underline_with_ansi(line_text)
-    line_width = _ansi_display_width(line_text)
-    if line_width >= width:
-        return underlined_line
-
-    separator = "─" * (width - line_width)
-    return f"{underlined_line}\033[2;38;5;245m{separator}\033[0m"
-
-
-def _iter_diff_logical_line_ranges(
-    text_lines: list[str],
-    wrap_text: bool,
-) -> list[tuple[int, int]]:
-    return preview_rendering.iter_diff_logical_line_ranges(text_lines, wrap_text)
-
-
-def _diff_preview_uses_plain_markers(
-    text_lines: list[str],
-    wrap_text: bool,
-) -> bool:
-    return preview_rendering.diff_preview_uses_plain_markers(text_lines, wrap_text)
-
-
-def _diff_preview_logical_line_is_removed(
-    first_chunk: str,
-    use_plain_markers: bool,
-) -> bool:
-    return preview_rendering.diff_preview_logical_line_is_removed(first_chunk, use_plain_markers)
-
-
-def _diff_source_line_for_display_index(
-    text_lines: list[str],
-    display_index: int,
-    wrap_text: bool,
-) -> int:
-    return preview_rendering.diff_source_line_for_display_index(text_lines, display_index, wrap_text)
-
-
-def _source_line_display_index(
-    text_lines: list[str],
-    source_line: int,
-    wrap_text: bool,
-    preview_is_git_diff: bool = False,
-) -> int | None:
-    return preview_rendering.source_line_display_index(
-        text_lines,
-        source_line,
-        wrap_text,
-        preview_is_git_diff=preview_is_git_diff,
-    )
-
-
-def _source_line_raw_text(
-    text_lines: list[str],
-    source_line: int,
-    wrap_text: bool,
-    preview_is_git_diff: bool = False,
-) -> str:
-    return preview_rendering.source_line_raw_text(
-        text_lines,
-        source_line,
-        wrap_text,
-        preview_is_git_diff=preview_is_git_diff,
-    )
-
-
-def _source_line_is_blank(
-    text_lines: list[str],
-    source_line: int,
-    wrap_text: bool,
-    preview_is_git_diff: bool = False,
-) -> bool:
-    return preview_rendering.source_line_is_blank(
-        text_lines,
-        source_line,
-        wrap_text,
-        preview_is_git_diff=preview_is_git_diff,
-    )
-
-
-def _source_line_count(
-    text_lines: list[str],
-    wrap_text: bool,
-    preview_is_git_diff: bool = False,
-) -> int:
-    return preview_rendering.source_line_count(
-        text_lines,
-        wrap_text,
-        preview_is_git_diff=preview_is_git_diff,
-    )
-
-
-def _next_nonblank_source_line(
-    text_lines: list[str],
-    start_line: int,
-    wrap_text: bool,
-    preview_is_git_diff: bool = False,
-) -> int | None:
-    return preview_rendering.next_nonblank_source_line(
-        text_lines,
-        start_line,
-        wrap_text,
-        preview_is_git_diff=preview_is_git_diff,
-    )
-
-
-def _leading_indent_columns(text: str) -> int:
-    return preview_rendering.leading_indent_columns(text)
-
-
-def _blank_line_exits_symbol_scope(
-    text_lines: list[str],
-    source_line: int,
-    wrap_text: bool,
-    current_path: Path,
-    sticky_symbol: SymbolEntry,
-    preview_is_git_diff: bool = False,
-) -> bool:
-    return preview_rendering.blank_line_exits_symbol_scope(
-        text_lines,
-        source_line,
-        wrap_text,
-        current_path,
-        sticky_symbol,
-        preview_is_git_diff=preview_is_git_diff,
-    )
-
-
-def _source_line_exits_symbol_scope(
-    text_lines: list[str],
-    source_line: int,
-    wrap_text: bool,
-    current_path: Path,
-    sticky_symbol: SymbolEntry,
-    preview_is_git_diff: bool = False,
-) -> bool:
-    return preview_rendering.source_line_exits_symbol_scope(
-        text_lines,
-        source_line,
-        wrap_text,
-        current_path,
-        sticky_symbol,
-        preview_is_git_diff=preview_is_git_diff,
-    )
-
-
-def sticky_symbol_headers_for_position(
-    text_lines: list[str],
-    text_start: int,
-    content_rows: int,
-    current_path: Path,
-    wrap_text: bool,
-    preview_is_git_diff: bool,
-) -> list[SymbolEntry]:
-    return preview_rendering.sticky_symbol_headers_for_position(
-        text_lines,
-        text_start,
-        content_rows,
-        current_path,
-        wrap_text,
-        preview_is_git_diff,
-    )
-
-
-def _extract_source_line_text(
-    text_lines: list[str],
-    source_line: int,
-    width: int,
-    wrap_text: bool,
-    text_x: int,
-    preview_is_git_diff: bool = False,
-) -> str:
-    return preview_rendering.extract_source_line_text(
-        text_lines,
-        source_line,
-        width,
-        wrap_text,
-        text_x,
-        preview_is_git_diff=preview_is_git_diff,
-    )
-
-
-def _sticky_source_lines(
-    text_lines: list[str],
-    sticky_symbols: list[SymbolEntry],
-    width: int,
-    wrap_text: bool,
-    text_x: int,
-    preview_is_git_diff: bool = False,
-) -> list[str]:
-    return preview_rendering.sticky_source_lines(
-        text_lines,
-        sticky_symbols,
-        width,
-        wrap_text,
-        text_x,
-        preview_is_git_diff=preview_is_git_diff,
-    )
-
-
-def _scroll_percent(text_start: int, total_lines: int, visible_rows: int) -> float:
-    if total_lines <= 0:
-        return 0.0
-    max_start = max(0, total_lines - max(1, visible_rows))
-    if max_start <= 0:
-        return 0.0
-    clamped_start = max(0, min(text_start, max_start))
-    return (clamped_start / max_start) * 100.0
-
-
-def _line_has_newline_terminator(line: str) -> bool:
-    return preview_rendering.line_has_newline_terminator(line)
-
-
-def _status_line_range(
-    text_lines: list[str],
-    text_start: int,
-    content_rows: int,
-    wrap_text: bool,
-) -> tuple[int, int, int]:
-    return preview_rendering.status_line_range(text_lines, text_start, content_rows, wrap_text)
-
-
-def _highlight_ansi_substrings(
-    text: str,
-    query: str,
-    current_column: int | None = None,
-    has_current_target: bool = False,
-) -> str:
-    if not text or not query:
-        return text
-
-    visible_chars: list[str] = []
-    visible_start: list[int] = []
-    visible_end: list[int] = []
-
-    i = 0
-    n = len(text)
-    while i < n:
-        if text[i] == "\x1b":
-            match = ANSI_ESCAPE_RE.match(text, i)
-            if match:
-                i = match.end()
-                continue
-        visible_start.append(i)
-        visible_chars.append(text[i])
-        i += 1
-        visible_end.append(i)
-
-    if not visible_chars:
-        return text
-
-    visible_text = "".join(visible_chars)
-    folded_text = visible_text.casefold()
-    folded_query = query.casefold()
-    if not folded_query:
-        return text
-
-    spans: list[tuple[int, int]] = []
-    cursor = 0
-    while True:
-        idx = folded_text.find(folded_query, cursor)
-        if idx < 0:
-            break
-        end = idx + len(query)
-        spans.append((idx, end))
-        cursor = end
-
-    if not spans:
-        return text
-
-    current_idx: int | None = None
-    if has_current_target and current_column is not None and spans:
-        target = max(0, current_column - 1)
-        for idx, (start_vis, end_vis) in enumerate(spans):
-            if start_vis <= target < end_vis:
-                current_idx = idx
-                break
-        if current_idx is None:
-            for idx, (start_vis, _end_vis) in enumerate(spans):
-                if start_vis >= target:
-                    current_idx = idx
-                    break
-        if current_idx is None:
-            current_idx = len(spans) - 1
-
-    primary_start = "\033[7;1m"
-    primary_end = "\033[27;22m"
-    secondary_start = "\033[1m"
-    secondary_end = "\033[22m"
-
-    out: list[str] = []
-    raw_cursor = 0
-    for span_idx, (start_vis, end_vis) in enumerate(spans):
-        if start_vis >= len(visible_start) or end_vis <= 0:
-            continue
-        start_raw = visible_start[start_vis]
-        end_raw = visible_end[min(len(visible_end) - 1, end_vis - 1)]
-        out.append(text[raw_cursor:start_raw])
-        if has_current_target:
-            if current_idx is not None and span_idx == current_idx:
-                out.append(primary_start)
-            else:
-                out.append(secondary_start)
-        else:
-            out.append(primary_start)
-        out.append(text[start_raw:end_raw])
-        if has_current_target:
-            if current_idx is not None and span_idx == current_idx:
-                out.append(primary_end)
-            else:
-                out.append(secondary_end)
-        else:
-            out.append(primary_end)
-        raw_cursor = end_raw
-    out.append(text[raw_cursor:])
-    return "".join(out)
-
-
-def _highlight_segment_with_background(text: str) -> str:
-    if not text:
-        return text
-    out: list[str] = [f"\033[{SOURCE_SELECTION_BG_SGR}m"]
-    idx = 0
-    while idx < len(text):
-        if text[idx] == "\x1b":
-            match = ANSI_ESCAPE_RE.match(text, idx)
-            if match is not None:
-                seq = match.group(0)
-                if seq.endswith("m"):
-                    params = seq[2:-1]
-                    if params:
-                        out.append(f"\033[{params};{SOURCE_SELECTION_BG_SGR}m")
-                    else:
-                        out.append(f"\033[{SOURCE_SELECTION_BG_SGR}m")
-                else:
-                    out.append(seq)
-                idx = match.end()
-                continue
-        out.append(text[idx])
-        idx += 1
-    out.append("\033[49m")
-    return "".join(out)
-
-
-def _highlight_ansi_column_range(text: str, start_col: int, end_col: int) -> str:
-    if not text:
-        return text
-    if end_col <= start_col:
-        return text
-
-    visible_start: list[int] = []
-    visible_end: list[int] = []
-
-    i = 0
-    n = len(text)
-    while i < n:
-        if text[i] == "\x1b":
-            match = ANSI_ESCAPE_RE.match(text, i)
-            if match:
-                i = match.end()
-                continue
-        visible_start.append(i)
-        i += 1
-        visible_end.append(i)
-
-    if not visible_start:
-        return text
-
-    start_idx = max(0, start_col)
-    end_idx = min(len(visible_start), end_col)
-    if end_idx <= start_idx:
-        return text
-
-    raw_start = visible_start[start_idx]
-    raw_end = visible_end[end_idx - 1]
-    return (
-        text[:raw_start]
-        + _highlight_segment_with_background(text[raw_start:raw_end])
-        + text[raw_end:]
-    )
-
-
-def _normalized_selection_range(
-    anchor: tuple[int, int] | None,
-    focus: tuple[int, int] | None,
-) -> tuple[tuple[int, int], tuple[int, int]] | None:
-    if anchor is None and focus is None:
-        return None
-    if anchor is None:
-        anchor = focus
-    if focus is None:
-        focus = anchor
-    assert anchor is not None and focus is not None
-    if focus < anchor:
-        anchor, focus = focus, anchor
-    return anchor, focus
-
-
-def _selection_span_for_rendered_line(
-    line_idx: int,
-    line_plain_length: int,
-    selection_range: tuple[tuple[int, int], tuple[int, int]] | None,
-    viewport_start_col: int,
-    viewport_end_col: int,
-) -> tuple[int, int] | None:
-    if selection_range is None:
-        return None
-
-    (start_line, start_col), (end_line, end_col) = selection_range
-    if line_idx < start_line or line_idx > end_line:
-        return None
-
-    if start_line == end_line:
-        abs_start = max(0, min(start_col, line_plain_length))
-        abs_end = max(abs_start, min(end_col, line_plain_length))
-    elif line_idx == start_line:
-        abs_start = max(0, min(start_col, line_plain_length))
-        abs_end = line_plain_length
-    elif line_idx == end_line:
-        abs_start = 0
-        abs_end = max(0, min(end_col, line_plain_length))
-    else:
-        abs_start = 0
-        abs_end = line_plain_length
-
-    if abs_end <= abs_start:
-        if line_plain_length <= abs_start:
-            return None
-        abs_end = abs_start + 1
-
-    visible_start = max(abs_start, viewport_start_col)
-    visible_end = min(abs_end, viewport_end_col)
-    if visible_end <= visible_start:
-        return None
-
-    return visible_start - viewport_start_col, visible_end - viewport_start_col
+# Compatibility aliases for tests and external imports.
+_source_line_raw_text = preview_rendering.source_line_raw_text
+sticky_symbol_headers_for_position = preview_rendering.sticky_symbol_headers_for_position
 
 
 def _format_tree_filter_status(
@@ -733,7 +255,7 @@ def render_dual_page(
     )
     content_rows = max(1, max_lines - help_rows)
     has_current_text_hit = text_search_current_line > 0 and text_search_current_column > 0
-    selection_range = _normalized_selection_range(source_selection_anchor, source_selection_focus)
+    selection_range = preview_rendering.normalized_selection_range(source_selection_anchor, source_selection_focus)
 
     sticky_symbols = sticky_symbol_headers_for_position(
         text_lines=text_lines,
@@ -746,21 +268,18 @@ def render_dual_page(
 
     if not browser_visible:
         line_width = max(1, width - 1)
-        sticky_headers = [
-            _format_sticky_header_line(line, line_width)
-            for line in _sticky_source_lines(
-                text_lines,
-                sticky_symbols,
-                line_width,
-                wrap_text,
-                text_x,
-                preview_is_git_diff=preview_is_git_diff,
-            )
-        ]
+        sticky_headers = preview_rendering.formatted_sticky_headers(
+            text_lines,
+            sticky_symbols,
+            line_width,
+            wrap_text,
+            text_x,
+            preview_is_git_diff=preview_is_git_diff,
+        )
         sticky_header_rows = len(sticky_headers)
         text_content_rows = max(1, content_rows - sticky_header_rows)
-        text_percent = _scroll_percent(text_start, len(text_lines), text_content_rows)
-        status_start, status_end, status_total = _status_line_range(
+        text_percent = preview_rendering.scroll_percent(text_start, len(text_lines), text_content_rows)
+        status_start, status_end, status_total = preview_rendering.status_line_range(
             text_lines,
             text_start,
             text_content_rows,
@@ -777,36 +296,18 @@ def render_dual_page(
 
             text_idx = text_start + row
             if text_idx < len(text_lines):
-                full_line = text_lines[text_idx].rstrip("\r\n")
-                line_plain_length = len(ANSI_ESCAPE_RE.sub("", full_line))
-                if wrap_text:
-                    text_raw = clip_ansi_line(full_line, line_width)
-                    viewport_start_col = 0
-                    viewport_end_col = line_width
-                else:
-                    text_raw = slice_ansi_line(full_line, text_x, line_width)
-                    viewport_start_col = text_x
-                    viewport_end_col = text_x + line_width
-                current_col = text_search_current_column if text_idx + 1 == text_search_current_line else None
-                text_raw = _highlight_ansi_substrings(
-                    text_raw,
-                    text_search_query,
-                    current_column=current_col,
-                    has_current_target=has_current_text_hit,
-                )
-                selection_span = _selection_span_for_rendered_line(
+                text_raw = preview_rendering.rendered_preview_row(
+                    text_lines,
                     text_idx,
-                    line_plain_length,
+                    line_width,
+                    wrap_text,
+                    text_x,
+                    text_search_query,
+                    text_search_current_line,
+                    text_search_current_column,
+                    has_current_text_hit,
                     selection_range,
-                    viewport_start_col,
-                    viewport_end_col,
                 )
-                if selection_span is not None:
-                    text_raw = _highlight_ansi_column_range(
-                        text_raw,
-                        selection_span[0],
-                        selection_span[1],
-                    )
                 out.append(text_raw)
                 if "\033" in text_raw:
                     out.append("\033[0m")
@@ -835,22 +336,19 @@ def render_dual_page(
     left_width = clamp_left_width(width, left_width)
     divider_width = 1
     right_width = max(1, width - left_width - divider_width - 1)
-    sticky_headers = [
-        _format_sticky_header_line(line, right_width)
-        for line in _sticky_source_lines(
-            text_lines,
-            sticky_symbols,
-            right_width,
-            wrap_text,
-            text_x,
-            preview_is_git_diff=preview_is_git_diff,
-        )
-    ]
+    sticky_headers = preview_rendering.formatted_sticky_headers(
+        text_lines,
+        sticky_symbols,
+        right_width,
+        wrap_text,
+        text_x,
+        preview_is_git_diff=preview_is_git_diff,
+    )
     sticky_header_rows = len(sticky_headers)
     text_content_rows = max(1, content_rows - sticky_header_rows)
 
-    text_percent = _scroll_percent(text_start, len(text_lines), text_content_rows)
-    status_start, status_end, status_total = _status_line_range(
+    text_percent = preview_rendering.scroll_percent(text_start, len(text_lines), text_content_rows)
+    status_start, status_end, status_total = preview_rendering.status_line_range(
         text_lines,
         text_start,
         text_content_rows,
@@ -949,36 +447,18 @@ def render_dual_page(
         else:
             text_idx = text_start + row
             if text_idx < len(text_lines):
-                full_line = text_lines[text_idx].rstrip("\r\n")
-                line_plain_length = len(ANSI_ESCAPE_RE.sub("", full_line))
-                if wrap_text:
-                    text_raw = clip_ansi_line(full_line, right_width)
-                    viewport_start_col = 0
-                    viewport_end_col = right_width
-                else:
-                    text_raw = slice_ansi_line(full_line, text_x, right_width)
-                    viewport_start_col = text_x
-                    viewport_end_col = text_x + right_width
-                current_col = text_search_current_column if text_idx + 1 == text_search_current_line else None
-                text_raw = _highlight_ansi_substrings(
-                    text_raw,
-                    text_search_query,
-                    current_column=current_col,
-                    has_current_target=has_current_text_hit,
-                )
-                selection_span = _selection_span_for_rendered_line(
+                text_raw = preview_rendering.rendered_preview_row(
+                    text_lines,
                     text_idx,
-                    line_plain_length,
+                    right_width,
+                    wrap_text,
+                    text_x,
+                    text_search_query,
+                    text_search_current_line,
+                    text_search_current_column,
+                    has_current_text_hit,
                     selection_range,
-                    viewport_start_col,
-                    viewport_end_col,
                 )
-                if selection_span is not None:
-                    text_raw = _highlight_ansi_column_range(
-                        text_raw,
-                        selection_span[0],
-                        selection_span[1],
-                    )
                 out.append(text_raw)
                 if "\033" in text_raw:
                     out.append("\033[0m")
