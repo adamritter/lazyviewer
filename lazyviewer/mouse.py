@@ -17,6 +17,10 @@ SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR = 2
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR = 1
 _TRAILING_GIT_BADGES_RE = re.compile(r"^(.*?)(?:\s(?:\[(?:M|\?)\])+)$")
 _CLICK_SEARCH_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
+_FROM_IMPORT_RE = re.compile(
+    r"^\s*from\s+(?P<module>\.+[A-Za-z_][A-Za-z0-9_\.]*|\.+|[A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+(?P<imports>.+?)\s*$"
+)
+_IMPORT_RE = re.compile(r"^\s*import\s+(?P<modules>.+?)\s*$")
 
 
 def _parse_mouse_col_row(mouse_key: str) -> tuple[int | None, int | None]:
@@ -73,6 +77,16 @@ def _clicked_preview_search_token(
     lines: list[str],
     selection_pos: tuple[int, int],
 ) -> str | None:
+    details = _clicked_preview_token_details(lines, selection_pos)
+    if details is not None:
+        return details[0]
+    return None
+
+
+def _clicked_preview_token_details(
+    lines: list[str],
+    selection_pos: tuple[int, int],
+) -> tuple[str, int, int, str, int] | None:
     if not lines:
         return None
 
@@ -95,7 +109,104 @@ def _clicked_preview_search_token(
         for match in _CLICK_SEARCH_TOKEN_RE.finditer(plain_line):
             if match.start() <= candidate < match.end():
                 token = match.group(0)
-                return token if token else None
+                if token:
+                    return token, match.start(), match.end(), plain_line, candidate
+    return None
+
+
+def _resolve_module_spec_to_path(
+    state: AppState,
+    module_spec: str,
+) -> Path | None:
+    if not module_spec:
+        return None
+    if not state.current_path.resolve().is_file():
+        return None
+
+    current_file = state.current_path.resolve()
+    module_base: Path
+    if module_spec.startswith("."):
+        leading_dots = len(module_spec) - len(module_spec.lstrip("."))
+        relative_part = module_spec[leading_dots:]
+        module_base = current_file.parent
+        for _ in range(max(0, leading_dots - 1)):
+            module_base = module_base.parent
+        if relative_part:
+            module_base = module_base.joinpath(*[part for part in relative_part.split(".") if part])
+    else:
+        module_base = state.tree_root.resolve().joinpath(*[part for part in module_spec.split(".") if part])
+
+    candidates: list[Path] = []
+    if module_base.suffix == ".py":
+        candidates.append(module_base)
+    else:
+        candidates.append(module_base.with_suffix(".py"))
+        candidates.append(module_base / "__init__.py")
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            resolved = candidate
+        if resolved.exists() and resolved.is_file():
+            return resolved
+    return None
+
+
+def _clicked_preview_import_target(
+    state: AppState,
+    lines: list[str],
+    selection_pos: tuple[int, int],
+) -> Path | None:
+    details = _clicked_preview_token_details(lines, selection_pos)
+    if details is None:
+        return None
+    token, token_start, _token_end, plain_line, clicked_index = details
+    if not token:
+        return None
+
+    line_without_comment = plain_line.split("#", 1)[0].rstrip()
+    if not line_without_comment:
+        return None
+
+    module_candidates: list[str] = []
+    from_match = _FROM_IMPORT_RE.match(line_without_comment)
+    if from_match is not None:
+        module_part = from_match.group("module")
+        if from_match.start("module") <= clicked_index < from_match.end("module"):
+            module_candidates.append(module_part)
+        elif from_match.start("imports") <= clicked_index < from_match.end("imports"):
+            import_prefix = line_without_comment[from_match.start("imports") : token_start]
+            if not import_prefix.rstrip().endswith(" as"):
+                if module_part.startswith("."):
+                    module_candidates.append(f"{module_part}{token}")
+                else:
+                    module_candidates.append(f"{module_part}.{token}")
+                module_candidates.append(module_part)
+
+    import_match = _IMPORT_RE.match(line_without_comment)
+    if import_match is not None and import_match.start("modules") <= clicked_index < import_match.end("modules"):
+        left = clicked_index
+        right = clicked_index
+        while left > import_match.start("modules") and (
+            line_without_comment[left - 1].isalnum() or line_without_comment[left - 1] in "._"
+        ):
+            left -= 1
+        while right < import_match.end("modules") and (
+            line_without_comment[right].isalnum() or line_without_comment[right] in "._"
+        ):
+            right += 1
+        module_expr = line_without_comment[left:right].strip(".")
+        if module_expr:
+            module_candidates.append(module_expr)
+
+    seen_modules: set[str] = set()
+    for module_spec in module_candidates:
+        if module_spec in seen_modules:
+            continue
+        seen_modules.add(module_spec)
+        target = _resolve_module_spec_to_path(state, module_spec)
+        if target is not None:
+            return target
     return None
 
 
@@ -556,6 +667,13 @@ class TreeMouseHandlers:
                     state.dirty = True
                     return True
             if same_selection_pos:
+                import_target = _clicked_preview_import_target(state, state.lines, selection_pos)
+                if import_target is not None:
+                    self._clear_source_selection()
+                    self._reset_source_selection_drag_state()
+                    self._jump_to_path(import_target)
+                    state.dirty = True
+                    return True
                 clicked_token = _clicked_preview_search_token(state.lines, selection_pos)
                 if clicked_token is not None:
                     self._clear_source_selection()
@@ -642,4 +760,3 @@ class TreeMouseHandlers:
         self._copy_text_to_clipboard(entry.path.name)
         state.dirty = True
         return True
-

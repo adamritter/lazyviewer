@@ -742,6 +742,79 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertEqual(snapshots["selected_kind"], "search_hit")
             self.assertEqual(snapshots["selected_path"], file_path.resolve())
 
+    def test_single_click_relative_import_module_in_preview_jumps_to_module_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            file_path = root / "demo.py"
+            target_module = root / "mouse.py"
+            file_path.write_text("from .mouse import TreeMouseHandlers\n", encoding="utf-8")
+            target_module.write_text("class TreeMouseHandlers:\n    pass\n", encoding="utf-8")
+            search_calls: list[str] = []
+            snapshots: dict[str, object] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_search_content(_root, query, _show_hidden, **_kwargs):
+                search_calls.append(query)
+                return {}, False, None
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
+                right_start_col = state.left_width + 2
+                target_row: int | None = None
+                target_col: int | None = None
+
+                for idx, line in enumerate(state.lines):
+                    plain = app_runtime.ANSI_ESCAPE_RE.sub("", line).rstrip("\r\n")
+                    token_start = plain.find("mouse")
+                    if token_start >= 0 and plain.lstrip().startswith("from .mouse import"):
+                        target_row = idx + 1
+                        target_col = right_start_col + token_start + 1
+                        break
+
+                self.assertIsNotNone(target_row)
+                self.assertIsNotNone(target_col)
+                assert target_row is not None
+                assert target_col is not None
+
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{target_col}:{target_row}")
+                handle_tree_mouse_click(f"MOUSE_LEFT_UP:{target_col}:{target_row}")
+
+                snapshots["current_path"] = state.current_path.resolve()
+                snapshots["selected_path"] = state.tree_entries[state.selected_idx].path.resolve()
+                snapshots["tree_filter_active"] = state.tree_filter_active
+
+            with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
+            ), mock.patch(
+                "lazyviewer.tree_filter.search_project_content_rg", side_effect=fake_search_content
+            ), mock.patch(
+                "lazyviewer.app_runtime.collect_project_file_labels", return_value=[]
+            ), mock.patch(
+                "lazyviewer.app_runtime.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.app_runtime.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.app_runtime.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", file_path, "monokai", True, False)
+
+            self.assertEqual(search_calls, [])
+            self.assertFalse(bool(snapshots["tree_filter_active"]))
+            self.assertEqual(snapshots["current_path"], target_module.resolve())
+            self.assertEqual(snapshots["selected_path"], target_module.resolve())
+
     def test_clicking_directory_name_in_preview_selects_it_in_tree(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
