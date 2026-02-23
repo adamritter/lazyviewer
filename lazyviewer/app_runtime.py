@@ -16,32 +16,32 @@ from functools import partial
 from pathlib import Path
 
 from .ansi import ANSI_ESCAPE_RE, build_screen_lines
-from .app_runtime_git_jumps import (
+from .git_jumps import (
     _GitModifiedJumpDeps,
     _jump_to_next_git_modified,
     _sorted_git_modified_file_paths,
 )
-from .app_runtime_mouse import (
+from .mouse import (
     _SourcePaneOps,
     _TreeMouseCallbacks,
     _TreeMouseHandlers,
     _copy_selected_source_range,
     _handle_tree_mouse_wheel,
 )
-from .app_runtime_tree_sync import (
+from .tree_sync import (
     _PreviewSelectionDeps,
     _TreeRefreshSyncDeps,
     _preview_selected_entry,
     _sync_selected_target_after_tree_refresh,
 )
-from .app_runtime_index_warmup import _TreeFilterIndexWarmupScheduler
-from .app_runtime_layout import _PagerLayoutOps
-from .app_runtime_utils import (
+from .index_warmup import _TreeFilterIndexWarmupScheduler
+from .layout import _PagerLayoutOps
+from .screen_utils import (
     _centered_scroll_start,
     _first_git_change_screen_line,
     _tree_order_key_for_relative_path,
 )
-from .app_runtime_watch import (
+from .watch_refresh import (
     _WatchRefreshContext,
     _mark_tree_watch_dirty,
     _maybe_refresh_git_watch,
@@ -69,9 +69,9 @@ from .preview import (
     clear_directory_preview_cache,
 )
 from .render import help_panel_row_count
-from .runtime_loop import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
-from .runtime_navigation import NavigationPickerDeps, NavigationPickerOps
-from .runtime_tree_filter import TreeFilterDeps, TreeFilterOps
+from .loop import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
+from .picker_navigation import NavigationPickerDeps, NavigationPickerOps
+from .tree_filter import TreeFilterDeps, TreeFilterOps
 from .search.fuzzy import collect_project_file_labels
 from .state import AppState
 from .terminal import TerminalController
