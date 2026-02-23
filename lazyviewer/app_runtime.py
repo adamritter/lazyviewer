@@ -1026,6 +1026,27 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         col, row = parse_mouse_col_row(mouse_key)
         if col is None or row is None:
             return True
+
+        def toggle_directory_entry(
+            resolved: Path,
+            *,
+            content_mode_toggle: bool = False,
+        ) -> None:
+            nonlocal tree_watch_signature
+            if content_mode_toggle and state.tree_filter_active and state.tree_filter_mode == "content":
+                if resolved in state.tree_filter_collapsed_dirs:
+                    state.tree_filter_collapsed_dirs.remove(resolved)
+                    state.expanded.add(resolved)
+                else:
+                    if resolved != state.tree_root:
+                        state.tree_filter_collapsed_dirs.add(resolved)
+                    state.expanded.discard(resolved)
+            else:
+                state.expanded.symmetric_difference_update({resolved})
+            rebuild_tree_entries(preferred_path=resolved)
+            tree_watch_signature = None
+            state.dirty = True
+
         if source_selection_drag_active and is_left_down:
             visible_rows = visible_content_rows()
             previous_row = source_selection_drag_pointer[1] if source_selection_drag_pointer is not None else row
@@ -1074,15 +1095,14 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 reset_source_selection_drag_state()
                 return True
             state.source_selection_focus = selection_pos
-            preview_target = None
             if state.source_selection_anchor == selection_pos and state.dir_preview_path is not None:
                 preview_target = directory_preview_target_for_display_line(selection_pos[0])
-            if preview_target is not None:
-                clear_source_selection()
-                reset_source_selection_drag_state()
-                jump_to_path_proxy(preview_target)
-                state.dirty = True
-                return True
+                if preview_target is not None:
+                    clear_source_selection()
+                    reset_source_selection_drag_state()
+                    jump_to_path_proxy(preview_target)
+                    state.dirty = True
+                    return True
             if state.source_selection_anchor == selection_pos:
                 clicked_token = clicked_preview_search_token(selection_pos)
                 if clicked_token is not None:
@@ -1134,24 +1154,9 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         raw_arrow_col = 1 + (raw_clicked_entry.depth * 2)
         if is_left_down and raw_clicked_entry.is_dir and raw_arrow_col <= col <= (raw_arrow_col + 1):
             resolved = raw_clicked_entry.path.resolve()
-            if state.tree_filter_active and state.tree_filter_mode == "content":
-                if resolved in state.tree_filter_collapsed_dirs:
-                    state.tree_filter_collapsed_dirs.remove(resolved)
-                    state.expanded.add(resolved)
-                else:
-                    if resolved != state.tree_root:
-                        state.tree_filter_collapsed_dirs.add(resolved)
-                    state.expanded.discard(resolved)
-            else:
-                if resolved in state.expanded:
-                    state.expanded.remove(resolved)
-                else:
-                    state.expanded.add(resolved)
-            rebuild_tree_entries(preferred_path=resolved)
-            tree_watch_signature = None
+            toggle_directory_entry(resolved, content_mode_toggle=True)
             state.last_click_idx = -1
             state.last_click_time = 0.0
-            state.dirty = True
             return True
 
         clicked_idx = coerce_tree_filter_result_index(raw_clicked_idx)
@@ -1178,13 +1183,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         entry = state.tree_entries[state.selected_idx]
         if entry.is_dir:
             resolved = entry.path.resolve()
-            if resolved in state.expanded:
-                state.expanded.remove(resolved)
-            else:
-                state.expanded.add(resolved)
-            rebuild_tree_entries(preferred_path=resolved)
-            tree_watch_signature = None
-            state.dirty = True
+            toggle_directory_entry(resolved)
             return True
 
         _copy_text_to_clipboard(entry.path.name)
