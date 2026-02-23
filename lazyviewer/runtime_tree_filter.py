@@ -99,14 +99,10 @@ class TreeFilterOps:
         return 0
 
     def tree_filter_prompt_prefix(self) -> str:
-        if self.state.tree_filter_mode == "content":
-            return "/>"
-        return "p>"
+        return "/>" if self.state.tree_filter_mode == "content" else "p>"
 
     def tree_filter_placeholder(self) -> str:
-        if self.state.tree_filter_mode == "content":
-            return "type to search content"
-        return "type to filter files"
+        return "type to search content" if self.state.tree_filter_mode == "content" else "type to filter files"
 
     def tree_view_rows(self) -> int:
         rows = self.visible_content_rows()
@@ -184,6 +180,12 @@ class TreeFilterOps:
             return self.next_content_hit_entry_index(selected_idx, direction)
         return next_file_entry_index(self.state.tree_entries, selected_idx, direction)
 
+    def nearest_tree_filter_result_entry_index(self, selected_idx: int) -> int | None:
+        candidate_idx = self.next_tree_filter_result_entry_index(selected_idx, 1)
+        if candidate_idx is None:
+            candidate_idx = self.next_tree_filter_result_entry_index(selected_idx, -1)
+        return candidate_idx
+
     def coerce_tree_filter_result_index(self, idx: int) -> int | None:
         if not (0 <= idx < len(self.state.tree_entries)):
             return None
@@ -197,10 +199,7 @@ class TreeFilterOps:
         elif not entry.is_dir:
             return idx
 
-        candidate_idx = self.next_tree_filter_result_entry_index(idx, 1)
-        if candidate_idx is None:
-            candidate_idx = self.next_tree_filter_result_entry_index(idx, -1)
-        return candidate_idx
+        return self.nearest_tree_filter_result_entry_index(idx)
 
     def move_tree_selection(self, direction: int) -> bool:
         if not self.state.tree_entries or direction == 0:
@@ -399,6 +398,10 @@ class TreeFilterOps:
             self.preview_selected_entry(force=True)
         self.state.dirty = True
 
+    def reset_tree_filter_session_state(self) -> None:
+        self.state.tree_filter_loading = False
+        self.state.tree_filter_collapsed_dirs = set()
+
     def open_tree_filter(self, mode: str = "files") -> None:
         was_active = self.state.tree_filter_active
         previous_mode = self.state.tree_filter_mode
@@ -414,8 +417,7 @@ class TreeFilterOps:
         self.state.tree_filter_query = ""
         self.state.tree_filter_match_count = 0
         self.state.tree_filter_truncated = False
-        self.state.tree_filter_loading = False
-        self.state.tree_filter_collapsed_dirs = set()
+        self.reset_tree_filter_session_state()
         if was_active and previous_mode != mode:
             self.rebuild_tree_entries(preferred_path=self.state.current_path.resolve())
         self.state.dirty = True
@@ -428,8 +430,7 @@ class TreeFilterOps:
         if clear_query:
             self.state.tree_filter_query = ""
             self.state.tree_filter_truncated = False
-        self.state.tree_filter_loading = False
-        self.state.tree_filter_collapsed_dirs = set()
+        self.reset_tree_filter_session_state()
         self.state.tree_filter_prev_browser_visible = None
         if previous_browser_visible is not None:
             browser_visibility_changed = self.state.browser_visible != previous_browser_visible
@@ -450,9 +451,7 @@ class TreeFilterOps:
 
         entry = self.state.tree_entries[self.state.selected_idx]
         if entry.is_dir:
-            candidate_idx = self.next_tree_filter_result_entry_index(self.state.selected_idx, 1)
-            if candidate_idx is None:
-                candidate_idx = self.next_tree_filter_result_entry_index(self.state.selected_idx, -1)
+            candidate_idx = self.nearest_tree_filter_result_entry_index(self.state.selected_idx)
             if candidate_idx is None:
                 self.close_tree_filter(clear_query=True)
                 return
