@@ -110,7 +110,7 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
 
             root_file.write_text("x = 2\n", encoding="utf-8")
             nested_file.write_text("y = 2\n", encoding="utf-8")
-            snapshots: dict[str, Path] = {}
+            snapshots: dict[str, object] = {}
 
             class _FakeTerminalController:
                 def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
@@ -126,10 +126,16 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
                 snapshots["initial"] = state.current_path.resolve()
                 handle_normal_key("n", 120)
                 snapshots["after_n_1"] = state.current_path.resolve()
+                snapshots["after_n_1_status"] = state.status_message
                 handle_normal_key("n", 120)
                 snapshots["after_n_2"] = state.current_path.resolve()
+                snapshots["after_n_2_status"] = state.status_message
+                handle_normal_key("n", 120)
+                snapshots["after_n_3"] = state.current_path.resolve()
+                snapshots["after_n_3_status"] = state.status_message
                 handle_normal_key("N", 120)
                 snapshots["after_N"] = state.current_path.resolve()
+                snapshots["after_N_status"] = state.status_message
 
             with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
@@ -147,7 +153,12 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertEqual(snapshots["initial"], root)
             self.assertEqual(snapshots["after_n_1"], nested_file.resolve())
             self.assertEqual(snapshots["after_n_2"], root_file.resolve())
-            self.assertEqual(snapshots["after_N"], nested_file.resolve())
+            self.assertEqual(snapshots["after_n_3"], nested_file.resolve())
+            self.assertEqual(snapshots["after_N"], root_file.resolve())
+            self.assertEqual(snapshots["after_n_1_status"], "")
+            self.assertEqual(snapshots["after_n_2_status"], "")
+            self.assertEqual(snapshots["after_n_3_status"], "wrapped to first change")
+            self.assertEqual(snapshots["after_N_status"], "wrapped to last change")
 
     @unittest.skipIf(shutil.which("git") is None, "git is required for same-file git hunk navigation tests")
     def test_n_and_shift_n_navigate_between_change_blocks_within_same_file(self) -> None:
@@ -186,9 +197,15 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
                 handle_normal_key("n", 120)
                 snapshots["after_n_path"] = state.current_path.resolve()
                 snapshots["after_n_start"] = state.start
+                snapshots["after_n_status"] = state.status_message
+                handle_normal_key("n", 120)
+                snapshots["after_n_wrap_path"] = state.current_path.resolve()
+                snapshots["after_n_wrap_start"] = state.start
+                snapshots["after_n_wrap_status"] = state.status_message
                 handle_normal_key("N", 120)
                 snapshots["after_N_path"] = state.current_path.resolve()
                 snapshots["after_N_start"] = state.start
+                snapshots["after_N_status"] = state.status_message
 
             with mock.patch("lazyviewer.app_runtime.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.app_runtime.TerminalController", _FakeTerminalController
@@ -206,9 +223,14 @@ class AppRuntimeBehaviorTests(unittest.TestCase):
             self.assertTrue(bool(snapshots["initial_is_diff"]))
             self.assertEqual(snapshots["initial_path"], file_path.resolve())
             self.assertEqual(snapshots["after_n_path"], file_path.resolve())
+            self.assertEqual(snapshots["after_n_wrap_path"], file_path.resolve())
             self.assertEqual(snapshots["after_N_path"], file_path.resolve())
             self.assertGreater(int(snapshots["after_n_start"]), int(snapshots["initial_start"]))
-            self.assertLess(int(snapshots["after_N_start"]), int(snapshots["after_n_start"]))
+            self.assertEqual(snapshots["after_n_status"], "")
+            self.assertLess(int(snapshots["after_n_wrap_start"]), int(snapshots["after_n_start"]))
+            self.assertEqual(snapshots["after_n_wrap_status"], "wrapped to first change")
+            self.assertGreater(int(snapshots["after_N_start"]), int(snapshots["after_n_wrap_start"]))
+            self.assertEqual(snapshots["after_N_status"], "wrapped to last change")
 
     @unittest.skipIf(shutil.which("git") is None, "git is required for git watch integration test")
     def test_git_watch_refresh_rebuilds_preview_after_commit(self) -> None:

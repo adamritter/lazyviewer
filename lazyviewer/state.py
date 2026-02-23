@@ -35,6 +35,8 @@ class AppState:
     browser_visible: bool = True
     show_help: bool = False
     dirty: bool = True
+    status_message: str = ""
+    status_message_until: float = 0.0
     skip_next_lf: bool = False
     count_buffer: str = ""
     last_click_idx: int = -1

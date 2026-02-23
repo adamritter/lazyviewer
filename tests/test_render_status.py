@@ -103,6 +103,38 @@ class RenderStatusTests(unittest.TestCase):
         self.assertTrue(matches)
         self.assertTrue(matches[-1].endswith("│ ? Help"))
 
+    def test_render_status_includes_transient_status_message(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            render_dual_page(
+                text_lines=["line 1", "line 2"],
+                text_start=0,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=3,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=120,
+                left_width=30,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=True,
+                show_hidden=False,
+                status_message="wrapped to first change",
+            )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        matches = re.findall(r"\x1b\[7m([^\x1b]*)\x1b\[0m", rendered)
+        self.assertTrue(matches)
+        self.assertIn("wrapped to first change", matches[-1])
+
     def test_git_diff_background_persists_when_horizontal_scroll_reaches_line_end(self) -> None:
         writes: list[bytes] = []
 

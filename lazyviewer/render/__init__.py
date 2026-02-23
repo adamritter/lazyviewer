@@ -45,6 +45,7 @@ class RenderContext:
     browser_visible: bool
     show_hidden: bool
     show_help: bool = False
+    status_message: str = ""
     tree_filter_active: bool = False
     tree_filter_mode: str = "files"
     tree_filter_query: str = ""
@@ -92,6 +93,7 @@ def render_dual_page_context(context: RenderContext) -> None:
         context.browser_visible,
         context.show_hidden,
         show_help=context.show_help,
+        status_message=context.status_message,
         tree_filter_active=context.tree_filter_active,
         tree_filter_mode=context.tree_filter_mode,
         tree_filter_query=context.tree_filter_query,
@@ -181,6 +183,20 @@ def build_status_line(left_text: str, width: int, right_text: str = "│ ? Help"
     left = left_text[:left_limit]
     gap = " " * (usable - len(left) - len(right_text))
     return f"{left}{gap}{right_text}"
+
+
+def _compose_status_left_text(
+    current_path: Path,
+    status_start: int,
+    status_end: int,
+    status_total: int,
+    text_percent: float,
+    status_message: str,
+) -> str:
+    base = f"{current_path} ({status_start}-{status_end}/{status_total} {text_percent:5.1f}%)"
+    if not status_message:
+        return base
+    return f"{base} · {status_message}"
 
 
 def _format_sticky_header_line(source_line: str, width: int) -> str:
@@ -976,6 +992,7 @@ def render_dual_page(
     browser_visible: bool,
     show_hidden: bool,
     show_help: bool = False,
+    status_message: str = "",
     tree_filter_active: bool = False,
     tree_filter_mode: str = "files",
     tree_filter_query: str = "",
@@ -1105,7 +1122,14 @@ def render_dual_page(
             if "\033" in help_text:
                 out.append("\033[0m")
             out.append("\r\n")
-        left_status = f"{current_path} ({status_start}-{status_end}/{status_total} {text_percent:5.1f}%)"
+        left_status = _compose_status_left_text(
+            current_path,
+            status_start,
+            status_end,
+            status_total,
+            text_percent,
+            status_message,
+        )
         status = build_status_line(left_status, width)
         out.append("\033[7m")
         out.append(status)
@@ -1282,7 +1306,14 @@ def render_dual_page(
             out.append("\033[0m")
         out.append("\r\n")
 
-    left_status = f"{current_path} ({status_start}-{status_end}/{status_total} {text_percent:5.1f}%)"
+    left_status = _compose_status_left_text(
+        current_path,
+        status_start,
+        status_end,
+        status_total,
+        text_percent,
+        status_message,
+    )
     status = build_status_line(left_status, width)
     out.append("\033[7m")
     out.append(status)

@@ -61,6 +61,7 @@ CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT = 50.0
 CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT = 8.0
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR = 2
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR = 1
+WRAP_STATUS_SECONDS = 1.2
 _TRAILING_GIT_BADGES_RE = re.compile(r"^(.*?)(?:\s(?:\[(?:M|\?)\])+)$")
 _CLICK_SEARCH_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 
@@ -278,6 +279,124 @@ def _line_has_newline_terminator(line: str) -> bool:
     return line.endswith("\n") or line.endswith("\r")
 
 
+def _clear_status_message(state: AppState) -> None:
+    state.status_message = ""
+    state.status_message_until = 0.0
+
+
+def _set_status_message(state: AppState, message: str) -> None:
+    state.status_message = message
+    state.status_message_until = time.monotonic() + WRAP_STATUS_SECONDS
+
+
+def _compose_normal_key_ops(
+    *,
+    navigation_ops: NavigationPickerOps,
+    current_jump_location,
+    record_jump_if_changed,
+    toggle_git_features,
+    launch_lazygit,
+    handle_tree_mouse_wheel,
+    handle_tree_mouse_click,
+    move_tree_selection,
+    rebuild_tree_entries,
+    preview_selected_entry,
+    refresh_rendered_for_current_path,
+    refresh_git_status_overlay,
+    maybe_grow_directory_preview,
+    visible_content_rows,
+    rebuild_screen_lines,
+    mark_tree_watch_dirty,
+    launch_editor_for_path,
+    jump_to_next_git_modified,
+) -> NormalKeyOps:
+    return NormalKeyOps(
+        current_jump_location=current_jump_location,
+        record_jump_if_changed=record_jump_if_changed,
+        open_symbol_picker=navigation_ops.open_symbol_picker,
+        reroot_to_parent=navigation_ops.reroot_to_parent,
+        reroot_to_selected_target=navigation_ops.reroot_to_selected_target,
+        toggle_hidden_files=navigation_ops.toggle_hidden_files,
+        toggle_tree_pane=navigation_ops.toggle_tree_pane,
+        toggle_wrap_mode=navigation_ops.toggle_wrap_mode,
+        toggle_help_panel=navigation_ops.toggle_help_panel,
+        toggle_git_features=toggle_git_features,
+        launch_lazygit=launch_lazygit,
+        handle_tree_mouse_wheel=handle_tree_mouse_wheel,
+        handle_tree_mouse_click=handle_tree_mouse_click,
+        move_tree_selection=move_tree_selection,
+        rebuild_tree_entries=rebuild_tree_entries,
+        preview_selected_entry=preview_selected_entry,
+        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+        refresh_git_status_overlay=refresh_git_status_overlay,
+        maybe_grow_directory_preview=maybe_grow_directory_preview,
+        visible_content_rows=visible_content_rows,
+        rebuild_screen_lines=rebuild_screen_lines,
+        mark_tree_watch_dirty=mark_tree_watch_dirty,
+        launch_editor_for_path=launch_editor_for_path,
+        jump_to_next_git_modified=jump_to_next_git_modified,
+    )
+
+
+def _compose_loop_callbacks(
+    *,
+    tree_filter_ops: TreeFilterOps,
+    navigation_ops: NavigationPickerOps,
+    visible_content_rows,
+    rebuild_screen_lines,
+    maybe_refresh_tree_watch,
+    maybe_refresh_git_watch,
+    refresh_git_status_overlay,
+    current_preview_image_path,
+    current_preview_image_geometry,
+    open_tree_filter,
+    close_tree_filter,
+    activate_tree_filter_selection,
+    move_tree_selection,
+    apply_tree_filter_query,
+    jump_to_next_content_hit,
+    handle_normal_key,
+    save_left_pane_width_for_mode,
+    tick_source_selection_drag,
+    handle_tree_mouse_wheel,
+    handle_tree_mouse_click,
+) -> RuntimeLoopCallbacks:
+    return RuntimeLoopCallbacks(
+        get_tree_filter_loading_until=tree_filter_ops.get_loading_until,
+        tree_view_rows=tree_filter_ops.tree_view_rows,
+        tree_filter_prompt_prefix=tree_filter_ops.tree_filter_prompt_prefix,
+        tree_filter_placeholder=tree_filter_ops.tree_filter_placeholder,
+        visible_content_rows=visible_content_rows,
+        rebuild_screen_lines=rebuild_screen_lines,
+        maybe_refresh_tree_watch=maybe_refresh_tree_watch,
+        maybe_refresh_git_watch=maybe_refresh_git_watch,
+        refresh_git_status_overlay=refresh_git_status_overlay,
+        current_preview_image_path=current_preview_image_path,
+        current_preview_image_geometry=current_preview_image_geometry,
+        open_tree_filter=open_tree_filter,
+        open_command_picker=navigation_ops.open_command_picker,
+        close_picker=navigation_ops.close_picker,
+        refresh_command_picker_matches=navigation_ops.refresh_command_picker_matches,
+        activate_picker_selection=navigation_ops.activate_picker_selection,
+        refresh_active_picker_matches=navigation_ops.refresh_active_picker_matches,
+        handle_tree_mouse_wheel=handle_tree_mouse_wheel,
+        handle_tree_mouse_click=handle_tree_mouse_click,
+        toggle_help_panel=navigation_ops.toggle_help_panel,
+        close_tree_filter=close_tree_filter,
+        activate_tree_filter_selection=activate_tree_filter_selection,
+        move_tree_selection=move_tree_selection,
+        apply_tree_filter_query=apply_tree_filter_query,
+        jump_to_next_content_hit=jump_to_next_content_hit,
+        set_named_mark=navigation_ops.set_named_mark,
+        jump_to_named_mark=navigation_ops.jump_to_named_mark,
+        jump_back_in_history=navigation_ops.jump_back_in_history,
+        jump_forward_in_history=navigation_ops.jump_forward_in_history,
+        handle_normal_key=handle_normal_key,
+        save_left_pane_width=save_left_pane_width_for_mode,
+        tick_source_selection_drag=tick_source_selection_drag,
+    )
+
+
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
     if nopager or not os.isatty(sys.stdin.fileno()):
         rendered = content
@@ -300,11 +419,14 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         skip_gitignored=_skip_gitignored_for_hidden_mode(show_hidden),
     )
     selected_path = current_path if current_path.exists() else tree_root
-    selected_idx = 0
-    for idx, entry in enumerate(tree_entries):
-        if entry.path.resolve() == selected_path.resolve():
-            selected_idx = idx
-            break
+    selected_idx = next(
+        (
+            idx
+            for idx, entry in enumerate(tree_entries)
+            if entry.path.resolve() == selected_path.resolve()
+        ),
+        0,
+    )
 
     term = shutil.get_terminal_size((80, 24))
     usable = max(1, term.lines - 1)
@@ -1004,22 +1126,22 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             return False
 
         col, _row = _parse_mouse_col_row(mouse_key)
+        in_tree_pane = state.browser_visible and col is not None and col <= state.left_width
 
         if is_horizontal:
-            if state.browser_visible and col is not None and col <= state.left_width:
+            if in_tree_pane:
                 return True
             prev_text_x = state.text_x
-            step = 4
             if mouse_key.startswith("MOUSE_WHEEL_LEFT:"):
-                state.text_x = max(0, state.text_x - step)
+                state.text_x = max(0, state.text_x - 4)
             else:
-                state.text_x = min(max_horizontal_text_offset(), state.text_x + step)
+                state.text_x = min(max_horizontal_text_offset(), state.text_x + 4)
             if state.text_x != prev_text_x:
                 state.dirty = True
             return True
 
         direction = -1 if mouse_key.startswith("MOUSE_WHEEL_UP:") else 1
-        if state.browser_visible and col is not None and col <= state.left_width:
+        if in_tree_pane:
             if move_tree_selection(direction):
                 state.dirty = True
             return True
@@ -1112,7 +1234,8 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 reset_source_selection_drag_state()
                 return True
             state.source_selection_focus = selection_pos
-            if state.source_selection_anchor == selection_pos and state.dir_preview_path is not None:
+            same_selection_pos = state.source_selection_anchor == selection_pos
+            if same_selection_pos and state.dir_preview_path is not None:
                 preview_target = directory_preview_target_for_display_line(selection_pos[0])
                 if preview_target is not None:
                     clear_source_selection()
@@ -1120,7 +1243,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     jump_to_path_proxy(preview_target)
                     state.dirty = True
                     return True
-            if state.source_selection_anchor == selection_pos:
+            if same_selection_pos:
                 clicked_token = _clicked_preview_search_token(state.lines, selection_pos)
                 if clicked_token is not None:
                     clear_source_selection()
@@ -1228,19 +1351,14 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         else:
             selected_target = state.tree_root.resolve()
 
-        if selected_target == previous_current_path:
-            refresh_rendered_for_current_path(
-                reset_scroll=False,
-                reset_dir_budget=False,
-                force_rebuild=force_rebuild,
-            )
-        else:
+        changed_target = selected_target != previous_current_path
+        if changed_target:
             state.current_path = selected_target
-            refresh_rendered_for_current_path(
-                reset_scroll=True,
-                reset_dir_budget=True,
-                force_rebuild=force_rebuild,
-            )
+        refresh_rendered_for_current_path(
+            reset_scroll=changed_target,
+            reset_dir_budget=changed_target,
+            force_rebuild=force_rebuild,
+        )
         schedule_tree_filter_index_warmup()
         refresh_git_status_overlay(force=True)
         state.dirty = True
@@ -1322,13 +1440,15 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     def jump_to_next_git_modified(direction: int) -> bool:
         if direction == 0:
             return False
+        _clear_status_message(state)
 
+        same_file_change_blocks: list[int] = []
         if state.preview_is_git_diff and state.current_path.is_file():
-            change_blocks = _git_change_block_start_lines(state.lines)
-            if change_blocks:
+            same_file_change_blocks = _git_change_block_start_lines(state.lines)
+            if same_file_change_blocks:
                 probe_line = state.start + max(0, visible_content_rows() // 3)
                 current_block: int | None = None
-                for line_idx in change_blocks:
+                for line_idx in same_file_change_blocks:
                     if line_idx <= probe_line:
                         current_block = line_idx
                     else:
@@ -1337,15 +1457,15 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                 target_line: int | None = None
                 if direction > 0:
                     if current_block is None:
-                        target_line = change_blocks[0]
+                        target_line = same_file_change_blocks[0]
                     else:
-                        for line_idx in change_blocks:
+                        for line_idx in same_file_change_blocks:
                             if line_idx > current_block:
                                 target_line = line_idx
                                 break
                 else:
                     if current_block is not None:
-                        for line_idx in reversed(change_blocks):
+                        for line_idx in reversed(same_file_change_blocks):
                             if line_idx < current_block:
                                 target_line = line_idx
                                 break
@@ -1386,12 +1506,15 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
             anchor_key = None
 
         target: Path | None = None
+        wrapped_files = False
         if direction > 0:
             if anchor_key is not None:
                 for item_key, path in ordered_items:
                     if item_key > anchor_key:
                         target = path
                         break
+                if target is None:
+                    wrapped_files = True
             if target is None:
                 target = ordered_items[0][1]
         else:
@@ -1400,15 +1523,39 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
                     if item_key < anchor_key:
                         target = path
                         break
+                if target is None:
+                    wrapped_files = True
             if target is None:
                 target = ordered_items[-1][1]
 
-        if target is None or target == anchor_path:
+        if target is None:
+            return False
+
+        if target == anchor_path and same_file_change_blocks:
+            wrap_line = same_file_change_blocks[0] if direction > 0 else same_file_change_blocks[-1]
+            next_start = _centered_scroll_start(
+                wrap_line,
+                state.max_start,
+                visible_content_rows(),
+            )
+            state.start = next_start
+            _set_status_message(
+                state,
+                "wrapped to first change" if direction > 0 else "wrapped to last change",
+            )
+            return True
+
+        if target == anchor_path:
             return False
 
         origin = current_jump_location()
         navigation_ops.jump_to_path(target)
         record_jump_if_changed(origin)
+        if wrapped_files:
+            _set_status_message(
+                state,
+                "wrapped to first change" if direction > 0 else "wrapped to last change",
+            )
         return True
 
     schedule_tree_filter_index_warmup()
