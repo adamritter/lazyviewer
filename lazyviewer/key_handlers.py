@@ -362,6 +362,23 @@ def handle_normal_key(
     jump_to_next_git_modified = ops.jump_to_next_git_modified
     key_lower = key.lower()
 
+    def set_directory_expanded_state(resolved: Path, expanded: bool) -> None:
+        if state.tree_filter_active and state.tree_filter_mode == "content":
+            if expanded:
+                state.tree_filter_collapsed_dirs.discard(resolved)
+            elif resolved != state.tree_root:
+                state.tree_filter_collapsed_dirs.add(resolved)
+        if expanded:
+            state.expanded.add(resolved)
+        else:
+            state.expanded.discard(resolved)
+
+    def refresh_tree_after_directory_change(resolved: Path) -> None:
+        rebuild_tree_entries(preferred_path=resolved)
+        mark_tree_watch_dirty()
+        preview_selected_entry()
+        state.dirty = True
+
     if key_lower == "s" and not state.picker_active:
         state.count_buffer = ""
         open_symbol_picker()
@@ -525,13 +542,8 @@ def handle_normal_key(
         if entry.is_dir:
             resolved = entry.path.resolve()
             if resolved not in state.expanded:
-                if state.tree_filter_active and state.tree_filter_mode == "content":
-                    state.tree_filter_collapsed_dirs.discard(resolved)
-                state.expanded.add(resolved)
-                rebuild_tree_entries(preferred_path=resolved)
-                mark_tree_watch_dirty()
-                preview_selected_entry()
-                state.dirty = True
+                set_directory_expanded_state(resolved, True)
+                refresh_tree_after_directory_change(resolved)
             else:
                 next_idx = state.selected_idx + 1
                 if next_idx < len(state.tree_entries) and state.tree_entries[next_idx].depth > entry.depth:
@@ -552,13 +564,9 @@ def handle_normal_key(
             and entry.path.resolve() in state.expanded
             and entry.path.resolve() != state.tree_root
         ):
-            if state.tree_filter_active and state.tree_filter_mode == "content":
-                state.tree_filter_collapsed_dirs.add(entry.path.resolve())
-            state.expanded.remove(entry.path.resolve())
-            rebuild_tree_entries(preferred_path=entry.path.resolve())
-            mark_tree_watch_dirty()
-            preview_selected_entry()
-            state.dirty = True
+            resolved = entry.path.resolve()
+            set_directory_expanded_state(resolved, False)
+            refresh_tree_after_directory_change(resolved)
         elif entry.path.resolve() != state.tree_root:
             parent = entry.path.parent.resolve()
             for idx, candidate in enumerate(state.tree_entries):
@@ -574,17 +582,10 @@ def handle_normal_key(
             resolved = entry.path.resolve()
             if resolved in state.expanded:
                 if resolved != state.tree_root:
-                    if state.tree_filter_active and state.tree_filter_mode == "content":
-                        state.tree_filter_collapsed_dirs.add(resolved)
-                    state.expanded.remove(resolved)
+                    set_directory_expanded_state(resolved, False)
             else:
-                if state.tree_filter_active and state.tree_filter_mode == "content":
-                    state.tree_filter_collapsed_dirs.discard(resolved)
-                state.expanded.add(resolved)
-            rebuild_tree_entries(preferred_path=resolved)
-            mark_tree_watch_dirty()
-            preview_selected_entry()
-            state.dirty = True
+                set_directory_expanded_state(resolved, True)
+            refresh_tree_after_directory_change(resolved)
             return False
 
     prev_start = state.start
