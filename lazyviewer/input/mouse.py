@@ -1,4 +1,9 @@
-"""Mouse interaction routing for source and tree panes."""
+"""Mouse event routing across source preview and tree panes.
+
+This module owns top-level mouse dispatch for the main loop. It classifies
+wheel and click tokens by pane geometry, applies direct scroll updates, and
+delegates detailed interactions to source-pane and tree-pane handlers.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +18,7 @@ from ..tree_pane.events import TreePaneMouseCallbacks, TreePaneMouseHandlers
 
 
 def _parse_mouse_col_row(mouse_key: str) -> tuple[int | None, int | None]:
+    """Parse ``MOUSE_*:col:row`` tokens into terminal coordinates."""
     parts = mouse_key.split(":")
     if len(parts) < 3:
         return None, None
@@ -29,6 +35,12 @@ def _handle_tree_mouse_wheel(
     max_horizontal_text_offset: Callable[[], int],
     mouse_key: str,
 ) -> bool:
+    """Handle wheel input for tree selection and source scrolling.
+
+    Vertical wheel events on the tree pane move tree selection; vertical events
+    on the source pane scroll preview content. Horizontal wheel events only
+    affect source horizontal offset when the cursor is outside the tree pane.
+    """
     is_vertical = mouse_key.startswith("MOUSE_WHEEL_UP:") or mouse_key.startswith("MOUSE_WHEEL_DOWN:")
     is_horizontal = mouse_key.startswith("MOUSE_WHEEL_LEFT:") or mouse_key.startswith("MOUSE_WHEEL_RIGHT:")
     if not (is_vertical or is_horizontal):
@@ -66,6 +78,8 @@ def _handle_tree_mouse_wheel(
 
 @dataclass(frozen=True)
 class TreeMouseCallbacks:
+    """Injected callbacks used to construct source/tree mouse delegates."""
+
     visible_content_rows: Callable[[], int]
     source_pane_col_bounds: Callable[[], tuple[int, int]]
     source_selection_position: Callable[[int, int], tuple[int, int] | None]
@@ -87,12 +101,15 @@ class TreeMouseCallbacks:
 
 
 class TreeMouseHandlers:
+    """Top-level click/drag coordinator that composes pane-specific handlers."""
+
     def __init__(
         self,
         state: AppState,
         callbacks: TreeMouseCallbacks,
         double_click_seconds: float,
     ) -> None:
+        """Build delegated handlers for source-pane and tree-pane mouse logic."""
         self._source_pane_handlers = SourcePaneMouseHandlers(
             state,
             SourcePaneMouseCallbacks(
@@ -125,9 +142,11 @@ class TreeMouseHandlers:
         )
 
     def tick_source_selection_drag(self) -> None:
+        """Advance drag-selection state for the source pane, if active."""
         self._source_pane_handlers.tick_source_selection_drag()
 
     def handle_tree_mouse_click(self, mouse_key: str) -> bool:
+        """Route left-click events to source pane first, then tree pane if needed."""
         is_left_down = mouse_key.startswith("MOUSE_LEFT_DOWN:")
         is_left_up = mouse_key.startswith("MOUSE_LEFT_UP:")
         if not (is_left_down or is_left_up):

@@ -1,7 +1,8 @@
-"""Key-event handlers for picker, filter, and normal modes.
+"""Keyboard dispatch for picker, tree-filter, and normal navigation modes.
 
-These functions convert normalized key tokens into state transitions.
-They are kept mostly side-effect-free via injected callback operations.
+This module translates normalized key tokens into deterministic ``AppState``
+transitions. Mode-specific handlers are written against injected callbacks so
+navigation behavior remains testable without coupling directly to runtime I/O.
 """
 
 from __future__ import annotations
@@ -21,10 +22,12 @@ from ..tree import (
 
 
 def _effective_max_start(state: AppState, visible_rows: int) -> int:
+    """Return max valid vertical scroll offset for current rendered lines."""
     return max(0, len(state.lines) - max(1, visible_rows))
 
 
 def _parse_mouse_col_row(mouse_key: str) -> tuple[int | None, int | None]:
+    """Parse ``MOUSE_*:col:row`` key tokens into integer coordinates."""
     parts = mouse_key.split(":")
     if len(parts) < 3:
         return None, None
@@ -36,30 +39,39 @@ def _parse_mouse_col_row(mouse_key: str) -> tuple[int | None, int | None]:
 
 @dataclass(frozen=True)
 class KeyComboBinding:
+    """Mapping from one or more key tokens to a single action callback."""
+
     combos: tuple[str, ...]
     handler: Callable[[], bool | None]
 
 
 class KeyComboRegistry:
+    """Small key-dispatch table with optional key normalization strategy."""
+
     def __init__(self, normalize: Callable[[str], str] | None = None) -> None:
+        """Initialize empty registry with optional token normalizer."""
         self._normalize = normalize if normalize is not None else self._identity
         self._handlers: dict[str, Callable[[], bool | None]] = {}
 
     @staticmethod
     def _identity(key: str) -> str:
+        """Return key unchanged for exact-match dispatch registries."""
         return key
 
     def register_binding(self, binding: KeyComboBinding) -> KeyComboRegistry:
+        """Register one binding, overwriting existing handlers for same combos."""
         for combo in binding.combos:
             self._handlers[self._normalize(combo)] = binding.handler
         return self
 
     def register_bindings(self, *bindings: KeyComboBinding) -> KeyComboRegistry:
+        """Register multiple bindings and return ``self`` for fluent usage."""
         for binding in bindings:
             self.register_binding(binding)
         return self
 
     def dispatch(self, key: str) -> bool | None:
+        """Invoke bound handler for ``key`` and return its handled result."""
         handler = self._handlers.get(self._normalize(key))
         if handler is None:
             return None
@@ -67,6 +79,7 @@ class KeyComboRegistry:
 
 
 def _move_picker_selection(state: AppState, direction: int) -> None:
+    """Move picker selection by ``direction`` while clamping to list bounds."""
     if not state.picker_match_labels:
         return
     prev_selected = state.picker_selected
@@ -79,6 +92,11 @@ def _move_picker_selection(state: AppState, direction: int) -> None:
 
 
 def _handle_picker_mouse_wheel(state: AppState, key: str) -> None:
+    """Handle wheel scrolling inside picker context.
+
+    Wheel input over the tree pane moves picker selection. Otherwise it scrolls
+    source content preview by small fixed increments.
+    """
     direction = -1 if key.startswith("MOUSE_WHEEL_UP:") else 1
     col, _row = _parse_mouse_col_row(key)
     if state.browser_visible and col is not None and col <= state.left_width:
@@ -93,6 +111,8 @@ def _handle_picker_mouse_wheel(state: AppState, key: str) -> None:
 
 @dataclass(frozen=True)
 class PickerKeyCallbacks:
+    """External operations required for picker key handling."""
+
     close_picker: Callable[[], None]
     refresh_command_picker_matches: Callable[..., None]
     activate_picker_selection: Callable[[], bool]
@@ -102,6 +122,8 @@ class PickerKeyCallbacks:
 
 @dataclass(frozen=True)
 class TreeFilterKeyCallbacks:
+    """External operations required for tree-filter key handling."""
+
     handle_tree_mouse_wheel: Callable[[str], bool]
     handle_tree_mouse_click: Callable[[str], bool]
     toggle_help_panel: Callable[[], None]
@@ -120,6 +142,7 @@ def _handle_picker_mouse_click(
     activate_picker_selection: Callable[[], bool],
     focus_query_row: bool,
 ) -> bool:
+    """Process picker click selection and optional double-click activation."""
     col, row = _parse_mouse_col_row(key)
     if not (
         state.browser_visible
@@ -160,6 +183,11 @@ def handle_picker_key(
     double_click_seconds: float,
     callbacks: PickerKeyCallbacks,
 ) -> tuple[bool, bool]:
+    """Handle one key while picker is active.
+
+    Returns ``(handled, should_quit)`` so the main loop can stop event
+    propagation and optionally terminate the application.
+    """
     close_picker = callbacks.close_picker
     refresh_command_picker_matches = callbacks.refresh_command_picker_matches
     activate_picker_selection = callbacks.activate_picker_selection
@@ -274,6 +302,7 @@ def handle_tree_filter_key(
     state: AppState,
     callbacks: TreeFilterKeyCallbacks,
 ) -> bool:
+    """Handle keys for tree filter prompt, list navigation, and hit jumps."""
     handle_tree_mouse_wheel = callbacks.handle_tree_mouse_wheel
     handle_tree_mouse_click = callbacks.handle_tree_mouse_click
     toggle_help_panel = callbacks.toggle_help_panel
@@ -286,6 +315,7 @@ def handle_tree_filter_key(
         return False
 
     def apply_live_filter_query(query: str) -> None:
+        """Apply query updates with mode-specific preview/selection semantics."""
         content_mode = state.tree_filter_mode == "content"
         apply_tree_filter_query(
             query,
@@ -359,6 +389,8 @@ def handle_tree_filter_key(
 
 @dataclass(frozen=True)
 class NormalKeyOps:
+    """Injected runtime operations used by normal-mode key processing."""
+
     current_jump_location: Callable[[], JumpLocation]
     record_jump_if_changed: Callable[[JumpLocation], None]
     open_symbol_picker: Callable[[], None]
@@ -392,6 +424,7 @@ def handle_normal_key(
     state: AppState,
     ops: NormalKeyOps,
 ) -> bool:
+    """Handle one normal-mode key and return ``True`` when app should quit."""
     current_jump_location = ops.current_jump_location
     record_jump_if_changed = ops.record_jump_if_changed
     open_symbol_picker = ops.open_symbol_picker
@@ -420,6 +453,7 @@ def handle_normal_key(
     key_lower = key.lower()
 
     def set_directory_expanded_state(resolved: Path, expanded: bool) -> None:
+        """Toggle expansion for ``resolved`` in tree and content-filter overlays."""
         if state.tree_filter_active and state.tree_filter_mode == "content":
             if expanded:
                 state.tree_filter_collapsed_dirs.discard(resolved)
@@ -431,12 +465,14 @@ def handle_normal_key(
             state.expanded.discard(resolved)
 
     def refresh_tree_after_directory_change(resolved: Path) -> None:
+        """Rebuild tree and preview after expand/collapse state mutation."""
         rebuild_tree_entries(preferred_path=resolved)
         mark_tree_watch_dirty()
         preview_selected_entry()
         state.dirty = True
 
     def open_symbol_picker_action() -> bool | None:
+        """Open symbol picker unless already active, clearing pending count."""
         if state.picker_active:
             return None
         state.count_buffer = ""
@@ -444,12 +480,14 @@ def handle_normal_key(
         return False
 
     def begin_mark_set_action() -> bool:
+        """Enter named-mark set mode for next keypress."""
         state.count_buffer = ""
         state.pending_mark_set = True
         state.pending_mark_jump = False
         return False
 
     def begin_mark_jump_action() -> bool:
+        """Enter named-mark jump mode for next keypress."""
         state.count_buffer = ""
         state.pending_mark_set = False
         state.pending_mark_jump = True
@@ -473,14 +511,17 @@ def handle_normal_key(
     state.count_buffer = ""
 
     def toggle_help_panel_action() -> bool:
+        """Toggle help overlay from normal mode."""
         toggle_help_panel()
         return False
 
     def launch_lazygit_action() -> bool:
+        """Launch lazygit integration command."""
         launch_lazygit()
         return False
 
     def toggle_git_features_action() -> bool:
+        """Enable or disable git-aware overlays and key behavior."""
         toggle_git_features()
         return False
 
@@ -499,6 +540,7 @@ def handle_normal_key(
             jump_steps = 1 if count is None else max(1, min(10, count))
 
             def parent_directory_index(from_idx: int) -> int | None:
+                """Return nearest ancestor directory index above ``from_idx``."""
                 current_depth = state.tree_entries[from_idx].depth
                 idx = from_idx - 1
                 while idx >= 0:
@@ -509,6 +551,7 @@ def handle_normal_key(
                 return None
 
             def smart_directory_jump(from_idx: int, jump_direction: int) -> int | None:
+                """Compute contextual ctrl-u/ctrl-d tree jump destination."""
                 if jump_direction < 0:
                     prev_opened = next_opened_directory_entry_index(
                         state.tree_entries,
@@ -559,30 +602,37 @@ def handle_normal_key(
         return False
 
     def reroot_to_parent_action() -> bool:
+        """Reroot file tree at parent directory."""
         reroot_to_parent()
         return False
 
     def reroot_to_selected_target_action() -> bool:
+        """Reroot file tree at selected entry or its parent directory."""
         reroot_to_selected_target()
         return False
 
     def toggle_hidden_files_action() -> bool:
+        """Toggle hidden-file visibility in tree pane."""
         toggle_hidden_files()
         return False
 
     def toggle_tree_pane_action() -> bool:
+        """Toggle tree-pane visibility."""
         toggle_tree_pane()
         return False
 
     def toggle_wrap_mode_action() -> bool:
+        """Toggle wrapped source rendering mode."""
         toggle_wrap_mode()
         return False
 
     def toggle_tree_size_labels_action() -> bool:
+        """Toggle directory size labels in tree entries."""
         toggle_tree_size_labels()
         return False
 
     def edit_selected_target_action() -> bool:
+        """Open selected path in editor and refresh preview/tree state."""
         edit_target: Path | None = None
         if state.browser_visible and state.tree_entries:
             selected_entry = state.tree_entries[state.selected_idx]
@@ -615,9 +665,11 @@ def handle_normal_key(
         return False
 
     def quit_action() -> bool:
+        """Signal application shutdown."""
         return True
 
     def jump_to_next_git_modified_action(direction: int) -> bool | None:
+        """Jump to next/previous git-modified entry when feature is enabled."""
         if state.tree_filter_active or not state.git_features_enabled:
             return None
         if jump_to_next_git_modified(direction):
@@ -652,16 +704,19 @@ def handle_normal_key(
         return False
 
     def move_tree_down_action() -> bool:
+        """Move tree selection down one entry."""
         if move_tree_selection(1):
             state.dirty = True
         return False
 
     def move_tree_up_action() -> bool:
+        """Move tree selection up one entry."""
         if move_tree_selection(-1):
             state.dirty = True
         return False
 
     def open_tree_entry_action() -> bool:
+        """Open selected tree entry, expanding dirs or previewing files."""
         entry = state.tree_entries[state.selected_idx]
         if entry.is_dir:
             resolved = entry.path.resolve()
@@ -683,6 +738,7 @@ def handle_normal_key(
         return False
 
     def close_or_parent_tree_entry_action() -> bool:
+        """Collapse selected directory or move selection to parent directory."""
         entry = state.tree_entries[state.selected_idx]
         if (
             entry.is_dir
@@ -703,6 +759,7 @@ def handle_normal_key(
         return False
 
     def toggle_directory_tree_entry_action() -> bool | None:
+        """Toggle expand/collapse on selected directory tree entry."""
         entry = state.tree_entries[state.selected_idx]
         if not entry.is_dir:
             return None
