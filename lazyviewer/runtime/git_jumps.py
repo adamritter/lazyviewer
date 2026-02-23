@@ -6,8 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .state import AppState
-from .screen_utils import (
+from ..state import AppState
+from ..screen_utils import (
     _centered_scroll_start,
     _git_change_block_start_lines,
     _tree_order_key_for_relative_path,

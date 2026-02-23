@@ -16,7 +16,7 @@ from functools import partial
 from pathlib import Path
 
 from ..ansi import ANSI_ESCAPE_RE, build_screen_lines
-from ..git_jumps import (
+from .git_jumps import (
     GitModifiedJumpDeps,
 )
 from ..input import (
@@ -25,18 +25,18 @@ from ..input import (
     _handle_tree_mouse_wheel,
 )
 from ..source_pane import SourcePaneOps, copy_selected_source_range as copy_source_selection_range
-from ..tree_sync import (
+from .tree_sync import (
     PreviewSelectionDeps,
     TreeRefreshSyncDeps,
 )
-from ..index_warmup import TreeFilterIndexWarmupScheduler
-from ..layout import PagerLayoutOps
+from .index_warmup import TreeFilterIndexWarmupScheduler
+from .layout import PagerLayoutOps
 from ..screen_utils import (
     _centered_scroll_start,
     _first_git_change_screen_line,
     _tree_order_key_for_relative_path,
 )
-from ..watch_refresh import (
+from .watch_refresh import (
     WatchRefreshContext,
     _refresh_git_status_overlay,
 )
