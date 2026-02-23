@@ -49,130 +49,127 @@ class _GitModifiedJumpDeps:
     state: AppState
     visible_content_rows: Callable[[], int]
     refresh_git_status_overlay: Callable[..., None]
-    sorted_git_modified_file_paths: Callable[[], list[Path]]
     current_jump_location: Callable[[], object]
     jump_to_path: Callable[[Path], None]
     record_jump_if_changed: Callable[[object], None]
     clear_status_message: Callable[[], None]
     set_status_message: Callable[[str], None]
 
+    def jump_to_next_git_modified(
+        self,
+        direction: int,
+    ) -> bool:
+        state = self.state
+        if direction == 0:
+            return False
+        self.clear_status_message()
 
-def _jump_to_next_git_modified(
-    deps: _GitModifiedJumpDeps,
-    direction: int,
-) -> bool:
-    state = deps.state
-    if direction == 0:
-        return False
-    deps.clear_status_message()
+        same_file_change_blocks: list[int] = []
+        if state.preview_is_git_diff and state.current_path.is_file():
+            same_file_change_blocks = _git_change_block_start_lines(state.lines)
+            if same_file_change_blocks:
+                probe_line = state.start + max(0, self.visible_content_rows() // 3)
+                current_block: int | None = None
+                for line_idx in same_file_change_blocks:
+                    if line_idx <= probe_line:
+                        current_block = line_idx
+                    else:
+                        break
 
-    same_file_change_blocks: list[int] = []
-    if state.preview_is_git_diff and state.current_path.is_file():
-        same_file_change_blocks = _git_change_block_start_lines(state.lines)
-        if same_file_change_blocks:
-            probe_line = state.start + max(0, deps.visible_content_rows() // 3)
-            current_block: int | None = None
-            for line_idx in same_file_change_blocks:
-                if line_idx <= probe_line:
-                    current_block = line_idx
+                target_line: int | None = None
+                if direction > 0:
+                    if current_block is None:
+                        target_line = same_file_change_blocks[0]
+                    else:
+                        for line_idx in same_file_change_blocks:
+                            if line_idx > current_block:
+                                target_line = line_idx
+                                break
                 else:
-                    break
+                    if current_block is not None:
+                        for line_idx in reversed(same_file_change_blocks):
+                            if line_idx < current_block:
+                                target_line = line_idx
+                                break
 
-            target_line: int | None = None
-            if direction > 0:
-                if current_block is None:
-                    target_line = same_file_change_blocks[0]
-                else:
-                    for line_idx in same_file_change_blocks:
-                        if line_idx > current_block:
-                            target_line = line_idx
-                            break
-            else:
-                if current_block is not None:
-                    for line_idx in reversed(same_file_change_blocks):
-                        if line_idx < current_block:
-                            target_line = line_idx
-                            break
+                if target_line is not None:
+                    next_start = _centered_scroll_start(
+                        target_line,
+                        state.max_start,
+                        self.visible_content_rows(),
+                    )
+                    if next_start != state.start:
+                        state.start = next_start
+                        return True
 
-            if target_line is not None:
-                next_start = _centered_scroll_start(
-                    target_line,
-                    state.max_start,
-                    deps.visible_content_rows(),
-                )
-                if next_start != state.start:
-                    state.start = next_start
-                    return True
+        self.refresh_git_status_overlay()
+        modified_paths = _sorted_git_modified_file_paths(state)
+        if not modified_paths:
+            return False
 
-    deps.refresh_git_status_overlay()
-    modified_paths = deps.sorted_git_modified_file_paths()
-    if not modified_paths:
-        return False
+        root = state.tree_root.resolve()
+        if state.browser_visible and state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
+            anchor_path = state.tree_entries[state.selected_idx].path.resolve()
+        else:
+            anchor_path = state.current_path.resolve()
 
-    root = state.tree_root.resolve()
-    if state.browser_visible and state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
-        anchor_path = state.tree_entries[state.selected_idx].path.resolve()
-    else:
-        anchor_path = state.current_path.resolve()
+        ordered_items: list[tuple[tuple[tuple[int, str, str], ...], Path]] = []
+        for path in modified_paths:
+            rel_path = path.relative_to(root)
+            ordered_items.append((_tree_order_key_for_relative_path(rel_path), path))
 
-    ordered_items: list[tuple[tuple[tuple[int, str, str], ...], Path]] = []
-    for path in modified_paths:
-        rel_path = path.relative_to(root)
-        ordered_items.append((_tree_order_key_for_relative_path(rel_path), path))
+        try:
+            anchor_rel_path = anchor_path.relative_to(root)
+            anchor_key: tuple[tuple[int, str, str], ...] | None = _tree_order_key_for_relative_path(
+                anchor_rel_path,
+                is_dir=anchor_path.is_dir(),
+            )
+        except Exception:
+            anchor_key = None
 
-    try:
-        anchor_rel_path = anchor_path.relative_to(root)
-        anchor_key: tuple[tuple[int, str, str], ...] | None = _tree_order_key_for_relative_path(
-            anchor_rel_path,
-            is_dir=anchor_path.is_dir(),
-        )
-    except Exception:
-        anchor_key = None
-
-    target: Path | None = None
-    wrapped_files = False
-    if direction > 0:
-        if anchor_key is not None:
-            for item_key, path in ordered_items:
-                if item_key > anchor_key:
-                    target = path
-                    break
+        target: Path | None = None
+        wrapped_files = False
+        if direction > 0:
+            if anchor_key is not None:
+                for item_key, path in ordered_items:
+                    if item_key > anchor_key:
+                        target = path
+                        break
+                if target is None:
+                    wrapped_files = True
             if target is None:
-                wrapped_files = True
-        if target is None:
-            target = ordered_items[0][1]
-    else:
-        if anchor_key is not None:
-            for item_key, path in reversed(ordered_items):
-                if item_key < anchor_key:
-                    target = path
-                    break
+                target = ordered_items[0][1]
+        else:
+            if anchor_key is not None:
+                for item_key, path in reversed(ordered_items):
+                    if item_key < anchor_key:
+                        target = path
+                        break
+                if target is None:
+                    wrapped_files = True
             if target is None:
-                wrapped_files = True
+                target = ordered_items[-1][1]
+
         if target is None:
-            target = ordered_items[-1][1]
+            return False
 
-    if target is None:
-        return False
+        if target == anchor_path and same_file_change_blocks:
+            wrap_line = same_file_change_blocks[0] if direction > 0 else same_file_change_blocks[-1]
+            next_start = _centered_scroll_start(
+                wrap_line,
+                state.max_start,
+                self.visible_content_rows(),
+            )
+            state.start = next_start
+            self.set_status_message("wrapped to first change" if direction > 0 else "wrapped to last change")
+            return True
 
-    if target == anchor_path and same_file_change_blocks:
-        wrap_line = same_file_change_blocks[0] if direction > 0 else same_file_change_blocks[-1]
-        next_start = _centered_scroll_start(
-            wrap_line,
-            state.max_start,
-            deps.visible_content_rows(),
-        )
-        state.start = next_start
-        deps.set_status_message("wrapped to first change" if direction > 0 else "wrapped to last change")
+        if target == anchor_path:
+            return False
+
+        origin = self.current_jump_location()
+        self.jump_to_path(target)
+        self.record_jump_if_changed(origin)
+        if wrapped_files:
+            self.set_status_message("wrapped to first change" if direction > 0 else "wrapped to last change")
         return True
-
-    if target == anchor_path:
-        return False
-
-    origin = deps.current_jump_location()
-    deps.jump_to_path(target)
-    deps.record_jump_if_changed(origin)
-    if wrapped_files:
-        deps.set_status_message("wrapped to first change" if direction > 0 else "wrapped to last change")
-    return True
-

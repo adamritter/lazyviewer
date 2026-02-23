@@ -18,8 +18,6 @@ from pathlib import Path
 from .ansi import ANSI_ESCAPE_RE, build_screen_lines
 from .git_jumps import (
     _GitModifiedJumpDeps,
-    _jump_to_next_git_modified,
-    _sorted_git_modified_file_paths,
 )
 from .mouse import (
     _SourcePaneOps,
@@ -31,8 +29,6 @@ from .mouse import (
 from .tree_sync import (
     _PreviewSelectionDeps,
     _TreeRefreshSyncDeps,
-    _preview_selected_entry,
-    _sync_selected_target_after_tree_refresh,
 )
 from .index_warmup import _TreeFilterIndexWarmupScheduler
 from .layout import _PagerLayoutOps
@@ -43,11 +39,7 @@ from .screen_utils import (
 )
 from .watch_refresh import (
     _WatchRefreshContext,
-    _mark_tree_watch_dirty,
-    _maybe_refresh_git_watch,
-    _maybe_refresh_tree_watch,
     _refresh_git_status_overlay,
-    _reset_git_watch_context,
 )
 from .config import (
     load_content_search_left_pane_percent,
@@ -460,9 +452,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     current_preview_image_path = layout_ops.current_preview_image_path
     current_preview_image_geometry = layout_ops.current_preview_image_geometry
     watch_refresh = _WatchRefreshContext()
-    mark_tree_watch_dirty = partial(_mark_tree_watch_dirty, watch_refresh)
-
-    sorted_git_modified_file_paths = partial(_sorted_git_modified_file_paths, state)
+    mark_tree_watch_dirty = watch_refresh.mark_tree_dirty
     refresh_rendered_for_current_path = partial(
         _refresh_rendered_for_current_path,
         state,
@@ -481,16 +471,14 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         status_refresh_seconds=GIT_STATUS_REFRESH_SECONDS,
     )
     reset_git_watch_context = partial(
-        _reset_git_watch_context,
+        watch_refresh.reset_git_context,
         state,
-        watch_refresh,
         resolve_git_paths=resolve_git_paths,
     )
     maybe_refresh_tree_watch: Callable[[], None]
     maybe_refresh_git_watch = partial(
-        _maybe_refresh_git_watch,
+        watch_refresh.maybe_refresh_git,
         state,
-        watch_refresh,
         refresh_git_status_overlay,
         refresh_rendered_for_current_path,
         build_git_watch_signature=build_git_watch_signature,
@@ -541,10 +529,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         jump_to_line=navigation_proxy.jump_to_line,
     )
 
-    preview_selected_entry = partial(
-        _preview_selected_entry,
-        preview_selection_deps,
-    )
+    preview_selected_entry = preview_selection_deps.preview_selected_entry
 
     tree_filter_deps = TreeFilterDeps(
         state=state,
@@ -574,14 +559,10 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         schedule_tree_filter_index_warmup=schedule_tree_filter_index_warmup,
         refresh_git_status_overlay=refresh_git_status_overlay,
     )
-    sync_selected_target_after_tree_refresh = partial(
-        _sync_selected_target_after_tree_refresh,
-        tree_refresh_sync_deps,
-    )
+    sync_selected_target_after_tree_refresh = tree_refresh_sync_deps.sync_selected_target_after_tree_refresh
     maybe_refresh_tree_watch = partial(
-        _maybe_refresh_tree_watch,
+        watch_refresh.maybe_refresh_tree,
         state,
-        watch_refresh,
         sync_selected_target_after_tree_refresh,
         build_tree_watch_signature=build_tree_watch_signature,
         monotonic=time.monotonic,
@@ -645,17 +626,13 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state=state,
         visible_content_rows=visible_content_rows,
         refresh_git_status_overlay=refresh_git_status_overlay,
-        sorted_git_modified_file_paths=sorted_git_modified_file_paths,
         current_jump_location=current_jump_location,
         jump_to_path=navigation_ops.jump_to_path,
         record_jump_if_changed=record_jump_if_changed,
         clear_status_message=partial(_clear_status_message, state),
         set_status_message=partial(_set_status_message, state),
     )
-    jump_to_next_git_modified = partial(
-        _jump_to_next_git_modified,
-        git_modified_jump_deps,
-    )
+    jump_to_next_git_modified = git_modified_jump_deps.jump_to_next_git_modified
 
     schedule_tree_filter_index_warmup()
     watch_refresh.tree_signature = build_tree_watch_signature(
