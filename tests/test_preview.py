@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer import preview
+from lazyviewer import source_pane as preview
 from lazyviewer.git_status import GIT_STATUS_CHANGED, GIT_STATUS_UNTRACKED
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
@@ -78,7 +78,7 @@ class PreviewBehaviorTests(unittest.TestCase):
                 call_count += 1
                 return original_scandir(path)
 
-            with mock.patch("lazyviewer.preview.os.scandir", side_effect=counted_scandir):
+            with mock.patch("lazyviewer.source_pane.os.scandir", side_effect=counted_scandir):
                 first = preview.build_directory_preview(root, show_hidden=False, max_depth=2, max_entries=10)
                 second = preview.build_directory_preview(root, show_hidden=False, max_depth=2, max_entries=10)
 
@@ -230,8 +230,8 @@ class PreviewBehaviorTests(unittest.TestCase):
             file_path = Path(tmp) / "big.py"
             file_path.write_text("x = 1\n" * 60_000, encoding="utf-8")
 
-            with mock.patch("lazyviewer.preview.os.isatty", return_value=True), mock.patch(
-                "lazyviewer.preview.colorize_source"
+            with mock.patch("lazyviewer.source_pane.os.isatty", return_value=True), mock.patch(
+                "lazyviewer.source_pane.colorize_source"
             ) as colorize_mock:
                 rendered = preview.build_rendered_for_path(
                     file_path,
@@ -350,7 +350,7 @@ class PreviewBehaviorTests(unittest.TestCase):
             subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=root, check=True)
 
             file_path.write_text("x = 1\nname = 'new'\n", encoding="utf-8")
-            with mock.patch("lazyviewer.preview.os.isatty", return_value=True):
+            with mock.patch("lazyviewer.source_pane.os.isatty", return_value=True):
                 rendered = preview.build_rendered_for_path(
                     file_path,
                     show_hidden=False,

@@ -23,6 +23,8 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 @dataclass(frozen=True)
 class RenderedPath:
+    """Rendered preview payload plus metadata used by runtime decisions."""
+
     text: str
     is_directory: bool
     truncated: bool
@@ -44,6 +46,17 @@ def build_rendered_for_path(
     dir_show_size_labels: bool = True,
     colorize_source_fn: Callable[[str, Path, str], str] | None = None,
 ) -> RenderedPath:
+    """Build preview content for a file or directory target.
+
+    Resolution order for files:
+    1. PNG signature -> kitty-image metadata preview
+    2. NUL-byte probe -> binary placeholder text
+    3. optional git-diff preview (when enabled and available)
+    4. sanitized source text, optionally syntax-colored on TTY
+
+    Directory targets delegate to ``build_directory_preview`` and report whether
+    entry listing was truncated.
+    """
     if target.is_dir():
         preview, truncated = build_directory_preview(
             target,

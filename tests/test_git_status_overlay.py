@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 
 from lazyviewer.ansi import ANSI_ESCAPE_RE
-from lazyviewer.preview.diff import (
+from lazyviewer.source_pane.diff import (
     _ADDED_BG_SGR,
     _apply_line_background,
     _boost_foreground_contrast_for_diff,

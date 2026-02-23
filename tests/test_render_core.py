@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.preview.diff import _ADDED_BG_SGR, _apply_line_background
+from lazyviewer.source_pane.diff import _ADDED_BG_SGR, _apply_line_background
 from lazyviewer.render import (
     build_status_line,
     help_panel_row_count,

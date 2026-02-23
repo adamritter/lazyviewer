@@ -19,6 +19,7 @@ from .text import format_sticky_header_line
 
 
 def leading_indent_columns(text: str) -> int:
+    """Return indentation width where tabs count as four columns."""
     col = 0
     for ch in text:
         if ch == " ":
@@ -38,6 +39,12 @@ def blank_line_exits_symbol_scope(
     sticky_symbol: SymbolEntry,
     preview_is_git_diff: bool = False,
 ) -> bool:
+    """Decide whether a blank line terminates the current sticky symbol scope.
+
+    Blank lines are considered inside scope when the next nonblank line is more
+    indented than the sticky header (or is an isolated closing brace), and
+    outside scope when control clearly returns to sibling/parent level.
+    """
     next_nonblank = next_nonblank_source_line(
         text_lines,
         source_line + 1,
@@ -95,6 +102,7 @@ def source_line_exits_symbol_scope(
     sticky_symbol: SymbolEntry,
     preview_is_git_diff: bool = False,
 ) -> bool:
+    """Return whether ``source_line`` lies outside ``sticky_symbol`` scope."""
     if source_line <= (sticky_symbol.line + 1):
         return False
 
@@ -158,6 +166,11 @@ def sticky_symbol_headers_for_position(
     wrap_text: bool,
     preview_is_git_diff: bool,
 ) -> list[SymbolEntry]:
+    """Compute sticky symbol chain for the current viewport top.
+
+    For git diff previews, scope checks prefer raw source-file text to avoid
+    repeated diff-to-source remapping while scrolling.
+    """
     if not current_path.is_file() or content_rows <= 1:
         return []
 
@@ -176,6 +189,7 @@ def sticky_symbol_headers_for_position(
             pass
 
     def visible_sticky_symbols(candidates: list[SymbolEntry], source_line: int) -> list[SymbolEntry]:
+        """Filter sticky candidates to symbols still active at ``source_line``."""
         visible: list[SymbolEntry] = []
         for symbol in candidates:
             if source_line_exits_symbol_scope(
@@ -236,6 +250,7 @@ def formatted_sticky_headers(
     text_x: int,
     preview_is_git_diff: bool = False,
 ) -> list[str]:
+    """Render sticky symbol source lines into formatted header rows."""
     return [
         format_sticky_header_line(line, width)
         for line in sticky_source_lines(

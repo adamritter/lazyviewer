@@ -52,15 +52,15 @@ from .editor import launch_editor
 from .git_status import collect_git_status_overlay
 from .highlight import colorize_source
 from .key_handlers import NormalKeyOps, handle_normal_key as handle_normal_key_event
-from .preview import (
+from .source_pane import (
     DIR_PREVIEW_GROWTH_STEP,
     DIR_PREVIEW_HARD_MAX_ENTRIES,
     DIR_PREVIEW_INITIAL_MAX_ENTRIES,
     build_rendered_for_path,
     clear_directory_preview_cache,
 )
-from .preview.diff import clear_diff_preview_cache
-from .preview.events import directory_preview_target_for_display_line as preview_directory_preview_target_for_display_line
+from .source_pane.diff import clear_diff_preview_cache
+from .source_pane.events import directory_preview_target_for_display_line as preview_directory_preview_target_for_display_line
 from .render import help_panel_row_count
 from .loop import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
 from .picker_navigation import NavigationPickerDeps, NavigationPickerOps

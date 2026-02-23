@@ -1,85 +1,83 @@
-"""Source-pane preview rendering helpers."""
+"""Preview-pane line mapping helpers for wrapped and diff-rendered content.
+
+This module is the stable public API for preview rendering helpers.
+Implementations are split across focused helper modules.
+"""
 
 from __future__ import annotations
 
-from pathlib import Path
+from .diffmap import (
+    DIFF_REMOVED_BG_SGR,
+    diff_preview_logical_line_is_removed,
+    diff_preview_uses_plain_markers,
+    diff_source_line_for_display_index,
+    iter_diff_logical_line_ranges,
+)
+from .highlighting import (
+    SOURCE_SELECTION_BG_SGR,
+    _highlight_segment_with_background,
+    highlight_ansi_column_range,
+    highlight_ansi_substrings,
+    normalized_selection_range,
+    rendered_preview_row,
+    selection_span_for_rendered_line,
+)
+from .source import (
+    extract_source_line_text,
+    next_nonblank_source_line,
+    source_line_count,
+    source_line_display_index,
+    source_line_is_blank,
+    source_line_raw_text,
+    status_line_range,
+    sticky_source_lines,
+)
+from .sticky import (
+    blank_line_exits_symbol_scope,
+    formatted_sticky_headers,
+    leading_indent_columns,
+    source_line_exits_symbol_scope,
+    sticky_symbol_headers_for_position,
+)
+from .text import (
+    ansi_display_width,
+    format_sticky_header_line,
+    line_has_newline_terminator,
+    plain_display_width,
+    scroll_percent,
+    underline_with_ansi,
+)
 
-from ..preview import rendering as preview_rendering
-
-
-class SourcePaneRenderer:
-    def __init__(
-        self,
-        text_lines: list[str],
-        text_start: int,
-        content_rows: int,
-        line_width: int,
-        current_path: Path,
-        wrap_text: bool,
-        text_x: int,
-        text_search_query: str,
-        text_search_current_line: int,
-        text_search_current_column: int,
-        preview_is_git_diff: bool,
-        source_selection_anchor: tuple[int, int] | None,
-        source_selection_focus: tuple[int, int] | None,
-    ) -> None:
-        self.text_lines = text_lines
-        self.text_start = text_start
-        self.line_width = line_width
-        self.wrap_text = wrap_text
-        self.text_x = text_x
-        self.text_search_query = text_search_query
-        self.text_search_current_line = text_search_current_line
-        self.text_search_current_column = text_search_current_column
-
-        self._has_current_text_hit = text_search_current_line > 0 and text_search_current_column > 0
-        self._selection_range = preview_rendering.normalized_selection_range(
-            source_selection_anchor,
-            source_selection_focus,
-        )
-        sticky_symbols = preview_rendering.sticky_symbol_headers_for_position(
-            text_lines=text_lines,
-            text_start=text_start,
-            content_rows=content_rows,
-            current_path=current_path,
-            wrap_text=wrap_text,
-            preview_is_git_diff=preview_is_git_diff,
-        )
-        self.sticky_headers = preview_rendering.formatted_sticky_headers(
-            text_lines,
-            sticky_symbols,
-            line_width,
-            wrap_text,
-            text_x,
-            preview_is_git_diff=preview_is_git_diff,
-        )
-        self.sticky_header_rows = len(self.sticky_headers)
-        self.text_content_rows = max(1, content_rows - self.sticky_header_rows)
-        self.text_percent = preview_rendering.scroll_percent(text_start, len(text_lines), self.text_content_rows)
-        self.status_start, self.status_end, self.status_total = preview_rendering.status_line_range(
-            text_lines,
-            text_start,
-            self.text_content_rows,
-            wrap_text,
-        )
-
-    def render_row(self, row: int) -> str:
-        if row < self.sticky_header_rows:
-            return self.sticky_headers[row]
-
-        text_idx = self.text_start + row
-        if text_idx >= len(self.text_lines):
-            return ""
-        return preview_rendering.rendered_preview_row(
-            self.text_lines,
-            text_idx,
-            self.line_width,
-            self.wrap_text,
-            self.text_x,
-            self.text_search_query,
-            self.text_search_current_line,
-            self.text_search_current_column,
-            self._has_current_text_hit,
-            self._selection_range,
-        )
+__all__ = [
+    "DIFF_REMOVED_BG_SGR",
+    "SOURCE_SELECTION_BG_SGR",
+    "plain_display_width",
+    "ansi_display_width",
+    "underline_with_ansi",
+    "format_sticky_header_line",
+    "line_has_newline_terminator",
+    "iter_diff_logical_line_ranges",
+    "diff_preview_uses_plain_markers",
+    "diff_preview_logical_line_is_removed",
+    "diff_source_line_for_display_index",
+    "source_line_display_index",
+    "source_line_raw_text",
+    "source_line_is_blank",
+    "source_line_count",
+    "next_nonblank_source_line",
+    "status_line_range",
+    "leading_indent_columns",
+    "blank_line_exits_symbol_scope",
+    "source_line_exits_symbol_scope",
+    "sticky_symbol_headers_for_position",
+    "extract_source_line_text",
+    "sticky_source_lines",
+    "scroll_percent",
+    "highlight_ansi_substrings",
+    "_highlight_segment_with_background",
+    "highlight_ansi_column_range",
+    "normalized_selection_range",
+    "selection_span_for_rendered_line",
+    "formatted_sticky_headers",
+    "rendered_preview_row",
+]

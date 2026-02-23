@@ -6,14 +6,21 @@ from ..ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line
 
 
 def plain_display_width(text: str) -> int:
+    """Return terminal display width for plain text (no ANSI stripping)."""
     return sum(char_display_width(ch, 0) for ch in text)
 
 
 def ansi_display_width(text: str) -> int:
+    """Return display width after removing ANSI escape sequences."""
     return plain_display_width(ANSI_ESCAPE_RE.sub("", text))
 
 
 def underline_with_ansi(text: str) -> str:
+    """Underline text while preserving existing ANSI color/style sequences.
+
+    For SGR sequences the underline attribute is re-applied after each style
+    reset/change so nested colorized tokens remain underlined end-to-end.
+    """
     if not text:
         return text
 
@@ -42,6 +49,7 @@ def underline_with_ansi(text: str) -> str:
 
 
 def format_sticky_header_line(source_line: str, width: int) -> str:
+    """Format one sticky-header row with underline and filler separator."""
     if width <= 0:
         return ""
 
@@ -56,10 +64,12 @@ def format_sticky_header_line(source_line: str, width: int) -> str:
 
 
 def line_has_newline_terminator(line: str) -> bool:
+    """Return whether the line ends with CR or LF terminator."""
     return line.endswith("\n") or line.endswith("\r")
 
 
 def scroll_percent(text_start: int, total_lines: int, visible_rows: int) -> float:
+    """Compute vertical scroll position as percentage of scrollable range."""
     if total_lines <= 0:
         return 0.0
     max_start = max(0, total_lines - max(1, visible_rows))
