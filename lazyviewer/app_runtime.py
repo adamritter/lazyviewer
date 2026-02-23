@@ -10,10 +10,8 @@ import os
 import subprocess
 import shutil
 import sys
-import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
@@ -36,10 +34,20 @@ from .app_runtime_tree_sync import (
     _preview_selected_entry,
     _sync_selected_target_after_tree_refresh,
 )
+from .app_runtime_index_warmup import _TreeFilterIndexWarmupScheduler
+from .app_runtime_layout import _PagerLayoutOps
 from .app_runtime_utils import (
     _centered_scroll_start,
     _first_git_change_screen_line,
     _tree_order_key_for_relative_path,
+)
+from .app_runtime_watch import (
+    _WatchRefreshContext,
+    _mark_tree_watch_dirty,
+    _maybe_refresh_git_watch,
+    _maybe_refresh_tree_watch,
+    _refresh_git_status_overlay,
+    _reset_git_watch_context,
 )
 from .config import (
     load_content_search_left_pane_percent,
@@ -149,188 +157,6 @@ def _clear_status_message(state: AppState) -> None:
 def _set_status_message(state: AppState, message: str) -> None:
     state.status_message = message
     state.status_message_until = time.monotonic() + WRAP_STATUS_SECONDS
-
-
-class _TreeFilterIndexWarmupScheduler:
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._pending: tuple[Path, bool] | None = None
-        self._running = False
-
-    def _worker(self) -> None:
-        while True:
-            with self._lock:
-                pending = self._pending
-                self._pending = None
-                if pending is None:
-                    self._running = False
-                    return
-
-            root, show_hidden = pending
-            try:
-                collect_project_file_labels(
-                    root,
-                    show_hidden,
-                    skip_gitignored=_skip_gitignored_for_hidden_mode(show_hidden),
-                )
-            except Exception:
-                # Warming is best-effort; foreground path still loads synchronously if needed.
-                pass
-
-    def schedule(self, root: Path, show_hidden: bool) -> None:
-        with self._lock:
-            self._pending = (root.resolve(), show_hidden)
-            if self._running:
-                return
-            self._running = True
-
-        worker = threading.Thread(
-            target=self._worker,
-            name="lazyviewer-file-index",
-            daemon=True,
-        )
-        worker.start()
-
-    def schedule_for_state(
-        self,
-        state: AppState,
-        root: Path | None = None,
-        show_hidden_value: bool | None = None,
-    ) -> None:
-        target_root = state.tree_root if root is None else root
-        target_show_hidden = state.show_hidden if show_hidden_value is None else show_hidden_value
-        self.schedule(target_root, target_show_hidden)
-
-
-class _PagerLayoutOps:
-    def __init__(
-        self,
-        state: AppState,
-        kitty_graphics_supported: bool,
-    ) -> None:
-        self.state = state
-        self.kitty_graphics_supported = kitty_graphics_supported
-        self.content_mode_left_width_active = self.content_search_match_view_active()
-
-    def effective_text_width(self, columns: int | None = None) -> int:
-        if columns is None:
-            columns = shutil.get_terminal_size((80, 24)).columns
-        if self.state.browser_visible:
-            return max(1, columns - self.state.left_width - 2)
-        return max(1, columns - 1)
-
-    def visible_content_rows(self) -> int:
-        help_rows = help_panel_row_count(
-            self.state.usable,
-            self.state.show_help,
-            browser_visible=self.state.browser_visible,
-            tree_filter_active=self.state.tree_filter_active,
-            tree_filter_mode=self.state.tree_filter_mode,
-            tree_filter_editing=self.state.tree_filter_editing,
-        )
-        return max(1, self.state.usable - help_rows)
-
-    def content_search_match_view_active(self) -> bool:
-        return (
-            self.state.tree_filter_active
-            and self.state.tree_filter_mode == "content"
-            and bool(self.state.tree_filter_query)
-        )
-
-    def rebuild_screen_lines(
-        self,
-        columns: int | None = None,
-        preserve_scroll: bool = True,
-    ) -> None:
-        self.state.lines = build_screen_lines(
-            self.state.rendered,
-            self.effective_text_width(columns),
-            wrap=self.state.wrap_text,
-        )
-        self.state.max_start = max(0, len(self.state.lines) - self.visible_content_rows())
-        if preserve_scroll:
-            self.state.start = max(0, min(self.state.start, self.state.max_start))
-        else:
-            self.state.start = 0
-        if self.state.wrap_text:
-            self.state.text_x = 0
-
-    def sync_left_width_for_tree_filter_mode(self, force: bool = False) -> None:
-        use_content_mode_width = self.content_search_match_view_active()
-        if not force and use_content_mode_width == self.content_mode_left_width_active:
-            return
-        self.content_mode_left_width_active = use_content_mode_width
-
-        columns = shutil.get_terminal_size((80, 24)).columns
-        if use_content_mode_width:
-            saved_percent = load_content_search_left_pane_percent()
-            if saved_percent is None:
-                current_percent = (self.state.left_width / max(1, columns)) * 100.0
-                saved_percent = min(
-                    99.0,
-                    max(
-                        CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT,
-                        current_percent + CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT,
-                    ),
-                )
-        else:
-            saved_percent = load_left_pane_percent()
-
-        if saved_percent is None:
-            desired_left = compute_left_width(columns)
-        else:
-            desired_left = int((saved_percent / 100.0) * columns)
-        desired_left = clamp_left_width(columns, desired_left)
-        if desired_left == self.state.left_width:
-            return
-
-        self.state.left_width = desired_left
-        self.state.right_width = max(1, columns - self.state.left_width - 2)
-        if self.state.right_width != self.state.last_right_width:
-            self.state.last_right_width = self.state.right_width
-            self.rebuild_screen_lines(columns=columns)
-        self.state.dirty = True
-
-    def save_left_pane_width_for_mode(self, total_width: int, left_width: int) -> None:
-        if self.content_search_match_view_active():
-            save_content_search_left_pane_percent(total_width, left_width)
-            return
-        save_left_pane_percent(total_width, left_width)
-
-    def show_inline_error(self, message: str) -> None:
-        self.state.rendered = f"\033[31m{message}\033[0m"
-        self.rebuild_screen_lines(preserve_scroll=False)
-        self.state.text_x = 0
-        self.state.dir_preview_path = None
-        self.state.dir_preview_truncated = False
-        self.state.preview_image_path = None
-        self.state.preview_image_format = None
-        self.state.dirty = True
-
-    def current_preview_image_path(self) -> Path | None:
-        if not self.kitty_graphics_supported:
-            return None
-        if self.state.preview_image_format != "png":
-            return None
-        if self.state.preview_image_path is None:
-            return None
-        try:
-            image_path = self.state.preview_image_path.resolve()
-        except Exception:
-            image_path = self.state.preview_image_path
-        if not image_path.exists() or not image_path.is_file():
-            return None
-        return image_path
-
-    def current_preview_image_geometry(self, columns: int) -> tuple[int, int, int, int]:
-        image_rows = self.visible_content_rows()
-        if self.state.browser_visible:
-            image_col = self.state.left_width + 2
-            image_width = max(1, columns - self.state.left_width - 2 - 1)
-        else:
-            image_col = 1
-            image_width = max(1, columns - 1)
-        return image_col, 1, image_width, image_rows
 
 
 def _launch_editor_for_path(terminal: TerminalController, target: Path) -> str | None:
@@ -492,17 +318,6 @@ def _launch_lazygit(
     sync_selected_target_after_tree_refresh(preferred_path=preferred_path, force_rebuild=True)
     mark_tree_watch_dirty()
 
-
-@dataclass
-class _WatchRefreshContext:
-    tree_last_poll: float = 0.0
-    tree_signature: str | None = None
-    git_last_poll: float = 0.0
-    git_signature: str | None = None
-    git_repo_root: Path | None = None
-    git_dir: Path | None = None
-
-
 class _NavigationProxy:
     def __init__(self) -> None:
         self._ops: NavigationPickerOps | None = None
@@ -525,111 +340,6 @@ class _NavigationProxy:
     def jump_to_line(self, line_number: int) -> None:
         assert self._ops is not None
         self._ops.jump_to_line(line_number)
-
-
-def _refresh_git_status_overlay(
-    state: AppState,
-    refresh_rendered_for_current_path: Callable[..., None],
-    force: bool = False,
-) -> None:
-    if not state.git_features_enabled:
-        if state.git_status_overlay:
-            state.git_status_overlay = {}
-            state.dirty = True
-        state.git_status_last_refresh = time.monotonic()
-        return
-
-    now = time.monotonic()
-    if not force and (now - state.git_status_last_refresh) < GIT_STATUS_REFRESH_SECONDS:
-        return
-
-    previous = state.git_status_overlay
-    state.git_status_overlay = collect_git_status_overlay(state.tree_root)
-    state.git_status_last_refresh = time.monotonic()
-    if state.git_status_overlay != previous:
-        if state.current_path.resolve().is_dir():
-            refresh_rendered_for_current_path(reset_scroll=False, reset_dir_budget=False)
-        state.dirty = True
-
-
-def _reset_git_watch_context(
-    state: AppState,
-    watch_context: _WatchRefreshContext,
-) -> None:
-    watch_context.git_repo_root, watch_context.git_dir = resolve_git_paths(state.tree_root)
-    watch_context.git_last_poll = 0.0
-    watch_context.git_signature = None
-
-
-def _maybe_refresh_tree_watch(
-    state: AppState,
-    watch_context: _WatchRefreshContext,
-    sync_selected_target_after_tree_refresh: Callable[..., None],
-) -> None:
-    now = time.monotonic()
-    if (now - watch_context.tree_last_poll) < TREE_WATCH_POLL_SECONDS:
-        return
-    watch_context.tree_last_poll = now
-
-    signature = build_tree_watch_signature(
-        state.tree_root,
-        state.expanded,
-        state.show_hidden,
-    )
-    if watch_context.tree_signature is None:
-        watch_context.tree_signature = signature
-        return
-    if signature == watch_context.tree_signature:
-        return
-
-    watch_context.tree_signature = signature
-    preferred_path = (
-        state.tree_entries[state.selected_idx].path.resolve()
-        if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries)
-        else state.current_path.resolve()
-    )
-    sync_selected_target_after_tree_refresh(preferred_path=preferred_path)
-
-
-def _maybe_refresh_git_watch(
-    state: AppState,
-    watch_context: _WatchRefreshContext,
-    refresh_git_status_overlay: Callable[..., None],
-    refresh_rendered_for_current_path: Callable[..., None],
-) -> None:
-    if not state.git_features_enabled:
-        return
-    now = time.monotonic()
-    if (now - watch_context.git_last_poll) < GIT_WATCH_POLL_SECONDS:
-        return
-    watch_context.git_last_poll = now
-
-    signature = build_git_watch_signature(watch_context.git_dir)
-    if watch_context.git_signature is None:
-        watch_context.git_signature = signature
-        return
-    if signature == watch_context.git_signature:
-        return
-
-    watch_context.git_signature = signature
-    refresh_git_status_overlay(force=True)
-    # Git HEAD/index changes can invalidate the current file's diff preview
-    # even when the selected path hasn't changed.
-    previous_rendered = state.rendered
-    previous_start = state.start
-    previous_max_start = state.max_start
-    refresh_rendered_for_current_path(reset_scroll=False, reset_dir_budget=False)
-    if (
-        state.rendered != previous_rendered
-        or state.start != previous_start
-        or state.max_start != previous_max_start
-    ):
-        state.dirty = True
-
-
-def _mark_tree_watch_dirty(watch_context: _WatchRefreshContext) -> None:
-    watch_context.tree_signature = None
-
 
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
     if nopager or not os.isatty(sys.stdin.fileno()):
@@ -722,9 +432,26 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     stdout_fd = sys.stdout.fileno()
     terminal = TerminalController(stdin_fd, stdout_fd)
     kitty_graphics_supported = terminal.supports_kitty_graphics()
-    index_warmup_scheduler = _TreeFilterIndexWarmupScheduler()
+    index_warmup_scheduler = _TreeFilterIndexWarmupScheduler(
+        collect_project_file_labels=collect_project_file_labels,
+        skip_gitignored_for_hidden_mode=_skip_gitignored_for_hidden_mode,
+    )
     schedule_tree_filter_index_warmup = partial(index_warmup_scheduler.schedule_for_state, state)
-    layout_ops = _PagerLayoutOps(state, kitty_graphics_supported)
+    layout_ops = _PagerLayoutOps(
+        state,
+        kitty_graphics_supported,
+        help_panel_row_count=help_panel_row_count,
+        build_screen_lines=build_screen_lines,
+        get_terminal_size=shutil.get_terminal_size,
+        load_content_search_left_pane_percent=load_content_search_left_pane_percent,
+        load_left_pane_percent=load_left_pane_percent,
+        save_content_search_left_pane_percent=save_content_search_left_pane_percent,
+        save_left_pane_percent=save_left_pane_percent,
+        compute_left_width=compute_left_width,
+        clamp_left_width=clamp_left_width,
+        content_search_left_pane_min_percent=CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT,
+        content_search_left_pane_fallback_delta_percent=CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT,
+    )
     visible_content_rows = layout_ops.visible_content_rows
     sync_left_width_for_tree_filter_mode = layout_ops.sync_left_width_for_tree_filter_mode
     save_left_pane_width_for_mode = layout_ops.save_left_pane_width_for_mode
@@ -749,11 +476,15 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         _refresh_git_status_overlay,
         state,
         refresh_rendered_for_current_path,
+        collect_git_status_overlay=collect_git_status_overlay,
+        monotonic=time.monotonic,
+        status_refresh_seconds=GIT_STATUS_REFRESH_SECONDS,
     )
     reset_git_watch_context = partial(
         _reset_git_watch_context,
         state,
         watch_refresh,
+        resolve_git_paths=resolve_git_paths,
     )
     maybe_refresh_tree_watch: Callable[[], None]
     maybe_refresh_git_watch = partial(
@@ -762,6 +493,9 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         watch_refresh,
         refresh_git_status_overlay,
         refresh_rendered_for_current_path,
+        build_git_watch_signature=build_git_watch_signature,
+        monotonic=time.monotonic,
+        git_watch_poll_seconds=GIT_WATCH_POLL_SECONDS,
     )
 
     clear_source_selection = partial(_clear_source_selection, state)
@@ -849,6 +583,9 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state,
         watch_refresh,
         sync_selected_target_after_tree_refresh,
+        build_tree_watch_signature=build_tree_watch_signature,
+        monotonic=time.monotonic,
+        tree_watch_poll_seconds=TREE_WATCH_POLL_SECONDS,
     )
     handle_tree_mouse_wheel = partial(
         _handle_tree_mouse_wheel,
