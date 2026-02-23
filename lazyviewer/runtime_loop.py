@@ -88,6 +88,18 @@ def run_main_loop(
             ops.rebuild_screen_lines(columns=term_columns)
         state.dirty = True
 
+    def toggle_tree_filter_mode(mode: str) -> None:
+        if state.tree_filter_active:
+            if state.tree_filter_mode == mode and state.tree_filter_editing:
+                ops.close_tree_filter(clear_query=True)
+            elif state.tree_filter_mode != mode:
+                ops.open_tree_filter(mode)
+            else:
+                state.tree_filter_editing = True
+                state.dirty = True
+            return
+        ops.open_tree_filter(mode)
+
     with terminal.raw_mode():
         while True:
             term = shutil.get_terminal_size((80, 24))
@@ -335,30 +347,12 @@ def run_main_loop(
 
             if key == "CTRL_P" and not state.picker_active:
                 state.count_buffer = ""
-                if state.tree_filter_active:
-                    if state.tree_filter_mode == "files" and state.tree_filter_editing:
-                        ops.close_tree_filter(clear_query=True)
-                    elif state.tree_filter_mode != "files":
-                        ops.open_tree_filter("files")
-                    else:
-                        state.tree_filter_editing = True
-                        state.dirty = True
-                else:
-                    ops.open_tree_filter("files")
+                toggle_tree_filter_mode("files")
                 continue
 
             if key == "/" and not state.picker_active and not (state.tree_filter_active and state.tree_filter_editing):
                 state.count_buffer = ""
-                if state.tree_filter_active:
-                    if state.tree_filter_mode == "content" and state.tree_filter_editing:
-                        ops.close_tree_filter(clear_query=True)
-                    elif state.tree_filter_mode != "content":
-                        ops.open_tree_filter("content")
-                    else:
-                        state.tree_filter_editing = True
-                        state.dirty = True
-                else:
-                    ops.open_tree_filter("content")
+                toggle_tree_filter_mode("content")
                 continue
 
             if key == ":" and not state.picker_active:
