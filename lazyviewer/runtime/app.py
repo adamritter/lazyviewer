@@ -31,7 +31,7 @@ from .tree_sync import (
 )
 from .index_warmup import TreeFilterIndexWarmupScheduler
 from .layout import PagerLayoutOps
-from ..screen_utils import (
+from .screen import (
     _centered_scroll_start,
     _first_git_change_screen_line,
     _tree_order_key_for_relative_path,

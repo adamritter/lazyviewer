@@ -16,7 +16,7 @@ from unittest import mock
 
 from lazyviewer.runtime import app as app_runtime
 from lazyviewer.ansi import ANSI_ESCAPE_RE
-from lazyviewer.screen_utils import (
+from lazyviewer.runtime.screen import (
     _centered_scroll_start,
     _first_git_change_screen_line,
     _tree_order_key_for_relative_path,
