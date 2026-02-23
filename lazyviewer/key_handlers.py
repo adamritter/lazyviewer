@@ -34,6 +34,38 @@ def _parse_mouse_col_row(mouse_key: str) -> tuple[int | None, int | None]:
         return None, None
 
 
+@dataclass(frozen=True)
+class KeyComboBinding:
+    combos: tuple[str, ...]
+    handler: Callable[[], bool | None]
+
+
+class KeyComboRegistry:
+    def __init__(self, normalize: Callable[[str], str] | None = None) -> None:
+        self._normalize = normalize if normalize is not None else self._identity
+        self._handlers: dict[str, Callable[[], bool | None]] = {}
+
+    @staticmethod
+    def _identity(key: str) -> str:
+        return key
+
+    def register_binding(self, binding: KeyComboBinding) -> KeyComboRegistry:
+        for combo in binding.combos:
+            self._handlers[self._normalize(combo)] = binding.handler
+        return self
+
+    def register_bindings(self, *bindings: KeyComboBinding) -> KeyComboRegistry:
+        for binding in bindings:
+            self.register_binding(binding)
+        return self
+
+    def dispatch(self, key: str) -> bool | None:
+        handler = self._handlers.get(self._normalize(key))
+        if handler is None:
+            return None
+        return handler()
+
+
 def _move_picker_selection(state: AppState, direction: int) -> None:
     if not state.picker_match_labels:
         return
@@ -379,22 +411,39 @@ def handle_normal_key(
         preview_selected_entry()
         state.dirty = True
 
-    if key_lower == "s" and not state.picker_active:
+    def open_symbol_picker_action() -> bool | None:
+        if state.picker_active:
+            return None
         state.count_buffer = ""
         open_symbol_picker()
         return False
 
-    if key == "m":
+    def begin_mark_set_action() -> bool:
         state.count_buffer = ""
         state.pending_mark_set = True
         state.pending_mark_jump = False
         return False
 
-    if key == "'":
+    def begin_mark_jump_action() -> bool:
         state.count_buffer = ""
         state.pending_mark_set = False
         state.pending_mark_jump = True
         return False
+
+    pre_exact_bindings = KeyComboRegistry().register_bindings(
+        KeyComboBinding(("m",), begin_mark_set_action),
+        KeyComboBinding(("'",), begin_mark_jump_action),
+    )
+    pre_lower_bindings = KeyComboRegistry(normalize=str.lower).register_bindings(
+        KeyComboBinding(("s",), open_symbol_picker_action),
+    )
+
+    handled = pre_exact_bindings.dispatch(key)
+    if handled is not None:
+        return handled
+    handled = pre_lower_bindings.dispatch(key)
+    if handled is not None:
+        return handled
 
     if key.isdigit():
         state.count_buffer += key
@@ -402,15 +451,28 @@ def handle_normal_key(
 
     count = int(state.count_buffer) if state.count_buffer else None
     state.count_buffer = ""
-    if key in {"?", "CTRL_QUESTION"}:
+
+    def toggle_help_panel_action() -> bool:
         toggle_help_panel()
         return False
-    if key == "CTRL_G":
+
+    def launch_lazygit_action() -> bool:
         launch_lazygit()
         return False
-    if key == "CTRL_O":
+
+    def toggle_git_features_action() -> bool:
         toggle_git_features()
         return False
+
+    global_exact_bindings = KeyComboRegistry().register_bindings(
+        KeyComboBinding(("?", "CTRL_QUESTION"), toggle_help_panel_action),
+        KeyComboBinding(("CTRL_G",), launch_lazygit_action),
+        KeyComboBinding(("CTRL_O",), toggle_git_features_action),
+    )
+    handled = global_exact_bindings.dispatch(key)
+    if handled is not None:
+        return handled
+
     if key in {"CTRL_U", "CTRL_D"}:
         if state.browser_visible and state.tree_entries:
             direction = -1 if key == "CTRL_U" else 1
@@ -475,22 +537,28 @@ def handle_normal_key(
                 if state.selected_idx != prev_selected or current_jump_location() != origin:
                     state.dirty = True
         return False
-    if key == "R":
+
+    def reroot_to_parent_action() -> bool:
         reroot_to_parent()
         return False
-    if key == "r":
+
+    def reroot_to_selected_target_action() -> bool:
         reroot_to_selected_target()
         return False
-    if key == ".":
+
+    def toggle_hidden_files_action() -> bool:
         toggle_hidden_files()
         return False
-    if key_lower == "t":
+
+    def toggle_tree_pane_action() -> bool:
         toggle_tree_pane()
         return False
-    if key_lower == "w":
+
+    def toggle_wrap_mode_action() -> bool:
         toggle_wrap_mode()
         return False
-    if key_lower == "e":
+
+    def edit_selected_target_action() -> bool:
         edit_target: Path | None = None
         if state.browser_visible and state.tree_entries:
             selected_entry = state.tree_entries[state.selected_idx]
@@ -521,23 +589,54 @@ def handle_normal_key(
             state.preview_is_git_diff = False
         state.dirty = True
         return False
-    if key_lower == "q" or key == "\x03":
+
+    def quit_action() -> bool:
         return True
-    if not state.tree_filter_active and state.git_features_enabled and key in {"n", "N"}:
-        direction = 1 if key == "n" else -1
+
+    def jump_to_next_git_modified_action(direction: int) -> bool | None:
+        if state.tree_filter_active or not state.git_features_enabled:
+            return None
         if jump_to_next_git_modified(direction):
             state.dirty = True
         return False
+
+    mode_exact_bindings = KeyComboRegistry().register_bindings(
+        KeyComboBinding(("R",), reroot_to_parent_action),
+        KeyComboBinding(("r",), reroot_to_selected_target_action),
+        KeyComboBinding((".",), toggle_hidden_files_action),
+        KeyComboBinding(("n",), lambda: jump_to_next_git_modified_action(1)),
+        KeyComboBinding(("N",), lambda: jump_to_next_git_modified_action(-1)),
+        KeyComboBinding(("\x03",), quit_action),
+    )
+    mode_lower_bindings = KeyComboRegistry(normalize=str.lower).register_bindings(
+        KeyComboBinding(("t",), toggle_tree_pane_action),
+        KeyComboBinding(("w",), toggle_wrap_mode_action),
+        KeyComboBinding(("e",), edit_selected_target_action),
+        KeyComboBinding(("q",), quit_action),
+    )
+    handled = mode_exact_bindings.dispatch(key)
+    if handled is not None:
+        return handled
+    handled = mode_lower_bindings.dispatch(key)
+    if handled is not None:
+        return handled
+
     if handle_tree_mouse_wheel(key):
         return False
     if handle_tree_mouse_click(key):
         return False
-    if state.browser_visible and key_lower in {"j", "k"}:
-        direction = 1 if key_lower == "j" else -1
-        if move_tree_selection(direction):
+
+    def move_tree_down_action() -> bool:
+        if move_tree_selection(1):
             state.dirty = True
         return False
-    if state.browser_visible and key_lower == "l":
+
+    def move_tree_up_action() -> bool:
+        if move_tree_selection(-1):
+            state.dirty = True
+        return False
+
+    def open_tree_entry_action() -> bool:
         entry = state.tree_entries[state.selected_idx]
         if entry.is_dir:
             resolved = entry.path.resolve()
@@ -557,7 +656,8 @@ def handle_normal_key(
             record_jump_if_changed(origin)
             state.dirty = True
         return False
-    if state.browser_visible and key_lower == "h":
+
+    def close_or_parent_tree_entry_action() -> bool:
         entry = state.tree_entries[state.selected_idx]
         if (
             entry.is_dir
@@ -576,17 +676,36 @@ def handle_normal_key(
                     state.dirty = True
                     break
         return False
-    if state.browser_visible and key == "ENTER":
+
+    def toggle_directory_tree_entry_action() -> bool | None:
         entry = state.tree_entries[state.selected_idx]
-        if entry.is_dir:
-            resolved = entry.path.resolve()
-            if resolved in state.expanded:
-                if resolved != state.tree_root:
-                    set_directory_expanded_state(resolved, False)
-            else:
-                set_directory_expanded_state(resolved, True)
-            refresh_tree_after_directory_change(resolved)
-            return False
+        if not entry.is_dir:
+            return None
+        resolved = entry.path.resolve()
+        if resolved in state.expanded:
+            if resolved != state.tree_root:
+                set_directory_expanded_state(resolved, False)
+        else:
+            set_directory_expanded_state(resolved, True)
+        refresh_tree_after_directory_change(resolved)
+        return False
+
+    if state.browser_visible:
+        browser_lower_bindings = KeyComboRegistry(normalize=str.lower).register_bindings(
+            KeyComboBinding(("j",), move_tree_down_action),
+            KeyComboBinding(("k",), move_tree_up_action),
+            KeyComboBinding(("l",), open_tree_entry_action),
+            KeyComboBinding(("h",), close_or_parent_tree_entry_action),
+        )
+        browser_exact_bindings = KeyComboRegistry().register_bindings(
+            KeyComboBinding(("ENTER",), toggle_directory_tree_entry_action),
+        )
+        handled = browser_lower_bindings.dispatch(key)
+        if handled is not None:
+            return handled
+        handled = browser_exact_bindings.dispatch(key)
+        if handled is not None:
+            return handled
 
     prev_start = state.start
     prev_text_x = state.text_x

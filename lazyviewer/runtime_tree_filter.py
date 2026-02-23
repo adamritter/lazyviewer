@@ -56,6 +56,7 @@ class TreeFilterOps:
         record_jump_if_changed: Callable[[JumpLocation], None],
         jump_to_path: Callable[[Path], None],
         jump_to_line: Callable[[int], None],
+        on_tree_filter_state_change: Callable[[], None] | None = None,
     ) -> None:
         self.state = state
         self.visible_content_rows = visible_content_rows
@@ -65,6 +66,7 @@ class TreeFilterOps:
         self.record_jump_if_changed = record_jump_if_changed
         self.jump_to_path = jump_to_path
         self.jump_to_line = jump_to_line
+        self.on_tree_filter_state_change = on_tree_filter_state_change
         self.loading_until = 0.0
         self.content_search_cache: OrderedDict[
             tuple[str, str, bool, bool, int, int],
@@ -397,6 +399,8 @@ class TreeFilterOps:
         if preview_selection:
             self.preview_selected_entry(force=True)
         self.state.dirty = True
+        if self.on_tree_filter_state_change is not None:
+            self.on_tree_filter_state_change()
 
     def reset_tree_filter_session_state(self) -> None:
         self.state.tree_filter_loading = False
@@ -421,6 +425,8 @@ class TreeFilterOps:
         if was_active and previous_mode != mode:
             self.rebuild_tree_entries(preferred_path=self.state.current_path.resolve())
         self.state.dirty = True
+        if self.on_tree_filter_state_change is not None:
+            self.on_tree_filter_state_change()
 
     def close_tree_filter(self, clear_query: bool = True) -> None:
         previous_browser_visible = self.state.tree_filter_prev_browser_visible
@@ -439,6 +445,8 @@ class TreeFilterOps:
                 self.rebuild_screen_lines()
         self.rebuild_tree_entries(preferred_path=self.state.current_path.resolve())
         self.state.dirty = True
+        if self.on_tree_filter_state_change is not None:
+            self.on_tree_filter_state_change()
 
     def activate_tree_filter_selection(self) -> None:
         if not self.state.tree_entries:

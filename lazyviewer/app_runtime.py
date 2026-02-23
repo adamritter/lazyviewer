@@ -289,114 +289,6 @@ def _set_status_message(state: AppState, message: str) -> None:
     state.status_message_until = time.monotonic() + WRAP_STATUS_SECONDS
 
 
-def _compose_normal_key_ops(
-    *,
-    navigation_ops: NavigationPickerOps,
-    current_jump_location,
-    record_jump_if_changed,
-    toggle_git_features,
-    launch_lazygit,
-    handle_tree_mouse_wheel,
-    handle_tree_mouse_click,
-    move_tree_selection,
-    rebuild_tree_entries,
-    preview_selected_entry,
-    refresh_rendered_for_current_path,
-    refresh_git_status_overlay,
-    maybe_grow_directory_preview,
-    visible_content_rows,
-    rebuild_screen_lines,
-    mark_tree_watch_dirty,
-    launch_editor_for_path,
-    jump_to_next_git_modified,
-) -> NormalKeyOps:
-    return NormalKeyOps(
-        current_jump_location=current_jump_location,
-        record_jump_if_changed=record_jump_if_changed,
-        open_symbol_picker=navigation_ops.open_symbol_picker,
-        reroot_to_parent=navigation_ops.reroot_to_parent,
-        reroot_to_selected_target=navigation_ops.reroot_to_selected_target,
-        toggle_hidden_files=navigation_ops.toggle_hidden_files,
-        toggle_tree_pane=navigation_ops.toggle_tree_pane,
-        toggle_wrap_mode=navigation_ops.toggle_wrap_mode,
-        toggle_help_panel=navigation_ops.toggle_help_panel,
-        toggle_git_features=toggle_git_features,
-        launch_lazygit=launch_lazygit,
-        handle_tree_mouse_wheel=handle_tree_mouse_wheel,
-        handle_tree_mouse_click=handle_tree_mouse_click,
-        move_tree_selection=move_tree_selection,
-        rebuild_tree_entries=rebuild_tree_entries,
-        preview_selected_entry=preview_selected_entry,
-        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
-        refresh_git_status_overlay=refresh_git_status_overlay,
-        maybe_grow_directory_preview=maybe_grow_directory_preview,
-        visible_content_rows=visible_content_rows,
-        rebuild_screen_lines=rebuild_screen_lines,
-        mark_tree_watch_dirty=mark_tree_watch_dirty,
-        launch_editor_for_path=launch_editor_for_path,
-        jump_to_next_git_modified=jump_to_next_git_modified,
-    )
-
-
-def _compose_loop_callbacks(
-    *,
-    tree_filter_ops: TreeFilterOps,
-    navigation_ops: NavigationPickerOps,
-    visible_content_rows,
-    rebuild_screen_lines,
-    maybe_refresh_tree_watch,
-    maybe_refresh_git_watch,
-    refresh_git_status_overlay,
-    current_preview_image_path,
-    current_preview_image_geometry,
-    open_tree_filter,
-    close_tree_filter,
-    activate_tree_filter_selection,
-    move_tree_selection,
-    apply_tree_filter_query,
-    jump_to_next_content_hit,
-    handle_normal_key,
-    save_left_pane_width_for_mode,
-    tick_source_selection_drag,
-    handle_tree_mouse_wheel,
-    handle_tree_mouse_click,
-) -> RuntimeLoopCallbacks:
-    return RuntimeLoopCallbacks(
-        get_tree_filter_loading_until=tree_filter_ops.get_loading_until,
-        tree_view_rows=tree_filter_ops.tree_view_rows,
-        tree_filter_prompt_prefix=tree_filter_ops.tree_filter_prompt_prefix,
-        tree_filter_placeholder=tree_filter_ops.tree_filter_placeholder,
-        visible_content_rows=visible_content_rows,
-        rebuild_screen_lines=rebuild_screen_lines,
-        maybe_refresh_tree_watch=maybe_refresh_tree_watch,
-        maybe_refresh_git_watch=maybe_refresh_git_watch,
-        refresh_git_status_overlay=refresh_git_status_overlay,
-        current_preview_image_path=current_preview_image_path,
-        current_preview_image_geometry=current_preview_image_geometry,
-        open_tree_filter=open_tree_filter,
-        open_command_picker=navigation_ops.open_command_picker,
-        close_picker=navigation_ops.close_picker,
-        refresh_command_picker_matches=navigation_ops.refresh_command_picker_matches,
-        activate_picker_selection=navigation_ops.activate_picker_selection,
-        refresh_active_picker_matches=navigation_ops.refresh_active_picker_matches,
-        handle_tree_mouse_wheel=handle_tree_mouse_wheel,
-        handle_tree_mouse_click=handle_tree_mouse_click,
-        toggle_help_panel=navigation_ops.toggle_help_panel,
-        close_tree_filter=close_tree_filter,
-        activate_tree_filter_selection=activate_tree_filter_selection,
-        move_tree_selection=move_tree_selection,
-        apply_tree_filter_query=apply_tree_filter_query,
-        jump_to_next_content_hit=jump_to_next_content_hit,
-        set_named_mark=navigation_ops.set_named_mark,
-        jump_to_named_mark=navigation_ops.jump_to_named_mark,
-        jump_back_in_history=navigation_ops.jump_back_in_history,
-        jump_forward_in_history=navigation_ops.jump_forward_in_history,
-        handle_normal_key=handle_normal_key,
-        save_left_pane_width=save_left_pane_width_for_mode,
-        tick_source_selection_drag=tick_source_selection_drag,
-    )
-
-
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
     if nopager or not os.isatty(sys.stdin.fileno()):
         rendered = content
@@ -1390,32 +1282,15 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         record_jump_if_changed=record_jump_if_changed_proxy,
         jump_to_path=jump_to_path_proxy,
         jump_to_line=jump_to_line_proxy,
+        on_tree_filter_state_change=sync_left_width_for_tree_filter_mode,
     )
 
     coerce_tree_filter_result_index = tree_filter_ops.coerce_tree_filter_result_index
     move_tree_selection = tree_filter_ops.move_tree_selection
     rebuild_tree_entries = tree_filter_ops.rebuild_tree_entries
-
-    def apply_tree_filter_query(
-        query: str,
-        preview_selection: bool = False,
-        select_first_file: bool = False,
-    ) -> None:
-        tree_filter_ops.apply_tree_filter_query(
-            query,
-            preview_selection=preview_selection,
-            select_first_file=select_first_file,
-        )
-        sync_left_width_for_tree_filter_mode()
-
-    def open_tree_filter(mode: str = "files") -> None:
-        tree_filter_ops.open_tree_filter(mode)
-        sync_left_width_for_tree_filter_mode()
-
-    def close_tree_filter(clear_query: bool = True) -> None:
-        tree_filter_ops.close_tree_filter(clear_query=clear_query)
-        sync_left_width_for_tree_filter_mode()
-
+    apply_tree_filter_query = tree_filter_ops.apply_tree_filter_query
+    open_tree_filter = tree_filter_ops.open_tree_filter
+    close_tree_filter = tree_filter_ops.close_tree_filter
     activate_tree_filter_selection = tree_filter_ops.activate_tree_filter_selection
     jump_to_next_content_hit = tree_filter_ops.jump_to_next_content_hit
 
@@ -1600,16 +1475,18 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         sync_selected_target_after_tree_refresh(preferred_path=preferred_path, force_rebuild=True)
         mark_tree_watch_dirty()
 
+    nav = navigation_ops
+
     normal_key_ops = NormalKeyOps(
         current_jump_location=current_jump_location,
         record_jump_if_changed=record_jump_if_changed,
-        open_symbol_picker=navigation_ops.open_symbol_picker,
-        reroot_to_parent=navigation_ops.reroot_to_parent,
-        reroot_to_selected_target=navigation_ops.reroot_to_selected_target,
-        toggle_hidden_files=navigation_ops.toggle_hidden_files,
-        toggle_tree_pane=navigation_ops.toggle_tree_pane,
-        toggle_wrap_mode=navigation_ops.toggle_wrap_mode,
-        toggle_help_panel=navigation_ops.toggle_help_panel,
+        open_symbol_picker=nav.open_symbol_picker,
+        reroot_to_parent=nav.reroot_to_parent,
+        reroot_to_selected_target=nav.reroot_to_selected_target,
+        toggle_hidden_files=nav.toggle_hidden_files,
+        toggle_tree_pane=nav.toggle_tree_pane,
+        toggle_wrap_mode=nav.toggle_wrap_mode,
+        toggle_help_panel=nav.toggle_help_panel,
         toggle_git_features=toggle_git_features,
         launch_lazygit=launch_lazygit,
         handle_tree_mouse_wheel=handle_tree_mouse_wheel,
@@ -1653,23 +1530,23 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         current_preview_image_path=current_preview_image_path,
         current_preview_image_geometry=current_preview_image_geometry,
         open_tree_filter=open_tree_filter,
-        open_command_picker=navigation_ops.open_command_picker,
-        close_picker=navigation_ops.close_picker,
-        refresh_command_picker_matches=navigation_ops.refresh_command_picker_matches,
-        activate_picker_selection=navigation_ops.activate_picker_selection,
-        refresh_active_picker_matches=navigation_ops.refresh_active_picker_matches,
+        open_command_picker=nav.open_command_picker,
+        close_picker=nav.close_picker,
+        refresh_command_picker_matches=nav.refresh_command_picker_matches,
+        activate_picker_selection=nav.activate_picker_selection,
+        refresh_active_picker_matches=nav.refresh_active_picker_matches,
         handle_tree_mouse_wheel=handle_tree_mouse_wheel,
         handle_tree_mouse_click=handle_tree_mouse_click,
-        toggle_help_panel=navigation_ops.toggle_help_panel,
+        toggle_help_panel=nav.toggle_help_panel,
         close_tree_filter=close_tree_filter,
         activate_tree_filter_selection=activate_tree_filter_selection,
         move_tree_selection=move_tree_selection,
         apply_tree_filter_query=apply_tree_filter_query,
         jump_to_next_content_hit=jump_to_next_content_hit,
-        set_named_mark=navigation_ops.set_named_mark,
-        jump_to_named_mark=navigation_ops.jump_to_named_mark,
-        jump_back_in_history=navigation_ops.jump_back_in_history,
-        jump_forward_in_history=navigation_ops.jump_forward_in_history,
+        set_named_mark=nav.set_named_mark,
+        jump_to_named_mark=nav.jump_to_named_mark,
+        jump_back_in_history=nav.jump_back_in_history,
+        jump_forward_in_history=nav.jump_forward_in_history,
         handle_normal_key=handle_normal_key,
         save_left_pane_width=save_left_pane_width_for_mode,
         tick_source_selection_drag=tick_source_selection_drag,
