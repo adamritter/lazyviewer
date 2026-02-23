@@ -127,7 +127,6 @@ def _centered_scroll_start(target_line: int, max_start: int, visible_rows: int) 
 
 def _tree_order_key_for_relative_path(
     relative_path: Path,
-    *,
     is_dir: bool = False,
 ) -> tuple[tuple[int, str, str], ...]:
     parts = relative_path.parts
@@ -257,7 +256,6 @@ def _clicked_preview_search_token(
 
 
 def _open_content_search_for_token(
-    *,
     state: AppState,
     query: str,
     open_tree_filter: Callable[[str], None],
@@ -345,7 +343,6 @@ class _TreeFilterIndexWarmupScheduler:
 class _PagerLayoutOps:
     def __init__(
         self,
-        *,
         state: AppState,
         kitty_graphics_supported: bool,
     ) -> None:
@@ -477,7 +474,6 @@ class _PagerLayoutOps:
 class _SourcePaneOps:
     def __init__(
         self,
-        *,
         state: AppState,
         visible_content_rows: Callable[[], int],
     ) -> None:
@@ -599,16 +595,15 @@ class _SourcePaneOps:
         return None
 
 
-def _launch_editor_for_path(target: Path, *, terminal: TerminalController) -> str | None:
+def _launch_editor_for_path(terminal: TerminalController, target: Path) -> str | None:
     return launch_editor(target, terminal.disable_tui_mode, terminal.enable_tui_mode)
 
 
 def _dispatch_normal_key(
-    key: str,
-    term_columns: int,
-    *,
     state: AppState,
     ops: NormalKeyOps,
+    key: str,
+    term_columns: int,
 ) -> bool:
     return handle_normal_key_event(
         key=key,
@@ -656,7 +651,6 @@ def _sorted_git_modified_file_paths(state: AppState) -> list[Path]:
 
 
 def _refresh_rendered_for_current_path(
-    *,
     state: AppState,
     style: str,
     no_color: bool,
@@ -713,7 +707,6 @@ def _refresh_rendered_for_current_path(
 
 
 def _maybe_grow_directory_preview(
-    *,
     state: AppState,
     visible_content_rows: Callable[[], int],
     refresh_rendered_for_current_path: Callable[..., None],
@@ -740,7 +733,6 @@ def _maybe_grow_directory_preview(
 
 
 def _toggle_git_features(
-    *,
     state: AppState,
     refresh_git_status_overlay: Callable[..., None],
     refresh_rendered_for_current_path: Callable[..., None],
@@ -759,45 +751,55 @@ def _toggle_git_features(
     state.dirty = True
 
 
+@dataclass(frozen=True)
+class _PreviewSelectionDeps:
+    state: AppState
+    clear_source_selection: Callable[[], bool]
+    refresh_rendered_for_current_path: Callable[..., None]
+    jump_to_line: Callable[[int], None]
+
+
 def _preview_selected_entry(
-    *,
-    state: AppState,
-    clear_source_selection: Callable[[], bool],
-    refresh_rendered_for_current_path: Callable[..., None],
-    jump_to_line: Callable[[int], None],
+    deps: _PreviewSelectionDeps,
     force: bool = False,
 ) -> None:
+    state = deps.state
     if not state.tree_entries:
         return
     entry = state.tree_entries[state.selected_idx]
     selected_target = entry.path.resolve()
-    if clear_source_selection():
+    if deps.clear_source_selection():
         state.dirty = True
     if entry.kind == "search_hit":
         if force or selected_target != state.current_path.resolve():
             state.current_path = selected_target
-            refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
+            deps.refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
         if entry.line is not None:
-            jump_to_line(max(0, entry.line - 1))
+            deps.jump_to_line(max(0, entry.line - 1))
         return
     if not force and selected_target == state.current_path.resolve():
         return
     state.current_path = selected_target
-    refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
+    deps.refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
+
+
+@dataclass(frozen=True)
+class _TreeRefreshSyncDeps:
+    state: AppState
+    rebuild_tree_entries: Callable[..., None]
+    refresh_rendered_for_current_path: Callable[..., None]
+    schedule_tree_filter_index_warmup: Callable[..., None]
+    refresh_git_status_overlay: Callable[..., None]
 
 
 def _sync_selected_target_after_tree_refresh(
-    *,
-    state: AppState,
-    rebuild_tree_entries: Callable[..., None],
-    refresh_rendered_for_current_path: Callable[..., None],
-    schedule_tree_filter_index_warmup: Callable[..., None],
-    refresh_git_status_overlay: Callable[..., None],
+    deps: _TreeRefreshSyncDeps,
     preferred_path: Path,
     force_rebuild: bool = False,
 ) -> None:
+    state = deps.state
     previous_current_path = state.current_path.resolve()
-    rebuild_tree_entries(preferred_path=preferred_path)
+    deps.rebuild_tree_entries(preferred_path=preferred_path)
     if state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
         selected_target = state.tree_entries[state.selected_idx].path.resolve()
     else:
@@ -806,27 +808,32 @@ def _sync_selected_target_after_tree_refresh(
     changed_target = selected_target != previous_current_path
     if changed_target:
         state.current_path = selected_target
-    refresh_rendered_for_current_path(
+    deps.refresh_rendered_for_current_path(
         reset_scroll=changed_target,
         reset_dir_budget=changed_target,
         force_rebuild=force_rebuild,
     )
-    schedule_tree_filter_index_warmup()
-    refresh_git_status_overlay(force=True)
+    deps.schedule_tree_filter_index_warmup()
+    deps.refresh_git_status_overlay(force=True)
     state.dirty = True
 
 
+@dataclass(frozen=True)
+class _GitModifiedJumpDeps:
+    state: AppState
+    visible_content_rows: Callable[[], int]
+    refresh_git_status_overlay: Callable[..., None]
+    sorted_git_modified_file_paths: Callable[[], list[Path]]
+    current_jump_location: Callable[[], object]
+    jump_to_path: Callable[[Path], None]
+    record_jump_if_changed: Callable[[object], None]
+
+
 def _jump_to_next_git_modified(
+    deps: _GitModifiedJumpDeps,
     direction: int,
-    *,
-    state: AppState,
-    visible_content_rows: Callable[[], int],
-    refresh_git_status_overlay: Callable[..., None],
-    sorted_git_modified_file_paths: Callable[[], list[Path]],
-    current_jump_location: Callable[[], object],
-    jump_to_path: Callable[[Path], None],
-    record_jump_if_changed: Callable[[object], None],
 ) -> bool:
+    state = deps.state
     if direction == 0:
         return False
     _clear_status_message(state)
@@ -835,7 +842,7 @@ def _jump_to_next_git_modified(
     if state.preview_is_git_diff and state.current_path.is_file():
         same_file_change_blocks = _git_change_block_start_lines(state.lines)
         if same_file_change_blocks:
-            probe_line = state.start + max(0, visible_content_rows() // 3)
+            probe_line = state.start + max(0, deps.visible_content_rows() // 3)
             current_block: int | None = None
             for line_idx in same_file_change_blocks:
                 if line_idx <= probe_line:
@@ -863,14 +870,14 @@ def _jump_to_next_git_modified(
                 next_start = _centered_scroll_start(
                     target_line,
                     state.max_start,
-                    visible_content_rows(),
+                    deps.visible_content_rows(),
                 )
                 if next_start != state.start:
                     state.start = next_start
                     return True
 
-    refresh_git_status_overlay()
-    modified_paths = sorted_git_modified_file_paths()
+    deps.refresh_git_status_overlay()
+    modified_paths = deps.sorted_git_modified_file_paths()
     if not modified_paths:
         return False
 
@@ -925,7 +932,7 @@ def _jump_to_next_git_modified(
         next_start = _centered_scroll_start(
             wrap_line,
             state.max_start,
-            visible_content_rows(),
+            deps.visible_content_rows(),
         )
         state.start = next_start
         _set_status_message(
@@ -937,9 +944,9 @@ def _jump_to_next_git_modified(
     if target == anchor_path:
         return False
 
-    origin = current_jump_location()
-    jump_to_path(target)
-    record_jump_if_changed(origin)
+    origin = deps.current_jump_location()
+    deps.jump_to_path(target)
+    deps.record_jump_if_changed(origin)
     if wrapped_files:
         _set_status_message(
             state,
@@ -949,7 +956,6 @@ def _jump_to_next_git_modified(
 
 
 def _copy_selected_source_range(
-    *,
     state: AppState,
     start_pos: tuple[int, int],
     end_pos: tuple[int, int],
@@ -991,12 +997,11 @@ def _copy_selected_source_range(
 
 
 def _handle_tree_mouse_wheel(
-    mouse_key: str,
-    *,
     state: AppState,
     move_tree_selection: Callable[[int], bool],
     maybe_grow_directory_preview: Callable[[], bool],
     max_horizontal_text_offset: Callable[[], int],
+    mouse_key: str,
 ) -> bool:
     is_vertical = mouse_key.startswith("MOUSE_WHEEL_UP:") or mouse_key.startswith("MOUSE_WHEEL_DOWN:")
     is_horizontal = mouse_key.startswith("MOUSE_WHEEL_LEFT:") or mouse_key.startswith("MOUSE_WHEEL_RIGHT:")
@@ -1047,45 +1052,49 @@ class _SourceSelectionDragState:
         self.horizontal_edge = None
 
 
+@dataclass(frozen=True)
+class _TreeMouseCallbacks:
+    visible_content_rows: Callable[[], int]
+    source_pane_col_bounds: Callable[[], tuple[int, int]]
+    source_selection_position: Callable[[int, int], tuple[int, int] | None]
+    directory_preview_target_for_display_line: Callable[[int], Path | None]
+    max_horizontal_text_offset: Callable[[], int]
+    maybe_grow_directory_preview: Callable[[], bool]
+    clear_source_selection: Callable[[], bool]
+    copy_selected_source_range: Callable[[tuple[int, int], tuple[int, int]], bool]
+    rebuild_tree_entries: Callable[..., None]
+    mark_tree_watch_dirty: Callable[[], None]
+    coerce_tree_filter_result_index: Callable[[int], int | None]
+    preview_selected_entry: Callable[..., None]
+    activate_tree_filter_selection: Callable[[], None]
+    open_tree_filter: Callable[[str], None]
+    apply_tree_filter_query: Callable[..., None]
+    jump_to_path: Callable[[Path], None]
+
+
 class _TreeMouseHandlers:
     def __init__(
         self,
-        *,
         state: AppState,
-        visible_content_rows: Callable[[], int],
-        source_pane_col_bounds: Callable[[], tuple[int, int]],
-        source_selection_position: Callable[[int, int], tuple[int, int] | None],
-        directory_preview_target_for_display_line: Callable[[int], Path | None],
-        max_horizontal_text_offset: Callable[[], int],
-        maybe_grow_directory_preview: Callable[[], bool],
-        clear_source_selection: Callable[[], bool],
-        copy_selected_source_range: Callable[..., bool],
-        rebuild_tree_entries: Callable[..., None],
-        mark_tree_watch_dirty: Callable[[], None],
-        coerce_tree_filter_result_index: Callable[[int], int | None],
-        preview_selected_entry: Callable[..., None],
-        activate_tree_filter_selection: Callable[[], None],
-        open_tree_filter: Callable[[str], bool],
-        apply_tree_filter_query: Callable[..., None],
-        jump_to_path: Callable[[Path], None],
+        callbacks: _TreeMouseCallbacks,
     ) -> None:
         self._state = state
-        self._visible_content_rows = visible_content_rows
-        self._source_pane_col_bounds = source_pane_col_bounds
-        self._source_selection_position = source_selection_position
-        self._directory_preview_target_for_display_line = directory_preview_target_for_display_line
-        self._max_horizontal_text_offset = max_horizontal_text_offset
-        self._maybe_grow_directory_preview = maybe_grow_directory_preview
-        self._clear_source_selection = clear_source_selection
-        self._copy_selected_source_range = copy_selected_source_range
-        self._rebuild_tree_entries = rebuild_tree_entries
-        self._mark_tree_watch_dirty = mark_tree_watch_dirty
-        self._coerce_tree_filter_result_index = coerce_tree_filter_result_index
-        self._preview_selected_entry = preview_selected_entry
-        self._activate_tree_filter_selection = activate_tree_filter_selection
-        self._open_tree_filter = open_tree_filter
-        self._apply_tree_filter_query = apply_tree_filter_query
-        self._jump_to_path = jump_to_path
+        self._visible_content_rows = callbacks.visible_content_rows
+        self._source_pane_col_bounds = callbacks.source_pane_col_bounds
+        self._source_selection_position = callbacks.source_selection_position
+        self._directory_preview_target_for_display_line = callbacks.directory_preview_target_for_display_line
+        self._max_horizontal_text_offset = callbacks.max_horizontal_text_offset
+        self._maybe_grow_directory_preview = callbacks.maybe_grow_directory_preview
+        self._clear_source_selection = callbacks.clear_source_selection
+        self._copy_selected_source_range = callbacks.copy_selected_source_range
+        self._rebuild_tree_entries = callbacks.rebuild_tree_entries
+        self._mark_tree_watch_dirty = callbacks.mark_tree_watch_dirty
+        self._coerce_tree_filter_result_index = callbacks.coerce_tree_filter_result_index
+        self._preview_selected_entry = callbacks.preview_selected_entry
+        self._activate_tree_filter_selection = callbacks.activate_tree_filter_selection
+        self._open_tree_filter = callbacks.open_tree_filter
+        self._apply_tree_filter_query = callbacks.apply_tree_filter_query
+        self._jump_to_path = callbacks.jump_to_path
         self._drag = _SourceSelectionDragState()
 
     def _reset_source_selection_drag_state(self) -> None:
@@ -1191,7 +1200,6 @@ class _TreeMouseHandlers:
     def _toggle_directory_entry(
         self,
         resolved: Path,
-        *,
         content_mode_toggle: bool = False,
     ) -> None:
         state = self._state
@@ -1256,12 +1264,12 @@ class _TreeMouseHandlers:
                     self._clear_source_selection()
                     self._reset_source_selection_drag_state()
                     return _open_content_search_for_token(
-                        state=state,
-                        query=clicked_token,
-                        open_tree_filter=self._open_tree_filter,
-                        apply_tree_filter_query=self._apply_tree_filter_query,
+                        state,
+                        clicked_token,
+                        self._open_tree_filter,
+                        self._apply_tree_filter_query,
                     )
-            self._copy_selected_source_range(start_pos=state.source_selection_anchor, end_pos=selection_pos)
+            self._copy_selected_source_range(state.source_selection_anchor, selection_pos)
             self._reset_source_selection_drag_state()
             state.dirty = True
             return True
@@ -1271,7 +1279,7 @@ class _TreeMouseHandlers:
                 self._drag.pointer = (col, row)
                 self.tick_source_selection_drag()
                 end_pos = state.source_selection_focus or state.source_selection_anchor
-                self._copy_selected_source_range(start_pos=state.source_selection_anchor, end_pos=end_pos)
+                self._copy_selected_source_range(state.source_selection_anchor, end_pos)
                 state.source_selection_focus = end_pos
                 state.dirty = True
             self._reset_source_selection_drag_state()
@@ -1340,7 +1348,6 @@ class _TreeMouseHandlers:
 
 
 def _launch_lazygit(
-    *,
     state: AppState,
     terminal: TerminalController,
     show_inline_error: Callable[[str], None],
@@ -1409,7 +1416,6 @@ class _NavigationProxy:
 
 
 def _refresh_git_status_overlay(
-    *,
     state: AppState,
     refresh_rendered_for_current_path: Callable[..., None],
     force: bool = False,
@@ -1435,7 +1441,6 @@ def _refresh_git_status_overlay(
 
 
 def _reset_git_watch_context(
-    *,
     state: AppState,
     watch_context: _WatchRefreshContext,
 ) -> None:
@@ -1445,7 +1450,6 @@ def _reset_git_watch_context(
 
 
 def _maybe_refresh_tree_watch(
-    *,
     state: AppState,
     watch_context: _WatchRefreshContext,
     sync_selected_target_after_tree_refresh: Callable[..., None],
@@ -1476,7 +1480,6 @@ def _maybe_refresh_tree_watch(
 
 
 def _maybe_refresh_git_watch(
-    *,
     state: AppState,
     watch_context: _WatchRefreshContext,
     refresh_git_status_overlay: Callable[..., None],
@@ -1609,10 +1612,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     kitty_graphics_supported = terminal.supports_kitty_graphics()
     index_warmup_scheduler = _TreeFilterIndexWarmupScheduler()
     schedule_tree_filter_index_warmup = partial(index_warmup_scheduler.schedule_for_state, state)
-    layout_ops = _PagerLayoutOps(
-        state=state,
-        kitty_graphics_supported=kitty_graphics_supported,
-    )
+    layout_ops = _PagerLayoutOps(state, kitty_graphics_supported)
     visible_content_rows = layout_ops.visible_content_rows
     sync_left_width_for_tree_filter_mode = layout_ops.sync_left_width_for_tree_filter_mode
     save_left_pane_width_for_mode = layout_ops.save_left_pane_width_for_mode
@@ -1626,72 +1626,72 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     sorted_git_modified_file_paths = partial(_sorted_git_modified_file_paths, state)
     refresh_rendered_for_current_path = partial(
         _refresh_rendered_for_current_path,
-        state=state,
-        style=style,
-        no_color=no_color,
-        rebuild_screen_lines=rebuild_screen_lines,
-        visible_content_rows=visible_content_rows,
+        state,
+        style,
+        no_color,
+        rebuild_screen_lines,
+        visible_content_rows,
     )
 
     refresh_git_status_overlay = partial(
         _refresh_git_status_overlay,
-        state=state,
-        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+        state,
+        refresh_rendered_for_current_path,
     )
     reset_git_watch_context = partial(
         _reset_git_watch_context,
-        state=state,
-        watch_context=watch_refresh,
+        state,
+        watch_refresh,
     )
     maybe_refresh_tree_watch: Callable[[], None]
     maybe_refresh_git_watch = partial(
         _maybe_refresh_git_watch,
-        state=state,
-        watch_context=watch_refresh,
-        refresh_git_status_overlay=refresh_git_status_overlay,
-        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+        state,
+        watch_refresh,
+        refresh_git_status_overlay,
+        refresh_rendered_for_current_path,
     )
 
     clear_source_selection = partial(_clear_source_selection, state)
     toggle_git_features = partial(
         _toggle_git_features,
-        state=state,
-        refresh_git_status_overlay=refresh_git_status_overlay,
-        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+        state,
+        refresh_git_status_overlay,
+        refresh_rendered_for_current_path,
     )
     preview_selected_entry: Callable[..., None]
 
     maybe_grow_directory_preview = partial(
         _maybe_grow_directory_preview,
-        state=state,
-        visible_content_rows=visible_content_rows,
-        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+        state,
+        visible_content_rows,
+        refresh_rendered_for_current_path,
     )
 
-    source_pane_ops = _SourcePaneOps(
-        state=state,
-        visible_content_rows=visible_content_rows,
-    )
+    source_pane_ops = _SourcePaneOps(state, visible_content_rows)
     preview_pane_width = source_pane_ops.preview_pane_width
     max_horizontal_text_offset = source_pane_ops.max_horizontal_text_offset
     source_pane_col_bounds = source_pane_ops.source_pane_col_bounds
     source_selection_position = source_pane_ops.source_selection_position
     display_line_to_source_line = source_pane_ops.display_line_to_source_line
     directory_preview_target_for_display_line = source_pane_ops.directory_preview_target_for_display_line
-    copy_selected_source_range = partial(_copy_selected_source_range, state=state)
+    copy_selected_source_range = partial(_copy_selected_source_range, state)
     handle_tree_mouse_wheel: Callable[[str], bool]
     handle_tree_mouse_click: Callable[[str], bool]
     tick_source_selection_drag: Callable[[], None]
 
     sync_selected_target_after_tree_refresh: Callable[..., None]
     navigation_proxy = _NavigationProxy()
-
-    preview_selected_entry = partial(
-        _preview_selected_entry,
+    preview_selection_deps = _PreviewSelectionDeps(
         state=state,
         clear_source_selection=clear_source_selection,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
         jump_to_line=navigation_proxy.jump_to_line,
+    )
+
+    preview_selected_entry = partial(
+        _preview_selected_entry,
+        preview_selection_deps,
     )
 
     tree_filter_ops = TreeFilterOps(
@@ -1714,26 +1714,29 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     close_tree_filter = tree_filter_ops.close_tree_filter
     activate_tree_filter_selection = tree_filter_ops.activate_tree_filter_selection
     jump_to_next_content_hit = tree_filter_ops.jump_to_next_content_hit
-    sync_selected_target_after_tree_refresh = partial(
-        _sync_selected_target_after_tree_refresh,
+    tree_refresh_sync_deps = _TreeRefreshSyncDeps(
         state=state,
         rebuild_tree_entries=rebuild_tree_entries,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
         schedule_tree_filter_index_warmup=schedule_tree_filter_index_warmup,
         refresh_git_status_overlay=refresh_git_status_overlay,
     )
+    sync_selected_target_after_tree_refresh = partial(
+        _sync_selected_target_after_tree_refresh,
+        tree_refresh_sync_deps,
+    )
     maybe_refresh_tree_watch = partial(
         _maybe_refresh_tree_watch,
-        state=state,
-        watch_context=watch_refresh,
-        sync_selected_target_after_tree_refresh=sync_selected_target_after_tree_refresh,
+        state,
+        watch_refresh,
+        sync_selected_target_after_tree_refresh,
     )
     handle_tree_mouse_wheel = partial(
         _handle_tree_mouse_wheel,
-        state=state,
-        move_tree_selection=move_tree_selection,
-        maybe_grow_directory_preview=maybe_grow_directory_preview,
-        max_horizontal_text_offset=max_horizontal_text_offset,
+        state,
+        move_tree_selection,
+        maybe_grow_directory_preview,
+        max_horizontal_text_offset,
     )
 
     navigation_ops = NavigationPickerOps(
@@ -1751,8 +1754,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     )
     navigation_proxy.bind(navigation_ops)
     navigation_ops.set_open_tree_filter(open_tree_filter)
-    mouse_handlers = _TreeMouseHandlers(
-        state=state,
+    tree_mouse_callbacks = _TreeMouseCallbacks(
         visible_content_rows=visible_content_rows,
         source_pane_col_bounds=source_pane_col_bounds,
         source_selection_position=source_selection_position,
@@ -1770,13 +1772,16 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         apply_tree_filter_query=apply_tree_filter_query,
         jump_to_path=navigation_proxy.jump_to_path,
     )
+    mouse_handlers = _TreeMouseHandlers(
+        state,
+        tree_mouse_callbacks,
+    )
     handle_tree_mouse_click = mouse_handlers.handle_tree_mouse_click
     tick_source_selection_drag = mouse_handlers.tick_source_selection_drag
 
     current_jump_location = navigation_ops.current_jump_location
     record_jump_if_changed = navigation_ops.record_jump_if_changed
-    jump_to_next_git_modified = partial(
-        _jump_to_next_git_modified,
+    git_modified_jump_deps = _GitModifiedJumpDeps(
         state=state,
         visible_content_rows=visible_content_rows,
         refresh_git_status_overlay=refresh_git_status_overlay,
@@ -1784,6 +1789,10 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         current_jump_location=current_jump_location,
         jump_to_path=navigation_ops.jump_to_path,
         record_jump_if_changed=record_jump_if_changed,
+    )
+    jump_to_next_git_modified = partial(
+        _jump_to_next_git_modified,
+        git_modified_jump_deps,
     )
 
     schedule_tree_filter_index_warmup()
@@ -1798,14 +1807,14 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     watch_refresh.git_last_poll = time.monotonic()
     refresh_git_status_overlay(force=True)
 
-    launch_editor_for_path = partial(_launch_editor_for_path, terminal=terminal)
+    launch_editor_for_path = partial(_launch_editor_for_path, terminal)
     launch_lazygit = partial(
         _launch_lazygit,
-        state=state,
-        terminal=terminal,
-        show_inline_error=show_inline_error,
-        sync_selected_target_after_tree_refresh=sync_selected_target_after_tree_refresh,
-        mark_tree_watch_dirty=mark_tree_watch_dirty,
+        state,
+        terminal,
+        show_inline_error,
+        sync_selected_target_after_tree_refresh,
+        mark_tree_watch_dirty,
     )
 
     nav = navigation_ops
@@ -1836,7 +1845,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         launch_editor_for_path=launch_editor_for_path,
         jump_to_next_git_modified=jump_to_next_git_modified,
     )
-    handle_normal_key = partial(_dispatch_normal_key, state=state, ops=normal_key_ops)
+    handle_normal_key = partial(_dispatch_normal_key, state, normal_key_ops)
 
     loop_timing = RuntimeLoopTiming(
         double_click_seconds=DOUBLE_CLICK_SECONDS,
