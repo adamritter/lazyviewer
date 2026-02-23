@@ -1,7 +1,6 @@
-"""Git status overlay helpers plus compatibility exports for preview diff code.
+"""Git status overlay helpers.
 
 Collects changed/untracked flags for tree badges and directory ancestors.
-Preview-diff rendering now lives under ``lazyviewer.preview.diff``.
 """
 
 from __future__ import annotations
@@ -11,42 +10,6 @@ import subprocess
 
 GIT_STATUS_CHANGED = 1
 GIT_STATUS_UNTRACKED = 2
-_ADDED_BG_SGR = "48;2;36;74;52"
-_REMOVED_BG_SGR = "48;2;92;43;49"
-
-
-def clear_diff_preview_cache() -> None:
-    from .preview.diff import clear_diff_preview_cache as _clear_diff_preview_cache
-
-    _clear_diff_preview_cache()
-
-
-def build_unified_diff_preview_for_path(
-    target: Path,
-    timeout_seconds: float = 0.2,
-    colorize: bool = True,
-    style: str = "monokai",
-) -> str | None:
-    from .preview.diff import build_unified_diff_preview_for_path as _build_diff_preview
-
-    return _build_diff_preview(
-        target,
-        timeout_seconds=timeout_seconds,
-        colorize=colorize,
-        style=style,
-    )
-
-
-def _boost_foreground_contrast_for_diff(params: str) -> str:
-    from .preview.diff import _boost_foreground_contrast_for_diff as _boost_contrast
-
-    return _boost_contrast(params)
-
-
-def _apply_line_background(code_line: str, bg_sgr: str) -> str:
-    from .preview.diff import _apply_line_background as _apply_bg
-
-    return _apply_bg(code_line, bg_sgr)
 
 
 def _merge_flags(overlay: dict[Path, int], target: Path, flags: int) -> None:

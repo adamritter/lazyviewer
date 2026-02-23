@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .ansi import ANSI_ESCAPE_RE, char_display_width
-from .preview.events import directory_preview_target_for_display_line, handle_preview_click
+from .preview.events import handle_preview_click
 from .state import AppState
 
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR = 2
@@ -106,10 +106,6 @@ class SourcePaneOps:
             return None
         line_idx = max(0, min(self.state.start + row - 1, len(self.state.lines) - 1))
         return line_idx, text_col
-
-    def directory_preview_target_for_display_line(self, display_idx: int) -> Path | None:
-        return directory_preview_target_for_display_line(self.state, display_idx)
-
 
 def _copy_selected_source_range(
     state: AppState,

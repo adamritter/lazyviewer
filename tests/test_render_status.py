@@ -12,13 +12,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.git_status import _ADDED_BG_SGR, _apply_line_background
+from lazyviewer.preview.diff import _ADDED_BG_SGR, _apply_line_background
+from lazyviewer.preview.rendering import sticky_symbol_headers_for_position
 from lazyviewer.render import (
     build_status_line,
     help_panel_row_count,
     render_dual_page,
     render_help_page,
-    sticky_symbol_headers_for_position,
 )
 
 
@@ -1052,9 +1052,9 @@ class RenderStatusTests(unittest.TestCase):
         text_lines = diff_lines
         diff_lookup_calls = {"count": 0}
 
-        import lazyviewer.render as render_mod
+        import lazyviewer.preview.rendering as preview_rendering_mod
 
-        original_source_line_raw_text = render_mod._source_line_raw_text
+        original_source_line_raw_text = preview_rendering_mod.source_line_raw_text
 
         def counting_source_line_raw_text(
             text_lines_arg: list[str],
@@ -1074,7 +1074,10 @@ class RenderStatusTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "big.py"
             path.write_text(source, encoding="utf-8")
-            with mock.patch("lazyviewer.render._source_line_raw_text", side_effect=counting_source_line_raw_text), mock.patch(
+            with mock.patch(
+                "lazyviewer.preview.rendering.source_line_raw_text",
+                side_effect=counting_source_line_raw_text,
+            ), mock.patch(
                 "lazyviewer.render.os.write", side_effect=capture
             ):
                 render_dual_page(

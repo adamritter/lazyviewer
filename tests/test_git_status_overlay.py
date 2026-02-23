@@ -13,10 +13,12 @@ import unittest
 from pathlib import Path
 
 from lazyviewer.ansi import ANSI_ESCAPE_RE
-from lazyviewer.git_status import (
+from lazyviewer.preview.diff import (
     _ADDED_BG_SGR,
     _apply_line_background,
     _boost_foreground_contrast_for_diff,
+)
+from lazyviewer.git_status import (
     GIT_STATUS_CHANGED,
     GIT_STATUS_UNTRACKED,
     collect_git_status_overlay,

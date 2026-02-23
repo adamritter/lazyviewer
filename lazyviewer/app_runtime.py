@@ -61,6 +61,7 @@ from .preview import (
     clear_directory_preview_cache,
 )
 from .preview.diff import clear_diff_preview_cache
+from .preview.events import directory_preview_target_for_display_line as preview_directory_preview_target_for_display_line
 from .render import help_panel_row_count
 from .loop import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
 from .picker_navigation import NavigationPickerDeps, NavigationPickerOps
@@ -82,6 +83,7 @@ GIT_STATUS_REFRESH_SECONDS = 2.0
 TREE_WATCH_POLL_SECONDS = 0.5
 GIT_WATCH_POLL_SECONDS = 0.5
 GIT_FEATURES_DEFAULT_ENABLED = True
+TREE_SIZE_LABELS_DEFAULT_ENABLED = True
 CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT = 50.0
 CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT = 8.0
 WRAP_STATUS_SECONDS = 1.2
@@ -152,24 +154,6 @@ def _set_status_message(state: AppState, message: str) -> None:
     state.status_message_until = time.monotonic() + WRAP_STATUS_SECONDS
 
 
-def _launch_editor_for_path(terminal: TerminalController, target: Path) -> str | None:
-    return launch_editor(target, terminal.disable_tui_mode, terminal.enable_tui_mode)
-
-
-def _dispatch_normal_key(
-    state: AppState,
-    ops: NormalKeyOps,
-    key: str,
-    term_columns: int,
-) -> bool:
-    return handle_normal_key_event(
-        key=key,
-        term_columns=term_columns,
-        state=state,
-        ops=ops,
-    )
-
-
 def _clear_source_selection(state: AppState) -> bool:
     changed = state.source_selection_anchor is not None or state.source_selection_focus is not None
     state.source_selection_anchor = None
@@ -213,6 +197,7 @@ def _refresh_rendered_for_current_path(
         dir_skip_gitignored=_skip_gitignored_for_hidden_mode(state.show_hidden),
         prefer_git_diff=prefer_git_diff,
         dir_git_status_overlay=(state.git_status_overlay if state.git_features_enabled else None),
+        dir_show_size_labels=state.show_tree_sizes,
     )
     state.rendered = rendered_for_path.text
     rebuild_screen_lines(preserve_scroll=not reset_scroll)
@@ -275,6 +260,16 @@ def _toggle_git_features(
         reset_scroll=state.git_features_enabled,
         reset_dir_budget=False,
     )
+    state.dirty = True
+
+
+def _toggle_tree_size_labels(
+    state: AppState,
+    refresh_rendered_for_current_path: Callable[..., None],
+) -> None:
+    state.show_tree_sizes = not state.show_tree_sizes
+    if state.current_path.resolve().is_dir():
+        refresh_rendered_for_current_path(reset_scroll=False, reset_dir_budget=False)
     state.dirty = True
 
 
@@ -382,6 +377,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         dir_max_entries=DIR_PREVIEW_INITIAL_MAX_ENTRIES,
         dir_skip_gitignored=_skip_gitignored_for_hidden_mode(show_hidden),
         prefer_git_diff=GIT_FEATURES_DEFAULT_ENABLED,
+        dir_show_size_labels=TREE_SIZE_LABELS_DEFAULT_ENABLED,
     )
     rendered = initial_render.text
     lines = build_screen_lines(rendered, right_width, wrap=False)
@@ -398,6 +394,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         expanded=expanded,
         tree_render_expanded=set(expanded),
         show_hidden=show_hidden,
+        show_tree_sizes=TREE_SIZE_LABELS_DEFAULT_ENABLED,
         tree_entries=tree_entries,
         selected_idx=selected_idx,
         rendered=rendered,
@@ -494,6 +491,11 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         refresh_git_status_overlay,
         refresh_rendered_for_current_path,
     )
+    toggle_tree_size_labels = partial(
+        _toggle_tree_size_labels,
+        state,
+        refresh_rendered_for_current_path,
+    )
     preview_selected_entry: Callable[..., None]
 
     maybe_grow_directory_preview = partial(
@@ -511,7 +513,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     max_horizontal_text_offset = source_pane_ops.max_horizontal_text_offset
     source_pane_col_bounds = source_pane_ops.source_pane_col_bounds
     source_selection_position = source_pane_ops.source_selection_position
-    directory_preview_target_for_display_line = source_pane_ops.directory_preview_target_for_display_line
+    directory_preview_target_for_display_line = partial(preview_directory_preview_target_for_display_line, state)
     copy_selected_source_range = partial(
         _copy_selected_source_range,
         state,
@@ -647,7 +649,11 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     watch_refresh.git_last_poll = time.monotonic()
     refresh_git_status_overlay(force=True)
 
-    launch_editor_for_path = partial(_launch_editor_for_path, terminal)
+    launch_editor_for_path = lambda target: launch_editor(  # noqa: E731
+        target,
+        terminal.disable_tui_mode,
+        terminal.enable_tui_mode,
+    )
     launch_lazygit = partial(
         _launch_lazygit,
         state,
@@ -668,6 +674,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         toggle_hidden_files=nav.toggle_hidden_files,
         toggle_tree_pane=nav.toggle_tree_pane,
         toggle_wrap_mode=nav.toggle_wrap_mode,
+        toggle_tree_size_labels=toggle_tree_size_labels,
         toggle_help_panel=nav.toggle_help_panel,
         toggle_git_features=toggle_git_features,
         launch_lazygit=launch_lazygit,
@@ -685,7 +692,11 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         launch_editor_for_path=launch_editor_for_path,
         jump_to_next_git_modified=jump_to_next_git_modified,
     )
-    handle_normal_key = partial(_dispatch_normal_key, state, normal_key_ops)
+    handle_normal_key = partial(
+        handle_normal_key_event,
+        state=state,
+        ops=normal_key_ops,
+    )
 
     loop_timing = RuntimeLoopTiming(
         double_click_seconds=DOUBLE_CLICK_SECONDS,

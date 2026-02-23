@@ -41,6 +41,7 @@ class RenderContext:
     browser_visible: bool
     show_hidden: bool
     show_help: bool = False
+    show_tree_sizes: bool = True
     status_message: str = ""
     tree_filter_active: bool = False
     tree_filter_mode: str = "files"
@@ -89,6 +90,7 @@ def render_dual_page_context(context: RenderContext) -> None:
         context.browser_visible,
         context.show_hidden,
         show_help=context.show_help,
+        show_tree_sizes=context.show_tree_sizes,
         status_message=context.status_message,
         tree_filter_active=context.tree_filter_active,
         tree_filter_mode=context.tree_filter_mode,
@@ -159,11 +161,6 @@ def _compose_status_left_text(
     return f"{base} · {status_message}"
 
 
-# Compatibility aliases for tests and external imports.
-_source_line_raw_text = preview_rendering.source_line_raw_text
-sticky_symbol_headers_for_position = preview_rendering.sticky_symbol_headers_for_position
-
-
 def _format_tree_filter_status(
     query: str,
     match_count: int,
@@ -209,6 +206,7 @@ def render_dual_page(
     browser_visible: bool,
     show_hidden: bool,
     show_help: bool = False,
+    show_tree_sizes: bool = True,
     status_message: str = "",
     tree_filter_active: bool = False,
     tree_filter_mode: str = "files",
@@ -257,7 +255,7 @@ def render_dual_page(
     has_current_text_hit = text_search_current_line > 0 and text_search_current_column > 0
     selection_range = preview_rendering.normalized_selection_range(source_selection_anchor, source_selection_focus)
 
-    sticky_symbols = sticky_symbol_headers_for_position(
+    sticky_symbols = preview_rendering.sticky_symbol_headers_for_position(
         text_lines=text_lines,
         text_start=text_start,
         content_rows=content_rows,
@@ -425,6 +423,7 @@ def render_dual_page(
                     expanded,
                     git_status_overlay=git_status_overlay,
                     search_query=tree_search_query,
+                    show_size_labels=show_tree_sizes,
                 )
                 tree_text = clip_ansi_line(tree_text, left_width)
                 if tree_idx == tree_selected:

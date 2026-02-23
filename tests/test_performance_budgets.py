@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.git_status import _ADDED_BG_SGR, _REMOVED_BG_SGR, _apply_line_background
+from lazyviewer.preview.diff import _ADDED_BG_SGR, _REMOVED_BG_SGR, _apply_line_background
 from lazyviewer.navigation import JumpLocation
 from lazyviewer.render import render_dual_page
 from lazyviewer.tree_filter import TreeFilterDeps, TreeFilterOps
