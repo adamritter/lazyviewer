@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from collections import OrderedDict
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from .navigation import JumpLocation
@@ -44,29 +45,30 @@ def _skip_gitignored_for_hidden_mode(show_hidden: bool) -> bool:
     return not show_hidden
 
 
+@dataclass(frozen=True)
+class TreeFilterDeps:
+    state: AppState
+    visible_content_rows: Callable[[], int]
+    rebuild_screen_lines: Callable[..., None]
+    preview_selected_entry: Callable[..., None]
+    current_jump_location: Callable[[], JumpLocation]
+    record_jump_if_changed: Callable[[JumpLocation], None]
+    jump_to_path: Callable[[Path], None]
+    jump_to_line: Callable[[int], None]
+    on_tree_filter_state_change: Callable[[], None] | None = None
+
+
 class TreeFilterOps:
-    def __init__(
-        self,
-        *,
-        state: AppState,
-        visible_content_rows: Callable[[], int],
-        rebuild_screen_lines: Callable[..., None],
-        preview_selected_entry: Callable[..., None],
-        current_jump_location: Callable[[], JumpLocation],
-        record_jump_if_changed: Callable[[JumpLocation], None],
-        jump_to_path: Callable[[Path], None],
-        jump_to_line: Callable[[int], None],
-        on_tree_filter_state_change: Callable[[], None] | None = None,
-    ) -> None:
-        self.state = state
-        self.visible_content_rows = visible_content_rows
-        self.rebuild_screen_lines = rebuild_screen_lines
-        self.preview_selected_entry = preview_selected_entry
-        self.current_jump_location = current_jump_location
-        self.record_jump_if_changed = record_jump_if_changed
-        self.jump_to_path = jump_to_path
-        self.jump_to_line = jump_to_line
-        self.on_tree_filter_state_change = on_tree_filter_state_change
+    def __init__(self, deps: TreeFilterDeps) -> None:
+        self.state = deps.state
+        self.visible_content_rows = deps.visible_content_rows
+        self.rebuild_screen_lines = deps.rebuild_screen_lines
+        self.preview_selected_entry = deps.preview_selected_entry
+        self.current_jump_location = deps.current_jump_location
+        self.record_jump_if_changed = deps.record_jump_if_changed
+        self.jump_to_path = deps.jump_to_path
+        self.jump_to_line = deps.jump_to_line
+        self.on_tree_filter_state_change = deps.on_tree_filter_state_change
         self.loading_until = 0.0
         self.content_search_cache: OrderedDict[
             tuple[str, str, bool, bool, int, int],

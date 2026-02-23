@@ -96,7 +96,6 @@ HELP_PANEL_SEARCH_HITS_TEXT_ONLY_LINES: tuple[str, ...] = (
 
 
 def help_panel_lines(
-    *,
     tree_filter_active: bool = False,
     tree_filter_mode: str = "files",
     tree_filter_editing: bool = False,
@@ -119,7 +118,6 @@ def help_panel_lines(
 def help_panel_row_count(
     max_lines: int,
     show_help: bool,
-    *,
     browser_visible: bool = True,
     tree_filter_active: bool = False,
     tree_filter_mode: str = "files",

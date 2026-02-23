@@ -255,7 +255,6 @@ def _diff_preview_uses_plain_markers(
 
 def _diff_preview_logical_line_is_removed(
     first_chunk: str,
-    *,
     use_plain_markers: bool,
 ) -> bool:
     if use_plain_markers:
@@ -559,7 +558,6 @@ def _source_line_exits_symbol_scope(
 
 
 def sticky_symbol_headers_for_position(
-    *,
     text_lines: list[str],
     text_start: int,
     content_rows: int,

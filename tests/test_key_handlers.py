@@ -12,6 +12,8 @@ from pathlib import Path
 
 from lazyviewer.key_handlers import (
     NormalKeyOps,
+    PickerKeyCallbacks,
+    TreeFilterKeyCallbacks,
     handle_normal_key,
     handle_picker_key,
     handle_tree_filter_key,
@@ -142,14 +144,16 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         close_calls = {"count": 0}
 
         handled, should_quit = handle_picker_key(
-            key="\x03",
-            state=state,
-            double_click_seconds=0.25,
-            close_picker=lambda: close_calls.__setitem__("count", close_calls["count"] + 1),
-            refresh_command_picker_matches=lambda **_kwargs: None,
-            activate_picker_selection=lambda: False,
-            visible_content_rows=lambda: 20,
-            refresh_active_picker_matches=lambda **_kwargs: None,
+            "\x03",
+            state,
+            0.25,
+            PickerKeyCallbacks(
+                close_picker=lambda: close_calls.__setitem__("count", close_calls["count"] + 1),
+                refresh_command_picker_matches=lambda **_kwargs: None,
+                activate_picker_selection=lambda: False,
+                visible_content_rows=lambda: 20,
+                refresh_active_picker_matches=lambda **_kwargs: None,
+            ),
         )
 
         self.assertTrue(handled)
@@ -194,16 +198,18 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         called = {"query": "", "toggle_help": 0}
 
         handled = handle_tree_filter_key(
-            key="?",
-            state=state,
-            handle_tree_mouse_wheel=lambda _key: False,
-            handle_tree_mouse_click=lambda _key: False,
-            toggle_help_panel=lambda: called.__setitem__("toggle_help", called["toggle_help"] + 1),
-            close_tree_filter=lambda **_kwargs: None,
-            activate_tree_filter_selection=lambda: None,
-            move_tree_selection=lambda _direction: False,
-            apply_tree_filter_query=lambda query, **_kwargs: called.__setitem__("query", query),
-            jump_to_next_content_hit=lambda _direction: False,
+            "?",
+            state,
+            TreeFilterKeyCallbacks(
+                handle_tree_mouse_wheel=lambda _key: False,
+                handle_tree_mouse_click=lambda _key: False,
+                toggle_help_panel=lambda: called.__setitem__("toggle_help", called["toggle_help"] + 1),
+                close_tree_filter=lambda **_kwargs: None,
+                activate_tree_filter_selection=lambda: None,
+                move_tree_selection=lambda _direction: False,
+                apply_tree_filter_query=lambda query, **_kwargs: called.__setitem__("query", query),
+                jump_to_next_content_hit=lambda _direction: False,
+            ),
         )
 
         self.assertTrue(handled)
@@ -218,16 +224,18 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         called = {"apply": 0, "toggle_help": 0}
 
         handled = handle_tree_filter_key(
-            key="CTRL_QUESTION",
-            state=state,
-            handle_tree_mouse_wheel=lambda _key: False,
-            handle_tree_mouse_click=lambda _key: False,
-            toggle_help_panel=lambda: called.__setitem__("toggle_help", called["toggle_help"] + 1),
-            close_tree_filter=lambda **_kwargs: None,
-            activate_tree_filter_selection=lambda: None,
-            move_tree_selection=lambda _direction: False,
-            apply_tree_filter_query=lambda _query, **_kwargs: called.__setitem__("apply", called["apply"] + 1),
-            jump_to_next_content_hit=lambda _direction: False,
+            "CTRL_QUESTION",
+            state,
+            TreeFilterKeyCallbacks(
+                handle_tree_mouse_wheel=lambda _key: False,
+                handle_tree_mouse_click=lambda _key: False,
+                toggle_help_panel=lambda: called.__setitem__("toggle_help", called["toggle_help"] + 1),
+                close_tree_filter=lambda **_kwargs: None,
+                activate_tree_filter_selection=lambda: None,
+                move_tree_selection=lambda _direction: False,
+                apply_tree_filter_query=lambda _query, **_kwargs: called.__setitem__("apply", called["apply"] + 1),
+                jump_to_next_content_hit=lambda _direction: False,
+            ),
         )
 
         self.assertTrue(handled)
@@ -242,16 +250,18 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         called = {"direction": 0}
 
         handled = handle_tree_filter_key(
-            key="p",
-            state=state,
-            handle_tree_mouse_wheel=lambda _key: False,
-            handle_tree_mouse_click=lambda _key: False,
-            toggle_help_panel=lambda: None,
-            close_tree_filter=lambda **_kwargs: None,
-            activate_tree_filter_selection=lambda: None,
-            move_tree_selection=lambda _direction: False,
-            apply_tree_filter_query=lambda _query, **_kwargs: None,
-            jump_to_next_content_hit=lambda direction: called.__setitem__("direction", direction) or True,
+            "p",
+            state,
+            TreeFilterKeyCallbacks(
+                handle_tree_mouse_wheel=lambda _key: False,
+                handle_tree_mouse_click=lambda _key: False,
+                toggle_help_panel=lambda: None,
+                close_tree_filter=lambda **_kwargs: None,
+                activate_tree_filter_selection=lambda: None,
+                move_tree_selection=lambda _direction: False,
+                apply_tree_filter_query=lambda _query, **_kwargs: None,
+                jump_to_next_content_hit=lambda direction: called.__setitem__("direction", direction) or True,
+            ),
         )
 
         self.assertTrue(handled)

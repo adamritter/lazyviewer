@@ -91,9 +91,29 @@ def _handle_picker_mouse_wheel(state: AppState, key: str) -> None:
         state.dirty = True
 
 
+@dataclass(frozen=True)
+class PickerKeyCallbacks:
+    close_picker: Callable[[], None]
+    refresh_command_picker_matches: Callable[..., None]
+    activate_picker_selection: Callable[[], bool]
+    visible_content_rows: Callable[[], int]
+    refresh_active_picker_matches: Callable[..., None]
+
+
+@dataclass(frozen=True)
+class TreeFilterKeyCallbacks:
+    handle_tree_mouse_wheel: Callable[[str], bool]
+    handle_tree_mouse_click: Callable[[str], bool]
+    toggle_help_panel: Callable[[], None]
+    close_tree_filter: Callable[..., None]
+    activate_tree_filter_selection: Callable[[], None]
+    move_tree_selection: Callable[[int], bool]
+    apply_tree_filter_query: Callable[..., None]
+    jump_to_next_content_hit: Callable[[int], bool]
+
+
 def _handle_picker_mouse_click(
     state: AppState,
-    *,
     key: str,
     visible_rows: int,
     double_click_seconds: float,
@@ -135,16 +155,16 @@ def _handle_picker_mouse_click(
 
 
 def handle_picker_key(
-    *,
     key: str,
     state: AppState,
     double_click_seconds: float,
-    close_picker: Callable[[], None],
-    refresh_command_picker_matches: Callable[..., None],
-    activate_picker_selection: Callable[[], bool],
-    visible_content_rows: Callable[[], int],
-    refresh_active_picker_matches: Callable[..., None],
+    callbacks: PickerKeyCallbacks,
 ) -> tuple[bool, bool]:
+    close_picker = callbacks.close_picker
+    refresh_command_picker_matches = callbacks.refresh_command_picker_matches
+    activate_picker_selection = callbacks.activate_picker_selection
+    visible_content_rows = callbacks.visible_content_rows
+    refresh_active_picker_matches = callbacks.refresh_active_picker_matches
     key_lower = key.lower()
 
     if not state.picker_active:
@@ -186,11 +206,11 @@ def handle_picker_key(
         if key.startswith("MOUSE_LEFT_DOWN:"):
             should_quit = _handle_picker_mouse_click(
                 state,
-                key=key,
-                visible_rows=visible_content_rows(),
-                double_click_seconds=double_click_seconds,
-                activate_picker_selection=activate_picker_selection,
-                focus_query_row=False,
+                key,
+                visible_content_rows(),
+                double_click_seconds,
+                activate_picker_selection,
+                False,
             )
             if should_quit:
                 return True, True
@@ -237,11 +257,11 @@ def handle_picker_key(
     if key.startswith("MOUSE_LEFT_DOWN:"):
         should_quit = _handle_picker_mouse_click(
             state,
-            key=key,
-            visible_rows=visible_content_rows(),
-            double_click_seconds=double_click_seconds,
-            activate_picker_selection=activate_picker_selection,
-            focus_query_row=True,
+            key,
+            visible_content_rows(),
+            double_click_seconds,
+            activate_picker_selection,
+            True,
         )
         if should_quit:
             return True, True
@@ -250,18 +270,18 @@ def handle_picker_key(
 
 
 def handle_tree_filter_key(
-    *,
     key: str,
     state: AppState,
-    handle_tree_mouse_wheel: Callable[[str], bool],
-    handle_tree_mouse_click: Callable[[str], bool],
-    toggle_help_panel: Callable[[], None],
-    close_tree_filter: Callable[..., None],
-    activate_tree_filter_selection: Callable[[], None],
-    move_tree_selection: Callable[[int], bool],
-    apply_tree_filter_query: Callable[..., None],
-    jump_to_next_content_hit: Callable[[int], bool],
+    callbacks: TreeFilterKeyCallbacks,
 ) -> bool:
+    handle_tree_mouse_wheel = callbacks.handle_tree_mouse_wheel
+    handle_tree_mouse_click = callbacks.handle_tree_mouse_click
+    toggle_help_panel = callbacks.toggle_help_panel
+    close_tree_filter = callbacks.close_tree_filter
+    activate_tree_filter_selection = callbacks.activate_tree_filter_selection
+    move_tree_selection = callbacks.move_tree_selection
+    apply_tree_filter_query = callbacks.apply_tree_filter_query
+    jump_to_next_content_hit = callbacks.jump_to_next_content_hit
     if not state.tree_filter_active:
         return False
 
@@ -362,7 +382,6 @@ class NormalKeyOps:
 
 
 def handle_normal_key(
-    *,
     key: str,
     term_columns: int,
     state: AppState,

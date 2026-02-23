@@ -15,7 +15,7 @@ from unittest import mock
 from lazyviewer.git_status import _ADDED_BG_SGR, _REMOVED_BG_SGR, _apply_line_background
 from lazyviewer.navigation import JumpLocation
 from lazyviewer.render import render_dual_page
-from lazyviewer.runtime_tree_filter import TreeFilterOps
+from lazyviewer.runtime_tree_filter import TreeFilterDeps, TreeFilterOps
 from lazyviewer.search.fuzzy import (
     clear_project_files_cache,
     collect_project_file_labels,
@@ -144,14 +144,16 @@ class PerformanceBudgetTests(unittest.TestCase):
             state.tree_filter_mode = "content"
 
             ops = TreeFilterOps(
-                state=state,
-                visible_content_rows=lambda: 20,
-                rebuild_screen_lines=lambda **_kwargs: None,
-                preview_selected_entry=lambda **_kwargs: None,
-                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
-                record_jump_if_changed=lambda _origin: None,
-                jump_to_path=lambda _target: None,
-                jump_to_line=lambda _line: None,
+                TreeFilterDeps(
+                    state=state,
+                    visible_content_rows=lambda: 20,
+                    rebuild_screen_lines=lambda **_kwargs: None,
+                    preview_selected_entry=lambda **_kwargs: None,
+                    current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                    record_jump_if_changed=lambda _origin: None,
+                    jump_to_path=lambda _target: None,
+                    jump_to_line=lambda _line: None,
+                )
             )
 
             def slow_search(*_args, **_kwargs):

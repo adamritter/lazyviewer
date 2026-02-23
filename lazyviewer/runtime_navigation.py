@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from .config import save_named_marks, save_show_hidden
@@ -49,33 +50,34 @@ def _first_display_index_for_source_line(lines: list[str], source_line: int) -> 
     return len(lines) - 1
 
 
+@dataclass(frozen=True)
+class NavigationPickerDeps:
+    state: AppState
+    command_palette_items: tuple[tuple[str, str], ...]
+    rebuild_screen_lines: Callable[..., None]
+    rebuild_tree_entries: Callable[..., None]
+    preview_selected_entry: Callable[..., None]
+    schedule_tree_filter_index_warmup: Callable[[], None]
+    mark_tree_watch_dirty: Callable[[], None]
+    reset_git_watch_context: Callable[[], None]
+    refresh_git_status_overlay: Callable[..., None]
+    visible_content_rows: Callable[[], int]
+    refresh_rendered_for_current_path: Callable[..., None]
+
+
 class NavigationPickerOps:
-    def __init__(
-        self,
-        *,
-        state: AppState,
-        command_palette_items: tuple[tuple[str, str], ...],
-        rebuild_screen_lines: Callable[..., None],
-        rebuild_tree_entries: Callable[..., None],
-        preview_selected_entry: Callable[..., None],
-        schedule_tree_filter_index_warmup: Callable[[], None],
-        mark_tree_watch_dirty: Callable[[], None],
-        reset_git_watch_context: Callable[[], None],
-        refresh_git_status_overlay: Callable[..., None],
-        visible_content_rows: Callable[[], int],
-        refresh_rendered_for_current_path: Callable[..., None],
-    ) -> None:
-        self.state = state
-        self.command_palette_items = command_palette_items
-        self.rebuild_screen_lines = rebuild_screen_lines
-        self.rebuild_tree_entries = rebuild_tree_entries
-        self.preview_selected_entry = preview_selected_entry
-        self.schedule_tree_filter_index_warmup = schedule_tree_filter_index_warmup
-        self.mark_tree_watch_dirty = mark_tree_watch_dirty
-        self.reset_git_watch_context = reset_git_watch_context
-        self.refresh_git_status_overlay = refresh_git_status_overlay
-        self.visible_content_rows = visible_content_rows
-        self.refresh_rendered_for_current_path = refresh_rendered_for_current_path
+    def __init__(self, deps: NavigationPickerDeps) -> None:
+        self.state = deps.state
+        self.command_palette_items = deps.command_palette_items
+        self.rebuild_screen_lines = deps.rebuild_screen_lines
+        self.rebuild_tree_entries = deps.rebuild_tree_entries
+        self.preview_selected_entry = deps.preview_selected_entry
+        self.schedule_tree_filter_index_warmup = deps.schedule_tree_filter_index_warmup
+        self.mark_tree_watch_dirty = deps.mark_tree_watch_dirty
+        self.reset_git_watch_context = deps.reset_git_watch_context
+        self.refresh_git_status_overlay = deps.refresh_git_status_overlay
+        self.visible_content_rows = deps.visible_content_rows
+        self.refresh_rendered_for_current_path = deps.refresh_rendered_for_current_path
         self.open_tree_filter_fn: Callable[[str], None] | None = None
 
     def set_open_tree_filter(self, callback: Callable[[str], None]) -> None:

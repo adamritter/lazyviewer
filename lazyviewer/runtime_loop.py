@@ -13,7 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .input import read_key
-from .key_handlers import handle_picker_key, handle_tree_filter_key
+from .key_handlers import (
+    PickerKeyCallbacks,
+    TreeFilterKeyCallbacks,
+    handle_picker_key,
+    handle_tree_filter_key,
+)
 from .render import RenderContext, render_dual_page_context
 from .state import AppState
 from .terminal import TerminalController
@@ -64,7 +69,6 @@ class RuntimeLoopCallbacks:
 
 
 def run_main_loop(
-    *,
     state: AppState,
     terminal: TerminalController,
     stdin_fd: int,
@@ -72,6 +76,23 @@ def run_main_loop(
     callbacks: RuntimeLoopCallbacks,
 ) -> None:
     ops = callbacks
+    picker_key_callbacks = PickerKeyCallbacks(
+        close_picker=ops.close_picker,
+        refresh_command_picker_matches=ops.refresh_command_picker_matches,
+        activate_picker_selection=ops.activate_picker_selection,
+        visible_content_rows=ops.visible_content_rows,
+        refresh_active_picker_matches=ops.refresh_active_picker_matches,
+    )
+    tree_filter_key_callbacks = TreeFilterKeyCallbacks(
+        handle_tree_mouse_wheel=ops.handle_tree_mouse_wheel,
+        handle_tree_mouse_click=ops.handle_tree_mouse_click,
+        toggle_help_panel=ops.toggle_help_panel,
+        close_tree_filter=ops.close_tree_filter,
+        activate_tree_filter_selection=ops.activate_tree_filter_selection,
+        move_tree_selection=ops.move_tree_selection,
+        apply_tree_filter_query=ops.apply_tree_filter_query,
+        jump_to_next_content_hit=ops.jump_to_next_content_hit,
+    )
     kitty_image_state: tuple[str, int, int, int, int] | None = None
     tree_filter_cursor_visible = True
     tree_filter_spinner_frame = 0
@@ -357,30 +378,19 @@ def run_main_loop(
                 continue
 
             picker_handled, picker_should_quit = handle_picker_key(
-                key=key,
-                state=state,
-                double_click_seconds=timing.double_click_seconds,
-                close_picker=ops.close_picker,
-                refresh_command_picker_matches=ops.refresh_command_picker_matches,
-                activate_picker_selection=ops.activate_picker_selection,
-                visible_content_rows=ops.visible_content_rows,
-                refresh_active_picker_matches=ops.refresh_active_picker_matches,
+                key,
+                state,
+                timing.double_click_seconds,
+                picker_key_callbacks,
             )
             if picker_should_quit:
                 break
             if picker_handled:
                 continue
             if handle_tree_filter_key(
-                key=key,
-                state=state,
-                handle_tree_mouse_wheel=ops.handle_tree_mouse_wheel,
-                handle_tree_mouse_click=ops.handle_tree_mouse_click,
-                toggle_help_panel=ops.toggle_help_panel,
-                close_tree_filter=ops.close_tree_filter,
-                activate_tree_filter_selection=ops.activate_tree_filter_selection,
-                move_tree_selection=ops.move_tree_selection,
-                apply_tree_filter_query=ops.apply_tree_filter_query,
-                jump_to_next_content_hit=ops.jump_to_next_content_hit,
+                key,
+                state,
+                tree_filter_key_callbacks,
             ):
                 continue
             if ops.handle_normal_key(key, term.columns):

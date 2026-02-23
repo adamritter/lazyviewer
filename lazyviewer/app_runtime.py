@@ -40,8 +40,8 @@ from .preview import (
 )
 from .render import help_panel_row_count
 from .runtime_loop import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
-from .runtime_navigation import NavigationPickerOps
-from .runtime_tree_filter import TreeFilterOps
+from .runtime_navigation import NavigationPickerDeps, NavigationPickerOps
+from .runtime_tree_filter import TreeFilterDeps, TreeFilterOps
 from .search.fuzzy import collect_project_file_labels
 from .state import AppState
 from .terminal import TerminalController
@@ -1694,7 +1694,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         preview_selection_deps,
     )
 
-    tree_filter_ops = TreeFilterOps(
+    tree_filter_deps = TreeFilterDeps(
         state=state,
         visible_content_rows=visible_content_rows,
         rebuild_screen_lines=rebuild_screen_lines,
@@ -1705,6 +1705,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         jump_to_line=navigation_proxy.jump_to_line,
         on_tree_filter_state_change=sync_left_width_for_tree_filter_mode,
     )
+    tree_filter_ops = TreeFilterOps(tree_filter_deps)
 
     coerce_tree_filter_result_index = tree_filter_ops.coerce_tree_filter_result_index
     move_tree_selection = tree_filter_ops.move_tree_selection
@@ -1739,7 +1740,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         max_horizontal_text_offset,
     )
 
-    navigation_ops = NavigationPickerOps(
+    navigation_picker_deps = NavigationPickerDeps(
         state=state,
         command_palette_items=COMMAND_PALETTE_ITEMS,
         rebuild_screen_lines=rebuild_screen_lines,
@@ -1752,6 +1753,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         visible_content_rows=visible_content_rows,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
     )
+    navigation_ops = NavigationPickerOps(navigation_picker_deps)
     navigation_proxy.bind(navigation_ops)
     navigation_ops.set_open_tree_filter(open_tree_filter)
     tree_mouse_callbacks = _TreeMouseCallbacks(
