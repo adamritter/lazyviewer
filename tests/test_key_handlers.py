@@ -234,6 +234,30 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         self.assertEqual(called["apply"], 0)
         self.assertEqual(called["toggle_help"], 1)
 
+    def test_p_jumps_to_previous_content_hit_in_content_filter_mode(self) -> None:
+        state = _make_state()
+        state.tree_filter_active = True
+        state.tree_filter_mode = "content"
+        state.tree_filter_editing = False
+        called = {"direction": 0}
+
+        handled = handle_tree_filter_key(
+            key="p",
+            state=state,
+            handle_tree_mouse_wheel=lambda _key: False,
+            handle_tree_mouse_click=lambda _key: False,
+            toggle_help_panel=lambda: None,
+            close_tree_filter=lambda **_kwargs: None,
+            activate_tree_filter_selection=lambda: None,
+            move_tree_selection=lambda _direction: False,
+            apply_tree_filter_query=lambda _query, **_kwargs: None,
+            jump_to_next_content_hit=lambda direction: called.__setitem__("direction", direction) or True,
+        )
+
+        self.assertTrue(handled)
+        self.assertEqual(called["direction"], -1)
+        self.assertTrue(state.dirty)
+
     def test_e_launches_selected_directory_when_browser_visible(self) -> None:
         state = _make_state()
         state.browser_visible = True

@@ -326,7 +326,7 @@ def handle_tree_filter_key(
             if jump_to_next_content_hit(1):
                 state.dirty = True
             return True
-        if key == "N":
+        if key in {"N", "p"}:
             if jump_to_next_content_hit(-1):
                 state.dirty = True
             return True
