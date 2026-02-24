@@ -125,6 +125,7 @@ def run_main_loop(
         jump_to_named_mark = tree_pane.navigation.jump_to_named_mark
         jump_back_in_history = tree_pane.navigation.jump_back_in_history
         jump_forward_in_history = tree_pane.navigation.jump_forward_in_history
+        toggle_tree_filter_mode = tree_pane.toggle_tree_filter_mode
         tick_source_selection_drag = getattr(
             callbacks,
             "tick_source_selection_drag",
@@ -162,6 +163,18 @@ def run_main_loop(
         tick_source_selection_drag = callbacks.tick_source_selection_drag
         picker_key_dispatch = None
         tree_filter_key_dispatch = None
+        def toggle_tree_filter_mode(mode: str) -> None:
+            """Open/switch/close tree filter UI based on current editing state."""
+            if state.tree_filter_active:
+                if state.tree_filter_mode == mode and state.tree_filter_editing:
+                    close_tree_filter(clear_query=True)
+                elif state.tree_filter_mode != mode:
+                    open_tree_filter(mode)
+                else:
+                    state.tree_filter_editing = True
+                    state.dirty = True
+                return
+            open_tree_filter(mode)
 
     maybe_refresh_tree_watch = callbacks.maybe_refresh_tree_watch
     maybe_refresh_git_watch = callbacks.maybe_refresh_git_watch
@@ -184,19 +197,6 @@ def run_main_loop(
             state.last_right_width = state.right_width
             rebuild_screen_lines(columns=term_columns)
         state.dirty = True
-
-    def toggle_tree_filter_mode(mode: str) -> None:
-        """Open/switch/close tree filter UI based on current editing state."""
-        if state.tree_filter_active:
-            if state.tree_filter_mode == mode and state.tree_filter_editing:
-                close_tree_filter(clear_query=True)
-            elif state.tree_filter_mode != mode:
-                open_tree_filter(mode)
-            else:
-                state.tree_filter_editing = True
-                state.dirty = True
-            return
-        open_tree_filter(mode)
 
     with terminal.raw_mode():
         while True:
