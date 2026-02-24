@@ -12,7 +12,6 @@ from unittest import mock
 
 from lazyviewer.render.ansi import build_screen_lines
 from lazyviewer.tree_pane.panels.picker import (
-    NavigationPickerDeps,
     NavigationPickerOps,
     _first_display_index_for_source_line,
     _source_line_for_display_index,
@@ -80,19 +79,17 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
                 state.text_x = 0
 
         ops = NavigationPickerOps(
-            NavigationPickerDeps(
-                state=state,
-                command_palette_items=(),
-                rebuild_screen_lines=rebuild_screen_lines,
-                rebuild_tree_entries=lambda **_kwargs: None,
-                preview_selected_entry=lambda **_kwargs: None,
-                schedule_tree_filter_index_warmup=lambda: None,
-                mark_tree_watch_dirty=lambda: None,
-                reset_git_watch_context=lambda: None,
-                refresh_git_status_overlay=lambda **_kwargs: None,
-                visible_content_rows=lambda: visible_rows,
-                refresh_rendered_for_current_path=lambda **_kwargs: None,
-            )
+            state=state,
+            command_palette_items=(),
+            rebuild_screen_lines=rebuild_screen_lines,
+            rebuild_tree_entries=lambda **_kwargs: None,
+            preview_selected_entry=lambda **_kwargs: None,
+            schedule_tree_filter_index_warmup=lambda: None,
+            mark_tree_watch_dirty=lambda: None,
+            reset_git_watch_context=lambda: None,
+            refresh_git_status_overlay=lambda **_kwargs: None,
+            visible_content_rows=lambda: visible_rows,
+            refresh_rendered_for_current_path=lambda **_kwargs: None,
         )
 
         ops.toggle_wrap_mode()
@@ -119,19 +116,17 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
                 state.text_x = 0
 
         ops = NavigationPickerOps(
-            NavigationPickerDeps(
-                state=state,
-                command_palette_items=(),
-                rebuild_screen_lines=rebuild_screen_lines,
-                rebuild_tree_entries=lambda **_kwargs: None,
-                preview_selected_entry=lambda **_kwargs: None,
-                schedule_tree_filter_index_warmup=lambda: None,
-                mark_tree_watch_dirty=lambda: None,
-                reset_git_watch_context=lambda: None,
-                refresh_git_status_overlay=lambda **_kwargs: None,
-                visible_content_rows=lambda: visible_rows,
-                refresh_rendered_for_current_path=lambda **_kwargs: None,
-            )
+            state=state,
+            command_palette_items=(),
+            rebuild_screen_lines=rebuild_screen_lines,
+            rebuild_tree_entries=lambda **_kwargs: None,
+            preview_selected_entry=lambda **_kwargs: None,
+            schedule_tree_filter_index_warmup=lambda: None,
+            mark_tree_watch_dirty=lambda: None,
+            reset_git_watch_context=lambda: None,
+            refresh_git_status_overlay=lambda **_kwargs: None,
+            visible_content_rows=lambda: visible_rows,
+            refresh_rendered_for_current_path=lambda **_kwargs: None,
         )
 
         ops.toggle_wrap_mode()
@@ -148,19 +143,17 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
         state.text_x = 2
 
         ops = NavigationPickerOps(
-            NavigationPickerDeps(
-                state=state,
-                command_palette_items=(),
-                rebuild_screen_lines=lambda **_kwargs: None,
-                rebuild_tree_entries=lambda **_kwargs: None,
-                preview_selected_entry=lambda **_kwargs: None,
-                schedule_tree_filter_index_warmup=lambda: None,
-                mark_tree_watch_dirty=lambda: None,
-                reset_git_watch_context=lambda: None,
-                refresh_git_status_overlay=lambda **_kwargs: None,
-                visible_content_rows=lambda: visible_rows,
-                refresh_rendered_for_current_path=lambda **_kwargs: None,
-            )
+            state=state,
+            command_palette_items=(),
+            rebuild_screen_lines=lambda **_kwargs: None,
+            rebuild_tree_entries=lambda **_kwargs: None,
+            preview_selected_entry=lambda **_kwargs: None,
+            schedule_tree_filter_index_warmup=lambda: None,
+            mark_tree_watch_dirty=lambda: None,
+            reset_git_watch_context=lambda: None,
+            refresh_git_status_overlay=lambda **_kwargs: None,
+            visible_content_rows=lambda: visible_rows,
+            refresh_rendered_for_current_path=lambda **_kwargs: None,
         )
 
         with mock.patch("lazyviewer.tree_pane.panels.picker.navigation.save_named_marks") as save_named_marks:

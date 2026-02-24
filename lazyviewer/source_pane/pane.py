@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from functools import partial
+import os
+import shutil
 
 from ..input.mouse import _handle_tree_mouse_wheel
 from ..runtime.state import AppState
@@ -17,11 +19,16 @@ class SourcePane:
         self,
         *,
         state: AppState,
-        ops: SourcePaneOps,
+        visible_content_rows: Callable[[], int],
         move_tree_selection: Callable[[int], bool],
         maybe_grow_directory_preview: Callable[[], bool],
+        get_terminal_size: Callable[[tuple[int, int]], os.terminal_size] = shutil.get_terminal_size,
     ) -> None:
-        self._ops = ops
+        self._ops = SourcePaneOps(
+            state,
+            visible_content_rows,
+            get_terminal_size=get_terminal_size,
+        )
         self._handle_tree_mouse_wheel = partial(
             _handle_tree_mouse_wheel,
             state,

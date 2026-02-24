@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from collections import OrderedDict
 from pathlib import Path
 
 from ....runtime.navigation import JumpLocation
+from ....runtime.state import AppState
 from ....search.fuzzy import (
     STRICT_SUBSTRING_ONLY_MIN_FILES,
     collect_project_file_labels,
@@ -20,7 +22,6 @@ from ....tree_model import (
     next_file_entry_index,
 )
 from . import matching as filter_matching
-from .deps import TreeFilterDeps
 from .helpers import skip_gitignored_for_hidden_mode
 from .limits import (
     CONTENT_SEARCH_CACHE_MAX_QUERIES,
@@ -35,41 +36,18 @@ class TreeFilterOps:
 
     def __init__(
         self,
-        deps: TreeFilterDeps | None = None,
         *,
-        state=None,
-        visible_content_rows=None,
-        rebuild_screen_lines=None,
-        preview_selected_entry=None,
-        current_jump_location=None,
-        record_jump_if_changed=None,
-        jump_to_path=None,
-        jump_to_line=None,
-        on_tree_filter_state_change=None,
+        state: AppState,
+        visible_content_rows: Callable[[], int],
+        rebuild_screen_lines: Callable[..., None],
+        preview_selected_entry: Callable[..., None],
+        current_jump_location: Callable[[], JumpLocation],
+        record_jump_if_changed: Callable[[JumpLocation], None],
+        jump_to_path: Callable[[Path], None],
+        jump_to_line: Callable[[int], None],
+        on_tree_filter_state_change: Callable[[], None] | None = None,
     ) -> None:
-        """Create operations object from deps bundle or explicit arguments."""
-        if deps is not None:
-            state = deps.state
-            visible_content_rows = deps.visible_content_rows
-            rebuild_screen_lines = deps.rebuild_screen_lines
-            preview_selected_entry = deps.preview_selected_entry
-            current_jump_location = deps.current_jump_location
-            record_jump_if_changed = deps.record_jump_if_changed
-            jump_to_path = deps.jump_to_path
-            jump_to_line = deps.jump_to_line
-            on_tree_filter_state_change = deps.on_tree_filter_state_change
-
-        if (
-            state is None
-            or visible_content_rows is None
-            or rebuild_screen_lines is None
-            or preview_selected_entry is None
-            or current_jump_location is None
-            or record_jump_if_changed is None
-            or jump_to_path is None
-            or jump_to_line is None
-        ):
-            raise TypeError("TreeFilterOps requires either deps or full explicit arguments.")
+        """Create operations object from explicit runtime dependencies."""
 
         self.state = state
         self.visible_content_rows = visible_content_rows

@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.tree_pane.panels.filter import TreeFilterDeps, TreeFilterOps
+from lazyviewer.tree_pane.panels.filter import TreeFilterOps
 from lazyviewer.runtime.state import AppState
 from lazyviewer.tree_model import TreeEntry
 
@@ -51,16 +51,14 @@ class RuntimeTreeFilterTests(unittest.TestCase):
             state.tree_filter_mode = "content"
 
             ops = TreeFilterOps(
-                TreeFilterDeps(
-                    state=state,
-                    visible_content_rows=lambda: 20,
-                    rebuild_screen_lines=lambda **_kwargs: None,
-                    preview_selected_entry=lambda **_kwargs: None,
-                    current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
-                    record_jump_if_changed=lambda _origin: None,
-                    jump_to_path=lambda _target: None,
-                    jump_to_line=lambda _line: None,
-                )
+                state=state,
+                visible_content_rows=lambda: 20,
+                rebuild_screen_lines=lambda **_kwargs: None,
+                preview_selected_entry=lambda **_kwargs: None,
+                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                record_jump_if_changed=lambda _origin: None,
+                jump_to_path=lambda _target: None,
+                jump_to_line=lambda _line: None,
             )
 
             with mock.patch(

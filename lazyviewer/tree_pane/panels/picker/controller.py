@@ -7,10 +7,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ....runtime.config import save_show_hidden
+from ....runtime.state import AppState
 from ....search.fuzzy import fuzzy_match_labels
 from ....source_pane.symbols import collect_symbols
 from . import navigation as picker_navigation
-from .deps import NavigationPickerDeps
 from .line_map import first_display_index_for_source_line, source_line_for_display_index
 
 PICKER_RESULT_LIMIT = 200
@@ -21,48 +21,20 @@ class NavigationPickerOps:
 
     def __init__(
         self,
-        deps: NavigationPickerDeps | None = None,
         *,
-        state=None,
-        command_palette_items=None,
-        rebuild_screen_lines=None,
-        rebuild_tree_entries=None,
-        preview_selected_entry=None,
-        schedule_tree_filter_index_warmup=None,
-        mark_tree_watch_dirty=None,
-        reset_git_watch_context=None,
-        refresh_git_status_overlay=None,
-        visible_content_rows=None,
-        refresh_rendered_for_current_path=None,
+        state: AppState,
+        command_palette_items: tuple[tuple[str, str], ...],
+        rebuild_screen_lines: Callable[..., None],
+        rebuild_tree_entries: Callable[..., None],
+        preview_selected_entry: Callable[..., None],
+        schedule_tree_filter_index_warmup: Callable[[], None],
+        mark_tree_watch_dirty: Callable[[], None],
+        reset_git_watch_context: Callable[[], None],
+        refresh_git_status_overlay: Callable[..., None],
+        visible_content_rows: Callable[[], int],
+        refresh_rendered_for_current_path: Callable[..., None],
     ) -> None:
-        """Bind controller methods from deps bundle or explicit runtime hooks."""
-        if deps is not None:
-            state = deps.state
-            command_palette_items = deps.command_palette_items
-            rebuild_screen_lines = deps.rebuild_screen_lines
-            rebuild_tree_entries = deps.rebuild_tree_entries
-            preview_selected_entry = deps.preview_selected_entry
-            schedule_tree_filter_index_warmup = deps.schedule_tree_filter_index_warmup
-            mark_tree_watch_dirty = deps.mark_tree_watch_dirty
-            reset_git_watch_context = deps.reset_git_watch_context
-            refresh_git_status_overlay = deps.refresh_git_status_overlay
-            visible_content_rows = deps.visible_content_rows
-            refresh_rendered_for_current_path = deps.refresh_rendered_for_current_path
-
-        if (
-            state is None
-            or command_palette_items is None
-            or rebuild_screen_lines is None
-            or rebuild_tree_entries is None
-            or preview_selected_entry is None
-            or schedule_tree_filter_index_warmup is None
-            or mark_tree_watch_dirty is None
-            or reset_git_watch_context is None
-            or refresh_git_status_overlay is None
-            or visible_content_rows is None
-            or refresh_rendered_for_current_path is None
-        ):
-            raise TypeError("NavigationPickerOps requires either deps or full explicit arguments.")
+        """Bind controller methods from explicit runtime hooks."""
 
         self.state = state
         self.command_palette_items = command_palette_items

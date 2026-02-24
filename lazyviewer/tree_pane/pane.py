@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from ..input.mouse import TreeMouseHandlers
+from ..runtime.navigation import JumpLocation
+from ..runtime.state import AppState
 from .panels.filter import TreeFilterOps
 from .panels.picker import NavigationPickerOps
 
@@ -15,12 +18,44 @@ class TreePane:
     def __init__(
         self,
         *,
-        filter_ops: TreeFilterOps,
-        navigation_ops: NavigationPickerOps,
+        state: AppState,
+        command_palette_items: tuple[tuple[str, str], ...],
+        visible_content_rows: Callable[[], int],
+        rebuild_screen_lines: Callable[..., None],
+        preview_selected_entry: Callable[..., None],
+        schedule_tree_filter_index_warmup: Callable[[], None],
+        mark_tree_watch_dirty: Callable[[], None],
+        reset_git_watch_context: Callable[[], None],
+        refresh_git_status_overlay: Callable[..., None],
+        refresh_rendered_for_current_path: Callable[..., None],
+        on_tree_filter_state_change: Callable[[], None] | None = None,
         mouse_handlers: TreeMouseHandlers | None = None,
     ) -> None:
-        self.filter = filter_ops
-        self.navigation = navigation_ops
+        self.filter = TreeFilterOps(
+            state=state,
+            visible_content_rows=visible_content_rows,
+            rebuild_screen_lines=rebuild_screen_lines,
+            preview_selected_entry=preview_selected_entry,
+            current_jump_location=self.current_jump_location,
+            record_jump_if_changed=self.record_jump_if_changed,
+            jump_to_path=self.jump_to_path,
+            jump_to_line=self.jump_to_line,
+            on_tree_filter_state_change=on_tree_filter_state_change,
+        )
+        self.navigation = NavigationPickerOps(
+            state=state,
+            command_palette_items=command_palette_items,
+            rebuild_screen_lines=rebuild_screen_lines,
+            rebuild_tree_entries=self.filter.rebuild_tree_entries,
+            preview_selected_entry=preview_selected_entry,
+            schedule_tree_filter_index_warmup=schedule_tree_filter_index_warmup,
+            mark_tree_watch_dirty=mark_tree_watch_dirty,
+            reset_git_watch_context=reset_git_watch_context,
+            refresh_git_status_overlay=refresh_git_status_overlay,
+            visible_content_rows=visible_content_rows,
+            refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+        )
+        self.navigation.set_open_tree_filter(self.open_tree_filter)
         self.mouse = mouse_handlers
 
     def attach_mouse(self, mouse_handlers: TreeMouseHandlers) -> None:
@@ -110,7 +145,7 @@ class TreePane:
     def current_jump_location(self):
         return self.navigation.current_jump_location()
 
-    def record_jump_if_changed(self, origin) -> None:
+    def record_jump_if_changed(self, origin: JumpLocation) -> None:
         self.navigation.record_jump_if_changed(origin)
 
     def jump_back_in_history(self) -> bool:

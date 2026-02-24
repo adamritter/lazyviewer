@@ -37,7 +37,7 @@ from ..input import (
     TreeMouseCallbacks,
     TreeMouseHandlers,
 )
-from ..source_pane import SourcePaneOps, copy_selected_source_range as copy_source_selection_range
+from ..source_pane import copy_selected_source_range as copy_source_selection_range
 from ..source_pane.pane import SourcePane
 from .tree_sync import (
     PreviewSelectionDeps,
@@ -46,7 +46,6 @@ from .tree_sync import (
 from .application import App
 from .index_warmup import TreeFilterIndexWarmupScheduler
 from .layout import PagerLayoutOps
-from .navigation_proxy import NavigationProxy
 from .watch_refresh import (
     WatchRefreshContext,
     _refresh_git_status_overlay,
@@ -70,8 +69,6 @@ from ..source_pane import (
 from ..source_pane.interaction.events import directory_preview_target_for_display_line as preview_directory_preview_target_for_display_line
 from ..render import help_panel_row_count
 from .loop import RuntimeLoopTiming, run_main_loop
-from ..tree_pane.panels.picker import NavigationPickerOps
-from ..tree_pane.panels.filter import TreeFilterOps
 from ..tree_pane.pane import TreePane
 from ..search.fuzzy import collect_project_file_labels
 from .terminal import TerminalController
@@ -208,11 +205,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         refresh_rendered_for_current_path,
     )
 
-    source_pane_ops = SourcePaneOps(
-        state,
-        visible_content_rows,
-        get_terminal_size=shutil.get_terminal_size,
-    )
     directory_preview_target_for_display_line = partial(preview_directory_preview_target_for_display_line, state)
     copy_selected_source_range = partial(
         copy_source_selection_range,
@@ -220,32 +212,46 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         copy_text_to_clipboard=_copy_text_to_clipboard,
     )
     source_pane_runtime: SourcePane
+    tree_pane_runtime: TreePane | None = None
 
     sync_selected_target_after_tree_refresh: Callable[..., None]
-    navigation_proxy = NavigationProxy()
+
+    def jump_to_line_for_preview(line_number: int) -> None:
+        assert tree_pane_runtime is not None
+        tree_pane_runtime.jump_to_line(line_number)
+
     preview_selection_deps = PreviewSelectionDeps(
         state=state,
         clear_source_selection=clear_source_selection,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
-        jump_to_line=navigation_proxy.jump_to_line,
+        jump_to_line=jump_to_line_for_preview,
     )
 
     preview_selected_entry = preview_selection_deps.preview_selected_entry
 
-    tree_filter_ops = TreeFilterOps(
+    tree_pane_runtime = TreePane(
         state=state,
+        command_palette_items=COMMAND_PALETTE_ITEMS,
         visible_content_rows=visible_content_rows,
         rebuild_screen_lines=rebuild_screen_lines,
         preview_selected_entry=preview_selected_entry,
-        current_jump_location=navigation_proxy.current_jump_location,
-        record_jump_if_changed=navigation_proxy.record_jump_if_changed,
-        jump_to_path=navigation_proxy.jump_to_path,
-        jump_to_line=navigation_proxy.jump_to_line,
+        schedule_tree_filter_index_warmup=schedule_tree_filter_index_warmup,
+        mark_tree_watch_dirty=mark_tree_watch_dirty,
+        reset_git_watch_context=reset_git_watch_context,
+        refresh_git_status_overlay=refresh_git_status_overlay,
+        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
         on_tree_filter_state_change=sync_left_width_for_tree_filter_mode,
+    )
+    source_pane_runtime = SourcePane(
+        state=state,
+        visible_content_rows=visible_content_rows,
+        move_tree_selection=tree_pane_runtime.move_tree_selection,
+        maybe_grow_directory_preview=maybe_grow_directory_preview,
+        get_terminal_size=shutil.get_terminal_size,
     )
     tree_refresh_sync_deps = TreeRefreshSyncDeps(
         state=state,
-        rebuild_tree_entries=tree_filter_ops.rebuild_tree_entries,
+        rebuild_tree_entries=tree_pane_runtime.rebuild_tree_entries,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
         schedule_tree_filter_index_warmup=schedule_tree_filter_index_warmup,
         refresh_git_status_overlay=refresh_git_status_overlay,
@@ -259,32 +265,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         monotonic=time.monotonic,
         tree_watch_poll_seconds=TREE_WATCH_POLL_SECONDS,
     )
-    source_pane_runtime = SourcePane(
-        state=state,
-        ops=source_pane_ops,
-        move_tree_selection=tree_filter_ops.move_tree_selection,
-        maybe_grow_directory_preview=maybe_grow_directory_preview,
-    )
-
-    navigation_ops = NavigationPickerOps(
-        state=state,
-        command_palette_items=COMMAND_PALETTE_ITEMS,
-        rebuild_screen_lines=rebuild_screen_lines,
-        rebuild_tree_entries=tree_filter_ops.rebuild_tree_entries,
-        preview_selected_entry=preview_selected_entry,
-        schedule_tree_filter_index_warmup=schedule_tree_filter_index_warmup,
-        mark_tree_watch_dirty=mark_tree_watch_dirty,
-        reset_git_watch_context=reset_git_watch_context,
-        refresh_git_status_overlay=refresh_git_status_overlay,
-        visible_content_rows=visible_content_rows,
-        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
-    )
-    tree_pane_runtime = TreePane(
-        filter_ops=tree_filter_ops,
-        navigation_ops=navigation_ops,
-    )
-    navigation_proxy.bind(navigation_ops)
-    navigation_ops.set_open_tree_filter(tree_pane_runtime.open_tree_filter)
     tree_mouse_callbacks = TreeMouseCallbacks(
         visible_content_rows=visible_content_rows,
         source_pane_col_bounds=source_pane_runtime.source_pane_col_bounds,
