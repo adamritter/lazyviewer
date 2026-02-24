@@ -6,7 +6,8 @@ Also formats rows with search-hit text and git status badges.
 
 from __future__ import annotations
 
-from .build import build_tree_entries
+from .build import DirectoryChild, build_tree_entries, list_directory_children, maybe_gitignore_matcher
+from .doc_summary import clear_doc_summary_cache
 from .filtering import (
     filter_tree_entries_for_content_matches,
     filter_tree_entries_for_files,
@@ -24,7 +25,11 @@ from .types import TreeEntry
 
 __all__ = [
     "TreeEntry",
+    "DirectoryChild",
     "build_tree_entries",
+    "list_directory_children",
+    "maybe_gitignore_matcher",
+    "clear_doc_summary_cache",
     "filter_tree_entries_for_content_matches",
     "filter_tree_entries_for_files",
     "find_content_hit_index",

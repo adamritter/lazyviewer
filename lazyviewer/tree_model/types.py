@@ -14,6 +14,9 @@ class TreeEntry:
     depth: int
     is_dir: bool
     file_size: int | None = None
+    mtime_ns: int | None = None
+    git_status_flags: int = 0
+    doc_summary: str | None = None
     kind: str = "path"
     display: str | None = None
     line: int | None = None

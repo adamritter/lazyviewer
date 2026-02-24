@@ -2,21 +2,17 @@
 
 Preview output is ANSI-formatted tree text used by the source pane when the
 selected path is a directory. Results are memoized with keys that include root
-mtime and git-overlay signature, then validated against scanned directory mtimes
-to avoid stale nested previews.
+mtime and git-overlay signature, then validated against scanned metadata.
 """
 
 from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
-import os
-import re
 from pathlib import Path
 
-from .syntax import sanitize_terminal_text
 from ..git_status import format_git_status_badges
-from ..gitignore import get_gitignore_matcher
+from ..tree_model import clear_doc_summary_cache, list_directory_children, maybe_gitignore_matcher
 from ..tree_model.rendering import TREE_SIZE_LABEL_MIN_BYTES
 
 DIR_PREVIEW_DEFAULT_DEPTH = 32
@@ -24,13 +20,6 @@ DIR_PREVIEW_INITIAL_MAX_ENTRIES = 1_000
 DIR_PREVIEW_GROWTH_STEP = 500
 DIR_PREVIEW_HARD_MAX_ENTRIES = 20_000
 DIR_PREVIEW_CACHE_MAX = 128
-DOC_SUMMARY_READ_BYTES = 4_096
-DOC_SUMMARY_MAX_FILE_BYTES = 256 * 1024
-DOC_SUMMARY_MAX_CHARS = 96
-
-_CODING_COOKIE_RE = re.compile(r"^#.*coding[:=]\s*[-\w.]+")
-_TRIPLE_QUOTE_PREFIXES = ('"""', "'''")
-_LINE_COMMENT_PREFIXES = ("#", "//", "--", ";")
 
 
 @dataclass(frozen=True)
@@ -46,120 +35,6 @@ class _DirectoryPreviewCacheEntry:
 _DIR_PREVIEW_CACHE: OrderedDict[tuple[str, bool, int, int, bool, bool, int, int], _DirectoryPreviewCacheEntry] = (
     OrderedDict()
 )
-
-
-def _normalize_doc_summary(text: str) -> str | None:
-    """Normalize doc text to one safe short line."""
-    candidate = sanitize_terminal_text(" ".join(text.strip().split()))
-    if not candidate:
-        return None
-    if len(candidate) > DOC_SUMMARY_MAX_CHARS:
-        return candidate[: DOC_SUMMARY_MAX_CHARS - 3].rstrip() + "..."
-    return candidate
-
-
-def _extract_triple_quote_summary(lines: list[str], start_idx: int, delimiter: str) -> str | None:
-    """Extract one-line summary from a top-level triple-quoted block."""
-    first = lines[start_idx].lstrip()
-    body = first[len(delimiter) :]
-    if delimiter in body:
-        return _normalize_doc_summary(body.split(delimiter, 1)[0])
-
-    summary = _normalize_doc_summary(body)
-    if summary:
-        return summary
-
-    for idx in range(start_idx + 1, len(lines)):
-        line = lines[idx]
-        if delimiter in line:
-            return _normalize_doc_summary(line.split(delimiter, 1)[0])
-        summary = _normalize_doc_summary(line)
-        if summary:
-            return summary
-    return None
-
-
-def _extract_block_comment_summary(lines: list[str], start_idx: int) -> str | None:
-    """Extract one-line summary from C/JS-style block comment at file start."""
-    first = lines[start_idx].lstrip()
-    body = first[2:]
-    if "*/" in body:
-        return _normalize_doc_summary(body.split("*/", 1)[0].lstrip("*").strip())
-
-    summary = _normalize_doc_summary(body.lstrip("*").strip())
-    if summary:
-        return summary
-
-    for idx in range(start_idx + 1, len(lines)):
-        line = lines[idx]
-        if "*/" in line:
-            return _normalize_doc_summary(line.split("*/", 1)[0].lstrip("*").strip())
-        summary = _normalize_doc_summary(line.lstrip("*").strip())
-        if summary:
-            return summary
-    return None
-
-
-def _extract_line_comment_summary(lines: list[str], start_idx: int, prefix: str) -> str | None:
-    """Extract one-line summary from contiguous top-of-file line comments."""
-    for idx in range(start_idx, len(lines)):
-        stripped = lines[idx].lstrip()
-        if not stripped:
-            continue
-        if not stripped.startswith(prefix):
-            break
-        summary = _normalize_doc_summary(stripped[len(prefix) :])
-        if summary:
-            return summary
-    return None
-
-
-def _top_file_doc_summary(path: Path, size_bytes: int | None) -> str | None:
-    """Return top-of-file one-line documentation summary when present."""
-    if size_bytes is not None and size_bytes > DOC_SUMMARY_MAX_FILE_BYTES:
-        return None
-
-    try:
-        with path.open("rb") as handle:
-            sample = handle.read(DOC_SUMMARY_READ_BYTES)
-    except OSError:
-        return None
-    if not sample or b"\x00" in sample:
-        return None
-
-    text = sample.decode("utf-8", errors="replace")
-    lines = text.splitlines()
-    if not lines:
-        return None
-    if lines[0].startswith("\ufeff"):
-        lines[0] = lines[0].lstrip("\ufeff")
-
-    idx = 0
-    while idx < len(lines) and not lines[idx].strip():
-        idx += 1
-    if idx >= len(lines):
-        return None
-
-    first_stripped = lines[idx].lstrip()
-    if first_stripped.startswith("#!"):
-        idx += 1
-    if idx < len(lines) and _CODING_COOKIE_RE.match(lines[idx].strip()):
-        idx += 1
-    while idx < len(lines) and not lines[idx].strip():
-        idx += 1
-    if idx >= len(lines):
-        return None
-
-    first = lines[idx].lstrip()
-    for delimiter in _TRIPLE_QUOTE_PREFIXES:
-        if first.startswith(delimiter):
-            return _extract_triple_quote_summary(lines, idx, delimiter)
-    if first.startswith("/*"):
-        return _extract_block_comment_summary(lines, idx)
-    for prefix in _LINE_COMMENT_PREFIXES:
-        if first.startswith(prefix):
-            return _extract_line_comment_summary(lines, idx, prefix)
-    return None
 
 
 def _cache_key_for_directory(
@@ -254,8 +129,9 @@ def _cache_put(
 
 
 def clear_directory_preview_cache() -> None:
-    """Clear in-memory directory preview cache."""
+    """Clear in-memory directory preview cache and doc-summary metadata cache."""
     _DIR_PREVIEW_CACHE.clear()
+    clear_doc_summary_cache()
 
 
 def _directory_overlay_signature(root_dir: Path, git_status_overlay: dict[Path, int] | None) -> int:
@@ -317,7 +193,8 @@ def build_directory_preview(
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
-    ignore_matcher = get_gitignore_matcher(root_dir) if skip_gitignored else None
+
+    ignore_matcher = maybe_gitignore_matcher(root_dir, skip_gitignored)
 
     dir_color = "\033[1;34m"
     file_color = "\033[38;5;252m"
@@ -337,91 +214,63 @@ def build_directory_preview(
     watched_directory_mtimes: dict[str, int] = {}
     watched_file_signatures: dict[str, tuple[int, int]] = {}
 
-    def iter_children(
-        directory: Path,
-    ) -> tuple[list[tuple[str, Path, bool, int | None, int | None]], Exception | None]:
-        """Scan and sort one directory's visible children for preview rendering."""
-        try:
-            resolved_directory = directory.resolve()
-        except Exception:
-            resolved_directory = directory
-        try:
-            watched_directory_mtimes[str(resolved_directory)] = int(resolved_directory.stat().st_mtime_ns)
-        except Exception:
-            pass
-
-        children: list[tuple[str, Path, bool, int | None, int | None]] = []
-        try:
-            with os.scandir(directory) as entries:
-                for child in entries:
-                    name = child.name
-                    if not show_hidden and name.startswith("."):
-                        continue
-                    child_path = Path(child.path)
-                    if ignore_matcher is not None and ignore_matcher.is_ignored(child_path):
-                        continue
-                    try:
-                        is_dir = child.is_dir(follow_symlinks=False)
-                    except OSError:
-                        is_dir = False
-                    size_bytes: int | None = None
-                    mtime_ns: int | None = None
-                    if not is_dir:
-                        try:
-                            stat = child.stat(follow_symlinks=False)
-                            size_bytes = int(stat.st_size)
-                            mtime_ns = int(stat.st_mtime_ns)
-                        except OSError:
-                            size_bytes = None
-                            mtime_ns = None
-                    children.append((name, child_path, is_dir, size_bytes, mtime_ns))
-        except (PermissionError, OSError) as exc:
-            return [], exc
-
-        children.sort(key=lambda item: (not item[2], item[0].lower()))
-        return children, None
-
     def walk(directory: Path, prefix: str, depth: int) -> None:
         """Emit preview rows depth-first until depth/entry limits are reached."""
         nonlocal emitted
         if depth > max_depth or emitted >= max_entries:
             return
 
-        children, scan_error = iter_children(directory)
+        children, scan_error, directory_mtime_ns = list_directory_children(
+            directory,
+            show_hidden,
+            ignore_matcher=ignore_matcher,
+            git_status_overlay=git_status_overlay,
+            include_doc_summaries=True,
+        )
+        if directory_mtime_ns is not None:
+            try:
+                resolved_directory = directory.resolve()
+            except Exception:
+                resolved_directory = directory
+            watched_directory_mtimes[str(resolved_directory)] = int(directory_mtime_ns)
         if scan_error is not None:
-            exc = scan_error
-            lines_out.append(f"{branch_color}{prefix}└─{reset} {note_color}<error: {exc}>{reset}")
+            lines_out.append(f"{branch_color}{prefix}└─{reset} {note_color}<error: {scan_error}>{reset}")
             return
 
-        for idx, (name, child_path, is_dir, size_bytes, mtime_ns) in enumerate(children):
+        for idx, child in enumerate(children):
             if emitted >= max_entries:
                 break
             last = idx == len(children) - 1
             branch = "└─ " if last else "├─ "
-            suffix = "/" if is_dir else ""
-            name_color = dir_color if is_dir else file_color
+            suffix = "/" if child.is_dir else ""
+            name_color = dir_color if child.is_dir else file_color
             size_label = ""
             doc_label = ""
-            if show_size_labels and (not is_dir) and size_bytes is not None and size_bytes >= TREE_SIZE_LABEL_MIN_BYTES:
-                size_kb = size_bytes // 1024
+            if (
+                show_size_labels
+                and (not child.is_dir)
+                and child.file_size is not None
+                and child.file_size >= TREE_SIZE_LABEL_MIN_BYTES
+            ):
+                size_kb = child.file_size // 1024
                 size_label = f"{size_color} [{size_kb} KB]{reset}"
-            if not is_dir:
-                if mtime_ns is not None and size_bytes is not None:
+            if not child.is_dir:
+                if child.mtime_ns is not None and child.file_size is not None:
                     try:
-                        resolved_file = child_path.resolve()
+                        resolved_file = child.path.resolve()
                     except Exception:
-                        resolved_file = child_path
-                    watched_file_signatures[str(resolved_file)] = (mtime_ns, size_bytes)
-                doc_summary = _top_file_doc_summary(child_path, size_bytes)
-                if doc_summary:
-                    doc_label = f"{doc_color}  -- {doc_summary}{reset}"
-            badges = format_git_status_badges(child_path, git_status_overlay)
+                        resolved_file = child.path
+                    watched_file_signatures[str(resolved_file)] = (child.mtime_ns, child.file_size)
+                if child.doc_summary:
+                    doc_label = f"{doc_color}  -- {child.doc_summary}{reset}"
+
+            badges = format_git_status_badges(child.path, git_status_overlay)
             lines_out.append(
-                f"{branch_color}{prefix}{branch}{reset}{name_color}{name}{suffix}{reset}{size_label}{badges}{doc_label}"
+                f"{branch_color}{prefix}{branch}{reset}{name_color}{child.name}{suffix}{reset}{size_label}{badges}{doc_label}"
             )
             emitted += 1
-            if is_dir:
-                walk(child_path, prefix + ("   " if last else "│  "), depth + 1)
+            if child.is_dir:
+                walk(child.path, prefix + ("   " if last else "│  "), depth + 1)
 
     walk(root_dir, "", 1)
     truncated = emitted >= max_entries
