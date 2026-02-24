@@ -145,6 +145,36 @@ class SourcePaneGeometryTests(unittest.TestCase):
             [{"reset_scroll": False, "reset_dir_budget": False}],
         )
 
+    def test_directory_prefetch_target_entries_returns_none_when_not_needed(self) -> None:
+        state = _make_state([f"line_{idx}" for idx in range(100)])
+        state.current_path = state.tree_root
+        state.dir_preview_path = state.tree_root
+        state.dir_preview_truncated = True
+        state.dir_preview_max_entries = 250
+        state.start = 0
+        state.max_start = 100
+
+        target = SourcePane.directory_prefetch_target_entries(
+            state,
+            visible_content_rows=lambda: 20,
+        )
+        self.assertIsNone(target)
+
+    def test_directory_prefetch_target_entries_returns_next_budget_when_needed(self) -> None:
+        state = _make_state([f"line_{idx}" for idx in range(30)])
+        state.current_path = state.tree_root
+        state.dir_preview_path = state.tree_root
+        state.dir_preview_truncated = True
+        state.dir_preview_max_entries = 25
+        state.start = 0
+        state.max_start = 4
+
+        target = SourcePane.directory_prefetch_target_entries(
+            state,
+            visible_content_rows=lambda: 20,
+        )
+        self.assertEqual(target, 240)
+
     def test_maybe_prefetch_directory_preview_skips_when_headroom_is_sufficient(self) -> None:
         state = _make_state([f"line_{idx}" for idx in range(100)])
         state.current_path = state.tree_root

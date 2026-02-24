@@ -163,6 +163,28 @@ class SourcePane:
             dir_git_status_overlay=(state.git_status_overlay if state.git_features_enabled else None),
             dir_show_size_labels=state.show_tree_sizes,
         )
+        SourcePane.apply_rendered_for_path(
+            state,
+            rendered_for_path,
+            rebuild_screen_lines,
+            visible_content_rows,
+            reset_scroll=reset_scroll,
+            resolved_target=resolved_target,
+        )
+
+    @staticmethod
+    def apply_rendered_for_path(
+        state: AppState,
+        rendered_for_path: RenderedPath,
+        rebuild_screen_lines: Callable[..., None],
+        visible_content_rows: Callable[[], int],
+        *,
+        reset_scroll: bool,
+        resolved_target: Path | None = None,
+    ) -> None:
+        """Apply rendered preview payload to state and update derived fields."""
+        if resolved_target is None:
+            resolved_target = state.current_path.resolve()
         state.rendered = rendered_for_path.text
         rebuild_screen_lines(preserve_scroll=not reset_scroll)
         if reset_scroll and rendered_for_path.is_git_diff_preview:
@@ -239,20 +261,41 @@ class SourcePane:
         target_headroom_screens: int = 12,
     ) -> bool:
         """Grow directory preview during idle to keep scroll headroom ahead."""
+        next_max_entries = SourcePane.directory_prefetch_target_entries(
+            state,
+            visible_content_rows,
+            min_headroom_screens=min_headroom_screens,
+            target_headroom_screens=target_headroom_screens,
+        )
+        if next_max_entries is None:
+            return False
+        previous_line_count = len(state.lines)
+        state.dir_preview_max_entries = next_max_entries
+        refresh_rendered_for_current_path_fn(reset_scroll=False, reset_dir_budget=False)
+        return len(state.lines) > previous_line_count
+
+    @staticmethod
+    def directory_prefetch_target_entries(
+        state: AppState,
+        visible_content_rows: Callable[[], int],
+        *,
+        min_headroom_screens: int = 4,
+        target_headroom_screens: int = 12,
+    ) -> int | None:
+        """Return next directory-preview entry budget for idle prefetch, if needed."""
         if state.dir_preview_path is None or not state.dir_preview_truncated:
-            return False
+            return None
         if state.current_path.resolve() != state.dir_preview_path:
-            return False
+            return None
         if state.dir_preview_max_entries >= SourcePane.DIR_PREVIEW_HARD_MAX_ENTRIES:
-            return False
+            return None
 
         visible_rows = max(1, visible_content_rows())
         min_headroom_lines = max(visible_rows, visible_rows * max(1, min_headroom_screens))
         headroom_lines = max(0, state.max_start - state.start)
         if headroom_lines >= min_headroom_lines:
-            return False
+            return None
 
-        previous_line_count = len(state.lines)
         growth_step = SourcePane.directory_preview_growth_step(visible_rows)
         target_entries = state.start + (visible_rows * max(1, target_headroom_screens))
         next_max_entries = min(
@@ -260,10 +303,8 @@ class SourcePane:
             max(state.dir_preview_max_entries + growth_step, target_entries),
         )
         if next_max_entries <= state.dir_preview_max_entries:
-            return False
-        state.dir_preview_max_entries = next_max_entries
-        refresh_rendered_for_current_path_fn(reset_scroll=False, reset_dir_budget=False)
-        return len(state.lines) > previous_line_count
+            return None
+        return next_max_entries
 
     @staticmethod
     def toggle_tree_size_labels(

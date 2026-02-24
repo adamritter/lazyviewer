@@ -341,7 +341,7 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
         state = _make_state()
         terminal = _FakeTerminal()
         keys = iter(["q"])
-        calls = {"tree": 0, "git": 0, "overlay": 0, "prefetch": 0}
+        calls = {"tree": 0, "git": 0, "overlay": 0, "poll": 0, "prefetch": 0}
 
         with mock.patch(
             "lazyviewer.runtime.loop.shutil.get_terminal_size",
@@ -365,6 +365,10 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
                     refresh_git_status_overlay=lambda **_kwargs: calls.__setitem__(
                         "overlay", calls["overlay"] + 1
                     ),
+                    maybe_poll_directory_preview_results=lambda: calls.__setitem__(
+                        "poll", calls["poll"] + 1
+                    )
+                    or False,
                     maybe_prefetch_directory_preview=lambda: calls.__setitem__(
                         "prefetch", calls["prefetch"] + 1
                     )
@@ -372,7 +376,47 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
                 ),
             )
 
-        self.assertEqual(calls, {"tree": 0, "git": 0, "overlay": 0, "prefetch": 0})
+        self.assertEqual(calls, {"tree": 0, "git": 0, "overlay": 0, "poll": 1, "prefetch": 0})
+
+    def test_directory_preview_result_poll_marks_state_dirty_without_idle_wait(self) -> None:
+        state = _make_state()
+        state.dirty = False
+        terminal = _FakeTerminal()
+        keys = iter(["q"])
+        render_calls = {"count": 0}
+
+        def fake_render(_context) -> None:
+            render_calls["count"] += 1
+
+        polled = {"count": 0}
+
+        def poll_results() -> bool:
+            polled["count"] += 1
+            return polled["count"] == 1
+
+        with mock.patch(
+            "lazyviewer.runtime.loop.shutil.get_terminal_size",
+            return_value=mock.Mock(columns=120, lines=40),
+        ), mock.patch(
+            "lazyviewer.runtime.loop.read_key",
+            side_effect=lambda *_args, **_kwargs: next(keys),
+        ), mock.patch(
+            "lazyviewer.runtime.loop.render_dual_page_context",
+            side_effect=fake_render,
+        ):
+            run_main_loop(
+                state=state,
+                terminal=terminal,  # type: ignore[arg-type]
+                stdin_fd=0,
+                timing=_loop_timing(),
+                callbacks=_loop_callbacks(
+                    handle_normal_key=lambda key, _columns: key == "q",
+                    maybe_poll_directory_preview_results=poll_results,
+                ),
+            )
+
+        self.assertEqual(polled["count"], 1)
+        self.assertEqual(render_calls["count"], 1)
 
     def test_idle_loop_runs_directory_prefetch_after_other_idle_callbacks(self) -> None:
         state = _make_state()

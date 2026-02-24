@@ -48,6 +48,7 @@ class RuntimeLoopCallbacks:
     handle_tree_filter_key: Callable[[str], bool] | None = None
     tick_source_selection_drag: Callable[[], None] | None = None
     tick_tree_filter_search: Callable[[float], bool] | None = None
+    maybe_poll_directory_preview_results: Callable[[], bool] | None = None
     maybe_prefetch_directory_preview: Callable[[], bool] | None = None
 
 
@@ -127,6 +128,7 @@ def run_main_loop(
     refresh_git_status_overlay = callbacks.refresh_git_status_overlay
     handle_normal_key = callbacks.handle_normal_key
     save_left_pane_width = callbacks.save_left_pane_width
+    maybe_poll_directory_preview_results = getattr(callbacks, "maybe_poll_directory_preview_results", None)
     maybe_prefetch_directory_preview = getattr(callbacks, "maybe_prefetch_directory_preview", None)
     kitty_image_state: tuple[str, int, int, int, int] | None = None
     tree_filter_cursor_visible = True
@@ -151,6 +153,8 @@ def run_main_loop(
         while True:
             if tick_tree_filter_search is not None:
                 tick_tree_filter_search(0.0)
+            if maybe_poll_directory_preview_results is not None and maybe_poll_directory_preview_results():
+                state.dirty = True
             term = shutil.get_terminal_size((80, 24))
             now = time.monotonic()
             terminal.set_mouse_reporting(True)

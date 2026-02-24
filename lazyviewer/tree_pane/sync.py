@@ -20,6 +20,7 @@ class PreviewSelection:
     state: AppState
     clear_source_selection: Callable[[], bool]
     refresh_rendered_for_current_path: Callable[..., None]
+    request_directory_preview_async: Callable[..., None] | None = None
     jump_to_line: Callable[[int], None] | None = None
 
     def bind_jump_to_line(self, jump_to_line: Callable[[int], None]) -> None:
@@ -48,6 +49,17 @@ class PreviewSelection:
         if not force and selected_target == state.current_path.resolve():
             return
         state.current_path = selected_target
+        if (
+            not force
+            and entry.is_dir
+            and self.request_directory_preview_async is not None
+        ):
+            self.request_directory_preview_async(
+                selected_target,
+                reset_scroll=True,
+                reset_dir_budget=True,
+            )
+            return
         self.refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
 
 
@@ -86,4 +98,3 @@ class TreeRefreshSync:
         self.schedule_tree_filter_index_warmup()
         self.refresh_git_status_overlay(force=True)
         state.dirty = True
-

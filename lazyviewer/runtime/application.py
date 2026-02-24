@@ -37,6 +37,7 @@ class App:
         preview_selected_entry: Callable[..., None],
         refresh_rendered_for_current_path: Callable[..., None],
         maybe_grow_directory_preview: Callable[[], bool],
+        maybe_poll_directory_preview_results: Callable[[], bool] | None,
         maybe_prefetch_directory_preview: Callable[[], bool],
         launch_editor_for_path: Callable[[Path], str | None],
         jump_to_next_git_modified: Callable[[int], bool],
@@ -60,6 +61,7 @@ class App:
         self.preview_selected_entry = preview_selected_entry
         self.refresh_rendered_for_current_path = refresh_rendered_for_current_path
         self.maybe_grow_directory_preview = maybe_grow_directory_preview
+        self.maybe_poll_directory_preview_results = maybe_poll_directory_preview_results
         self.maybe_prefetch_directory_preview = maybe_prefetch_directory_preview
         self.launch_editor_for_path = launch_editor_for_path
         self.jump_to_next_git_modified = jump_to_next_git_modified

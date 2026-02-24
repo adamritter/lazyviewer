@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
+import threading
 
 from ..file_tree_model.doc_summary import cached_top_file_doc_summary, clear_doc_summary_cache
 from ..file_tree_model.fs import list_directory_children, maybe_gitignore_matcher
@@ -36,6 +37,7 @@ class _DirectoryPreviewCacheEntry:
 _DIR_PREVIEW_CACHE: OrderedDict[tuple[str, bool, int, int, bool, bool, int, int], _DirectoryPreviewCacheEntry] = (
     OrderedDict()
 )
+_DIR_PREVIEW_CACHE_LOCK = threading.RLock()
 
 
 def _cache_key_for_directory(
@@ -95,17 +97,24 @@ def _cache_get(key: tuple[str, bool, int, int, bool, bool, int, int] | None) -> 
     """Return cached preview/truncation pair and refresh LRU order."""
     if key is None:
         return None
-    cached = _DIR_PREVIEW_CACHE.get(key)
+    with _DIR_PREVIEW_CACHE_LOCK:
+        cached = _DIR_PREVIEW_CACHE.get(key)
     if cached is None:
         return None
     if not _watched_directory_mtimes_match(cached.watched_directory_mtimes):
-        _DIR_PREVIEW_CACHE.pop(key, None)
+        with _DIR_PREVIEW_CACHE_LOCK:
+            _DIR_PREVIEW_CACHE.pop(key, None)
         return None
     if not _watched_file_signatures_match(cached.watched_file_signatures):
-        _DIR_PREVIEW_CACHE.pop(key, None)
+        with _DIR_PREVIEW_CACHE_LOCK:
+            _DIR_PREVIEW_CACHE.pop(key, None)
         return None
-    _DIR_PREVIEW_CACHE.move_to_end(key)
-    return cached.preview, cached.truncated
+    with _DIR_PREVIEW_CACHE_LOCK:
+        current_cached = _DIR_PREVIEW_CACHE.get(key)
+        if current_cached is None:
+            return None
+        _DIR_PREVIEW_CACHE.move_to_end(key)
+        return current_cached.preview, current_cached.truncated
 
 
 def _cache_put(
@@ -118,20 +127,22 @@ def _cache_put(
     """Insert preview result into LRU cache with bounded size."""
     if key is None:
         return
-    _DIR_PREVIEW_CACHE[key] = _DirectoryPreviewCacheEntry(
-        preview=preview,
-        truncated=truncated,
-        watched_directory_mtimes=watched_directory_mtimes,
-        watched_file_signatures=watched_file_signatures,
-    )
-    _DIR_PREVIEW_CACHE.move_to_end(key)
-    while len(_DIR_PREVIEW_CACHE) > DIR_PREVIEW_CACHE_MAX:
-        _DIR_PREVIEW_CACHE.popitem(last=False)
+    with _DIR_PREVIEW_CACHE_LOCK:
+        _DIR_PREVIEW_CACHE[key] = _DirectoryPreviewCacheEntry(
+            preview=preview,
+            truncated=truncated,
+            watched_directory_mtimes=watched_directory_mtimes,
+            watched_file_signatures=watched_file_signatures,
+        )
+        _DIR_PREVIEW_CACHE.move_to_end(key)
+        while len(_DIR_PREVIEW_CACHE) > DIR_PREVIEW_CACHE_MAX:
+            _DIR_PREVIEW_CACHE.popitem(last=False)
 
 
 def clear_directory_preview_cache() -> None:
     """Clear in-memory directory preview cache and doc-summary metadata cache."""
-    _DIR_PREVIEW_CACHE.clear()
+    with _DIR_PREVIEW_CACHE_LOCK:
+        _DIR_PREVIEW_CACHE.clear()
     clear_doc_summary_cache()
 
 

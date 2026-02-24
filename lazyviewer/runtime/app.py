@@ -32,6 +32,10 @@ from .git_jumps import (
 )
 from ..source_pane import SourcePane
 from .application import App
+from .directory_prefetch import (
+    DirectoryPreviewPrefetchResult,
+    DirectoryPreviewPrefetchScheduler,
+)
 from .index_warmup import TreeFilterIndexWarmupScheduler
 from .layout import PagerLayout
 from .config import (
@@ -176,12 +180,154 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         visible_content_rows,
         refresh_rendered_for_current_path,
     )
-    maybe_prefetch_directory_preview = partial(
-        SourcePane.maybe_prefetch_directory_preview,
-        state,
-        visible_content_rows,
-        refresh_rendered_for_current_path,
+    directory_prefetch_scheduler = DirectoryPreviewPrefetchScheduler(
+        build_rendered_for_path=SourcePane.build_rendered_for_path,
     )
+    prefetch_requested_context: tuple[Path, bool, bool, bool] | None = None
+    prefetch_requested_entries = 0
+    pending_async_preview_context: tuple[Path, bool, bool, bool] | None = None
+    pending_async_preview_reset_scroll = False
+
+    def schedule_directory_preview_request(
+        target: Path,
+        dir_max_entries: int,
+    ) -> None:
+        """Schedule one background directory preview request for target/context."""
+        nonlocal prefetch_requested_context
+        nonlocal prefetch_requested_entries
+        resolved_target = target.resolve()
+        context = (
+            resolved_target,
+            state.show_hidden,
+            state.show_tree_sizes,
+            state.git_features_enabled,
+        )
+        if context != prefetch_requested_context:
+            prefetch_requested_context = context
+            prefetch_requested_entries = state.dir_preview_max_entries
+        prefer_git_diff = state.git_features_enabled and not (
+            state.tree_filter_active
+            and state.tree_filter_mode == "content"
+            and bool(state.tree_filter_query)
+        )
+        directory_prefetch_scheduler.schedule(
+            target=resolved_target,
+            show_hidden=state.show_hidden,
+            style=style,
+            no_color=no_color,
+            dir_max_entries=dir_max_entries,
+            dir_skip_gitignored=not state.show_hidden,
+            prefer_git_diff=prefer_git_diff,
+            dir_git_status_overlay=(state.git_status_overlay if state.git_features_enabled else None),
+            dir_show_size_labels=state.show_tree_sizes,
+        )
+        prefetch_requested_entries = max(prefetch_requested_entries, dir_max_entries)
+
+    def request_directory_preview_async(
+        target: Path,
+        *,
+        reset_scroll: bool = True,
+        reset_dir_budget: bool = False,
+    ) -> None:
+        """Queue directory preview in background without blocking UI input."""
+        nonlocal pending_async_preview_context
+        nonlocal pending_async_preview_reset_scroll
+        resolved_target = target.resolve()
+        if not resolved_target.is_dir():
+            return
+        if reset_dir_budget or state.dir_preview_path != resolved_target:
+            state.dir_preview_max_entries = SourcePane.initial_directory_preview_max_entries(
+                visible_content_rows()
+            )
+        pending_async_preview_context = (
+            resolved_target,
+            state.show_hidden,
+            state.show_tree_sizes,
+            state.git_features_enabled,
+        )
+        pending_async_preview_reset_scroll = bool(reset_scroll)
+        if reset_scroll:
+            state.start = 0
+            state.text_x = 0
+        schedule_directory_preview_request(
+            resolved_target,
+            state.dir_preview_max_entries,
+        )
+
+    def maybe_poll_directory_preview_results() -> bool:
+        """Apply completed directory-preview background jobs for current context."""
+        nonlocal prefetch_requested_context
+        nonlocal prefetch_requested_entries
+        nonlocal pending_async_preview_context
+        nonlocal pending_async_preview_reset_scroll
+        changed = False
+        resolved_target = state.current_path.resolve()
+        context = (
+            resolved_target,
+            state.show_hidden,
+            state.show_tree_sizes,
+            state.git_features_enabled,
+        )
+        if context != prefetch_requested_context:
+            prefetch_requested_context = context
+            prefetch_requested_entries = state.dir_preview_max_entries
+
+        best_result: DirectoryPreviewPrefetchResult | None = None
+        for result in directory_prefetch_scheduler.drain_results():
+            request = result.request
+            if request.target != resolved_target:
+                continue
+            if request.show_hidden != state.show_hidden:
+                continue
+            if request.dir_skip_gitignored != (not state.show_hidden):
+                continue
+            if request.dir_show_size_labels != state.show_tree_sizes:
+                continue
+            if request.dir_max_entries < state.dir_preview_max_entries:
+                continue
+            if not getattr(result.rendered_for_path, "is_directory", False):
+                continue
+            if best_result is None or request.dir_max_entries >= best_result.request.dir_max_entries:
+                best_result = result
+
+        if best_result is not None:
+            state.dir_preview_max_entries = best_result.request.dir_max_entries
+            apply_reset_scroll = False
+            if pending_async_preview_context == context:
+                apply_reset_scroll = pending_async_preview_reset_scroll
+                pending_async_preview_context = None
+                pending_async_preview_reset_scroll = False
+            SourcePane.apply_rendered_for_path(
+                state,
+                best_result.rendered_for_path,
+                rebuild_screen_lines,
+                visible_content_rows,
+                reset_scroll=apply_reset_scroll,
+                resolved_target=resolved_target,
+            )
+            changed = True
+            prefetch_requested_entries = max(prefetch_requested_entries, best_result.request.dir_max_entries)
+
+        return changed
+
+    def maybe_prefetch_directory_preview() -> bool:
+        changed = maybe_poll_directory_preview_results()
+        resolved_target = state.current_path.resolve()
+        if not resolved_target.is_dir():
+            return changed
+
+        target_entries = SourcePane.directory_prefetch_target_entries(
+            state,
+            visible_content_rows,
+        )
+        if target_entries is None:
+            return changed
+
+        if target_entries <= max(state.dir_preview_max_entries, prefetch_requested_entries):
+            return changed
+
+        schedule_directory_preview_request(resolved_target, target_entries)
+        return changed
 
     directory_preview_target_for_display_line = partial(SourcePane.directory_preview_target_for_display_line, state)
     copy_selected_source_range = partial(
@@ -197,6 +343,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state=state,
         clear_source_selection=clear_source_selection,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+        request_directory_preview_async=request_directory_preview_async,
     )
 
     preview_selected_entry = preview_selection.preview_selected_entry
@@ -311,6 +458,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         preview_selected_entry=preview_selected_entry,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
         maybe_grow_directory_preview=maybe_grow_directory_preview,
+        maybe_poll_directory_preview_results=maybe_poll_directory_preview_results,
         maybe_prefetch_directory_preview=maybe_prefetch_directory_preview,
         launch_editor_for_path=launch_editor_for_path,
         jump_to_next_git_modified=jump_to_next_git_modified,

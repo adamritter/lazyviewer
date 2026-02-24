@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from pathlib import Path
 import re
+import threading
 
 DOC_SUMMARY_READ_BYTES = 4_096
 DOC_SUMMARY_MAX_FILE_BYTES = 256 * 1024
@@ -16,6 +17,7 @@ _CODING_COOKIE_RE = re.compile(r"^#.*coding[:=]\s*[-\w.]+")
 _TRIPLE_QUOTE_PREFIXES = ('"""', "'''")
 _LINE_COMMENT_PREFIXES = ("#", "//", "--", ";")
 _DOC_SUMMARY_CACHE: OrderedDict[tuple[str, int, int], str | None] = OrderedDict()
+_DOC_SUMMARY_CACHE_LOCK = threading.RLock()
 _CACHE_MISS = object()
 
 
@@ -166,25 +168,28 @@ def cached_top_file_doc_summary(path: Path, size_bytes: int | None) -> str | Non
     """Return cached top-of-file summary for ``path`` when possible."""
     cache_key = _doc_summary_cache_key(path, size_bytes)
     if cache_key is not None:
-        cached = _DOC_SUMMARY_CACHE.get(cache_key, _CACHE_MISS)
-        if cached is not _CACHE_MISS:
-            _DOC_SUMMARY_CACHE.move_to_end(cache_key)
-            return cached
+        with _DOC_SUMMARY_CACHE_LOCK:
+            cached = _DOC_SUMMARY_CACHE.get(cache_key, _CACHE_MISS)
+            if cached is not _CACHE_MISS:
+                _DOC_SUMMARY_CACHE.move_to_end(cache_key)
+                return cached
 
     summary = top_file_doc_summary(path, size_bytes)
 
     if cache_key is not None:
-        _DOC_SUMMARY_CACHE[cache_key] = summary
-        _DOC_SUMMARY_CACHE.move_to_end(cache_key)
-        while len(_DOC_SUMMARY_CACHE) > DOC_SUMMARY_CACHE_MAX:
-            _DOC_SUMMARY_CACHE.popitem(last=False)
+        with _DOC_SUMMARY_CACHE_LOCK:
+            _DOC_SUMMARY_CACHE[cache_key] = summary
+            _DOC_SUMMARY_CACHE.move_to_end(cache_key)
+            while len(_DOC_SUMMARY_CACHE) > DOC_SUMMARY_CACHE_MAX:
+                _DOC_SUMMARY_CACHE.popitem(last=False)
 
     return summary
 
 
 def clear_doc_summary_cache() -> None:
     """Clear in-memory top-of-file summary cache."""
-    _DOC_SUMMARY_CACHE.clear()
+    with _DOC_SUMMARY_CACHE_LOCK:
+        _DOC_SUMMARY_CACHE.clear()
 
 
 __all__ = [

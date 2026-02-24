@@ -12,6 +12,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
+import threading
 
 
 GITIGNORE_MATCHER_CACHE_MAX = 64
@@ -28,11 +29,13 @@ class _MatcherCacheEntry:
 
 
 _GITIGNORE_MATCHER_CACHE: OrderedDict[str, _MatcherCacheEntry] = OrderedDict()
+_GITIGNORE_MATCHER_CACHE_LOCK = threading.RLock()
 
 
 def clear_gitignore_cache() -> None:
     """Clear cached gitignore matchers."""
-    _GITIGNORE_MATCHER_CACHE.clear()
+    with _GITIGNORE_MATCHER_CACHE_LOCK:
+        _GITIGNORE_MATCHER_CACHE.clear()
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -164,23 +167,25 @@ def get_gitignore_matcher(root: Path) -> GitIgnoreMatcher | None:
         root_mtime_ns = None
     now = time.monotonic()
 
-    cached = _GITIGNORE_MATCHER_CACHE.get(key)
-    if cached is not None:
-        cache_age = now - cached.loaded_at
-        if (
-            cached.root_mtime_ns == root_mtime_ns
-            and cache_age <= GITIGNORE_MATCHER_CACHE_TTL_SECONDS
-        ):
-            _GITIGNORE_MATCHER_CACHE.move_to_end(key)
-            return cached.matcher
+    with _GITIGNORE_MATCHER_CACHE_LOCK:
+        cached = _GITIGNORE_MATCHER_CACHE.get(key)
+        if cached is not None:
+            cache_age = now - cached.loaded_at
+            if (
+                cached.root_mtime_ns == root_mtime_ns
+                and cache_age <= GITIGNORE_MATCHER_CACHE_TTL_SECONDS
+            ):
+                _GITIGNORE_MATCHER_CACHE.move_to_end(key)
+                return cached.matcher
 
     matcher = _load_matcher(resolved_root)
-    _GITIGNORE_MATCHER_CACHE[key] = _MatcherCacheEntry(
-        matcher=matcher,
-        root_mtime_ns=root_mtime_ns,
-        loaded_at=now,
-    )
-    _GITIGNORE_MATCHER_CACHE.move_to_end(key)
-    while len(_GITIGNORE_MATCHER_CACHE) > GITIGNORE_MATCHER_CACHE_MAX:
-        _GITIGNORE_MATCHER_CACHE.popitem(last=False)
+    with _GITIGNORE_MATCHER_CACHE_LOCK:
+        _GITIGNORE_MATCHER_CACHE[key] = _MatcherCacheEntry(
+            matcher=matcher,
+            root_mtime_ns=root_mtime_ns,
+            loaded_at=now,
+        )
+        _GITIGNORE_MATCHER_CACHE.move_to_end(key)
+        while len(_GITIGNORE_MATCHER_CACHE) > GITIGNORE_MATCHER_CACHE_MAX:
+            _GITIGNORE_MATCHER_CACHE.popitem(last=False)
     return matcher
