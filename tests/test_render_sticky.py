@@ -669,7 +669,7 @@ class RenderStatusStickyTests(unittest.TestCase):
             path.write_text(source, encoding="utf-8")
             with (
                 mock.patch(
-                    "lazyviewer.symbols._load_parser",
+                    "lazyviewer.source_pane.symbols._load_parser",
                     return_value=(None, "Tree-sitter parser package not found. Install tree-sitter-languages."),
                 ),
                 mock.patch("lazyviewer.render.os.write", side_effect=capture),

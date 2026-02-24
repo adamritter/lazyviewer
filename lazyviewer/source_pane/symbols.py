@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from .highlight import read_text
+from ..highlight import read_text
 
 LANGUAGE_BY_SUFFIX: dict[str, str] = {
     ".py": "python",

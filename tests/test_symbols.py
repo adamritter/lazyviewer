@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer import symbols
+from lazyviewer.source_pane import symbols
 
 
 def line_col_for(text: str, token: str) -> tuple[int, int]:
@@ -76,7 +76,7 @@ class SymbolsBehaviorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sample.py"
             path.write_text("x = 1\ny = 2\n", encoding="utf-8")
-            with mock.patch("lazyviewer.symbols._load_parser", return_value=(None, "boom")):
+            with mock.patch("lazyviewer.source_pane.symbols._load_parser", return_value=(None, "boom")):
                 out, error = symbols.collect_symbols(path)
         self.assertEqual(out, [])
         self.assertEqual(error, "boom")
@@ -93,7 +93,7 @@ class SymbolsBehaviorTests(unittest.TestCase):
             path = Path(tmp) / "sample.py"
             path.write_text(source, encoding="utf-8")
             parser_error = "Failed to load Tree-sitter parser for python: __init__() takes exactly 1 argument (2 given)"
-            with mock.patch("lazyviewer.symbols._load_parser", return_value=(None, parser_error)):
+            with mock.patch("lazyviewer.source_pane.symbols._load_parser", return_value=(None, parser_error)):
                 out, error = symbols.collect_symbols(path)
 
         self.assertIsNone(error)
@@ -197,8 +197,8 @@ class SymbolsBehaviorTests(unittest.TestCase):
             )
             parser = FakeParser(FakeTree(root))
 
-            with mock.patch("lazyviewer.symbols._load_parser", return_value=(parser, None)), mock.patch(
-                "lazyviewer.symbols.read_text", return_value=source
+            with mock.patch("lazyviewer.source_pane.symbols._load_parser", return_value=(parser, None)), mock.patch(
+                "lazyviewer.source_pane.symbols.read_text", return_value=source
             ):
                 out, error = symbols.collect_symbols(path)
 
@@ -266,8 +266,8 @@ class SymbolsBehaviorTests(unittest.TestCase):
             )
             parser = FakeParser(FakeTree(root))
 
-            with mock.patch("lazyviewer.symbols._load_parser", return_value=(parser, None)), mock.patch(
-                "lazyviewer.symbols.read_text", return_value=source
+            with mock.patch("lazyviewer.source_pane.symbols._load_parser", return_value=(parser, None)), mock.patch(
+                "lazyviewer.source_pane.symbols.read_text", return_value=source
             ):
                 out, error = symbols.collect_symbols(path, max_symbols=2)
 
@@ -286,7 +286,7 @@ class SymbolsBehaviorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sample.py"
             path.write_text(source, encoding="utf-8")
-            with mock.patch("lazyviewer.symbols._load_parser", return_value=(None, symbols.MISSING_PARSER_ERROR)):
+            with mock.patch("lazyviewer.source_pane.symbols._load_parser", return_value=(None, symbols.MISSING_PARSER_ERROR)):
                 out, error = symbols.collect_symbols(path)
 
         self.assertIsNone(error)
@@ -304,7 +304,7 @@ class SymbolsBehaviorTests(unittest.TestCase):
             path = Path(tmp) / "sample.js"
             path.write_text(source, encoding="utf-8")
             symbols.clear_symbol_context_cache()
-            with mock.patch("lazyviewer.symbols._load_parser", return_value=(None, symbols.MISSING_PARSER_ERROR)):
+            with mock.patch("lazyviewer.source_pane.symbols._load_parser", return_value=(None, symbols.MISSING_PARSER_ERROR)):
                 headers = symbols.collect_sticky_symbol_headers(path, visible_start_line=2, max_headers=2)
 
         self.assertEqual([(entry.kind, entry.name, entry.line) for entry in headers], [("fn", "boot", 0)])
@@ -323,7 +323,7 @@ class SymbolsBehaviorTests(unittest.TestCase):
             path = Path(tmp) / "sample.js"
             path.write_text(source, encoding="utf-8")
             symbols.clear_symbol_context_cache()
-            with mock.patch("lazyviewer.symbols._load_parser", return_value=(None, symbols.MISSING_PARSER_ERROR)):
+            with mock.patch("lazyviewer.source_pane.symbols._load_parser", return_value=(None, symbols.MISSING_PARSER_ERROR)):
                 headers = symbols.collect_sticky_symbol_headers(path, visible_start_line=7, max_headers=2)
 
         self.assertEqual(
@@ -343,7 +343,7 @@ class SymbolsBehaviorTests(unittest.TestCase):
             path = Path(tmp) / "sample.py"
             path.write_text(source, encoding="utf-8")
             symbols.clear_symbol_context_cache()
-            with mock.patch("lazyviewer.symbols._load_parser", return_value=(None, symbols.MISSING_PARSER_ERROR)):
+            with mock.patch("lazyviewer.source_pane.symbols._load_parser", return_value=(None, symbols.MISSING_PARSER_ERROR)):
                 headers = symbols.collect_sticky_symbol_headers(path, visible_start_line=5, max_headers=8)
 
         self.assertEqual(

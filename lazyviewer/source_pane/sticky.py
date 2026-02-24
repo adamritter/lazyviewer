@@ -1,4 +1,10 @@
-"""Sticky-symbol scope and header formatting helpers."""
+"""Sticky-symbol scope detection and header composition.
+
+Sticky headers mirror the active symbol chain (for example, nested class/
+function context) at the top of the preview pane. This module decides when a
+symbol scope ends across blank lines/indent transitions and builds the header
+set shown for both normal source views and git-diff previews.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +12,7 @@ from pathlib import Path
 
 from ..ansi import ANSI_ESCAPE_RE
 from ..highlight import read_text
-from ..symbols import SymbolEntry, collect_sticky_symbol_headers, next_symbol_start_line
+from ..source_pane.symbols import SymbolEntry, collect_sticky_symbol_headers, next_symbol_start_line
 from .diffmap import diff_source_line_for_display_index
 from .source import (
     next_nonblank_source_line,
