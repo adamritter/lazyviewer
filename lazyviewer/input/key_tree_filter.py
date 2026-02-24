@@ -1,10 +1,56 @@
-"""Tree-filter-mode keyboard handling."""
+"""Tree-filter-mode keyboard handling compatibility wrapper."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
 from ..runtime.state import AppState
+from ..tree_pane.panels.filter import key_dispatch
+
+
+class _TreeFilterDispatchAdapter:
+    """Adapter exposing TreeFilterController-like API over callback functions."""
+
+    def __init__(
+        self,
+        *,
+        state: AppState,
+        close_tree_filter: Callable[..., None],
+        activate_tree_filter_selection: Callable[[], None],
+        move_tree_selection: Callable[[int], bool],
+        apply_tree_filter_query: Callable[..., None],
+        jump_to_next_content_hit: Callable[[int], bool],
+    ) -> None:
+        self.state = state
+        self._close_tree_filter = close_tree_filter
+        self._activate_tree_filter_selection = activate_tree_filter_selection
+        self._move_tree_selection = move_tree_selection
+        self._apply_tree_filter_query = apply_tree_filter_query
+        self._jump_to_next_content_hit = jump_to_next_content_hit
+
+    def close_tree_filter(self, clear_query: bool = True, restore_origin: bool = False) -> None:
+        self._close_tree_filter(clear_query=clear_query, restore_origin=restore_origin)
+
+    def activate_tree_filter_selection(self) -> None:
+        self._activate_tree_filter_selection()
+
+    def move_tree_selection(self, direction: int) -> bool:
+        return self._move_tree_selection(direction)
+
+    def apply_tree_filter_query(
+        self,
+        query: str,
+        preview_selection: bool = True,
+        select_first_file: bool = True,
+    ) -> None:
+        self._apply_tree_filter_query(
+            query,
+            preview_selection=preview_selection,
+            select_first_file=select_first_file,
+        )
+
+    def jump_to_next_content_hit(self, direction: int) -> bool:
+        return self._jump_to_next_content_hit(direction)
 
 
 def handle_tree_filter_key(
@@ -21,77 +67,18 @@ def handle_tree_filter_key(
     jump_to_next_content_hit: Callable[[int], bool],
 ) -> bool:
     """Handle keys for tree filter prompt, list navigation, and hit jumps."""
-    if not state.tree_filter_active:
-        return False
-
-    def apply_live_filter_query(query: str) -> None:
-        """Apply query updates with mode-specific preview/selection semantics."""
-        content_mode = state.tree_filter_mode == "content"
-        apply_tree_filter_query(
-            query,
-            preview_selection=not content_mode,
-            select_first_file=not content_mode,
-        )
-
-    if state.tree_filter_editing:
-        if handle_tree_mouse_wheel(key):
-            return True
-        if handle_tree_mouse_click(key):
-            return True
-        if key == "ESC":
-            close_tree_filter(
-                clear_query=True,
-                restore_origin=state.tree_filter_mode == "content",
-            )
-            return True
-        if key == "ENTER":
-            activate_tree_filter_selection()
-            return True
-        if key == "TAB":
-            state.tree_filter_editing = False
-            state.dirty = True
-            return True
-        if key == "UP" or key == "CTRL_K":
-            if move_tree_selection(-1):
-                state.dirty = True
-            return True
-        if key == "DOWN" or key == "CTRL_J":
-            if move_tree_selection(1):
-                state.dirty = True
-            return True
-        if key == "BACKSPACE":
-            if state.tree_filter_query:
-                apply_live_filter_query(state.tree_filter_query[:-1])
-            return True
-        if key == "CTRL_U":
-            if state.tree_filter_query:
-                apply_live_filter_query("")
-            return True
-        if key == "CTRL_QUESTION":
-            toggle_help_panel()
-            return True
-        if len(key) == 1 and key.isprintable():
-            apply_live_filter_query(state.tree_filter_query + key)
-            return True
-        return True
-
-    if key == "TAB":
-        state.tree_filter_editing = True
-        state.dirty = True
-        return True
-    if key == "ENTER":
-        activate_tree_filter_selection()
-        return True
-    if key == "ESC":
-        close_tree_filter(clear_query=True)
-        return True
-    if state.tree_filter_mode == "content":
-        if key == "n":
-            if jump_to_next_content_hit(1):
-                state.dirty = True
-            return True
-        if key in {"N", "p"}:
-            if jump_to_next_content_hit(-1):
-                state.dirty = True
-            return True
-    return False
+    adapter = _TreeFilterDispatchAdapter(
+        state=state,
+        close_tree_filter=close_tree_filter,
+        activate_tree_filter_selection=activate_tree_filter_selection,
+        move_tree_selection=move_tree_selection,
+        apply_tree_filter_query=apply_tree_filter_query,
+        jump_to_next_content_hit=jump_to_next_content_hit,
+    )
+    return key_dispatch.handle_tree_filter_key(
+        adapter,
+        key,
+        handle_tree_mouse_wheel=handle_tree_mouse_wheel,
+        handle_tree_mouse_click=handle_tree_mouse_click,
+        toggle_help_panel=toggle_help_panel,
+    )
