@@ -6,13 +6,13 @@ import time
 from collections import OrderedDict
 from pathlib import Path
 
-from ...search.content import ContentMatch, search_project_content_rg
-from ...search.fuzzy import (
+from ....search.content import ContentMatch, search_project_content_rg
+from ....search.fuzzy import (
     STRICT_SUBSTRING_ONLY_MIN_FILES,
     collect_project_file_labels,
     fuzzy_match_label_index,
 )
-from ..model import (
+from ...model import (
     build_tree_entries,
     filter_tree_entries_for_content_matches,
     filter_tree_entries_for_files,

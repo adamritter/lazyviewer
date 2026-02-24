@@ -11,7 +11,7 @@ import unittest
 from unittest import mock
 
 from lazyviewer.render.ansi import build_screen_lines
-from lazyviewer.tree_pane.picker import (
+from lazyviewer.tree_pane.panels.picker import (
     NavigationPickerDeps,
     NavigationPickerOps,
     _first_display_index_for_source_line,
@@ -163,7 +163,7 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
             )
         )
 
-        with mock.patch("lazyviewer.tree_pane.picker.navigation.save_named_marks") as save_named_marks:
+        with mock.patch("lazyviewer.tree_pane.panels.picker.navigation.save_named_marks") as save_named_marks:
             self.assertTrue(ops.set_named_mark("a"))
 
         self.assertIn("a", state.named_marks)

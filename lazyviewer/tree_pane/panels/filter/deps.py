@@ -6,8 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ...runtime.navigation import JumpLocation
-from ...runtime.state import AppState
+from ....runtime.navigation import JumpLocation
+from ....runtime.state import AppState
 
 
 @dataclass(frozen=True)

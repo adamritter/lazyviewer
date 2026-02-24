@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shutil
 
-from ...runtime.config import save_show_hidden
+from ....runtime.config import save_show_hidden
 from .line_map import first_display_index_for_source_line, source_line_for_display_index
 
 
