@@ -140,7 +140,9 @@ class SourcePane:
         is_dir_target = resolved_target.is_dir()
         if is_dir_target:
             if reset_dir_budget or state.dir_preview_path != resolved_target:
-                state.dir_preview_max_entries = SourcePane.DIR_PREVIEW_INITIAL_MAX_ENTRIES
+                state.dir_preview_max_entries = SourcePane.initial_directory_preview_max_entries(
+                    visible_content_rows()
+                )
             dir_limit = state.dir_preview_max_entries
         else:
             dir_limit = SourcePane.DIR_PREVIEW_INITIAL_MAX_ENTRIES
@@ -178,6 +180,13 @@ class SourcePane:
         state.preview_is_git_diff = rendered_for_path.is_git_diff_preview
         if reset_scroll:
             state.text_x = 0
+
+    @staticmethod
+    def initial_directory_preview_max_entries(visible_rows: int) -> int:
+        """Return initial preview budget bounded by viewport rows and global ceiling."""
+        # Reserve rows for root/header plus the truncated footer marker.
+        bounded_rows = max(1, visible_rows - 4)
+        return min(SourcePane.DIR_PREVIEW_INITIAL_MAX_ENTRIES, bounded_rows)
 
     @staticmethod
     def maybe_grow_directory_preview(

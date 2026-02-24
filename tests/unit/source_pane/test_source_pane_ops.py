@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from lazyviewer.runtime.state import AppState
+from lazyviewer.source_pane import SourcePane
 from lazyviewer.source_pane.interaction.geometry import SourcePaneGeometry
 from lazyviewer.tree_model import TreeEntry
 
@@ -75,6 +76,10 @@ class SourcePaneGeometryTests(unittest.TestCase):
 
         self.assertGreater(updated, 0)
         self.assertEqual(width_mock.call_count, len(lines) + len(state.lines))
+
+    def test_initial_directory_preview_max_entries_is_viewport_bounded(self) -> None:
+        self.assertEqual(SourcePane.initial_directory_preview_max_entries(30), 26)
+        self.assertEqual(SourcePane.initial_directory_preview_max_entries(4), 1)
 
 
 if __name__ == "__main__":

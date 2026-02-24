@@ -267,3 +267,27 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
             self.assertIn("level_4/", plain)
             self.assertIn("deep.py", plain)
             self.assertIn("deep.py  -- deep module", plain)
+
+    def test_build_directory_preview_computes_doc_summaries_only_for_emitted_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            for idx in range(10):
+                (root / f"file_{idx:02d}.py").write_text("# summary\n", encoding="utf-8")
+
+            with mock.patch(
+                "lazyviewer.source_pane.directory.cached_top_file_doc_summary",
+                return_value="summary",
+            ) as summary_mock:
+                rendered, truncated = preview.SourcePane.build_directory_preview(
+                    root,
+                    show_hidden=False,
+                    max_depth=2,
+                    max_entries=2,
+                )
+            plain = strip_ansi(rendered)
+
+            self.assertTrue(truncated)
+            self.assertEqual(summary_mock.call_count, 2)
+            self.assertIn("file_00.py  -- summary", plain)
+            self.assertIn("file_01.py  -- summary", plain)
+            self.assertNotIn("file_02.py  -- summary", plain)

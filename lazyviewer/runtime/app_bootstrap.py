@@ -67,12 +67,16 @@ class AppStateBootstrap:
             initial_left = int((saved_percent / 100.0) * term.columns)
         left_width = self.clamp_left_width(term.columns, initial_left)
         right_width = max(1, term.columns - left_width - 1)
+        initial_dir_max_entries = min(
+            self.dir_preview_initial_max_entries,
+            max(1, usable - 4),
+        )
         initial_render = self.build_rendered_for_path(
             current_path,
             show_hidden,
             style,
             no_color,
-            dir_max_entries=self.dir_preview_initial_max_entries,
+            dir_max_entries=initial_dir_max_entries,
             dir_skip_gitignored=self.skip_gitignored_for_hidden_mode(show_hidden),
             prefer_git_diff=self.git_features_default_enabled,
             dir_show_size_labels=self.tree_size_labels_default_enabled,
@@ -106,7 +110,7 @@ class AppStateBootstrap:
             usable=usable,
             max_start=max_start,
             last_right_width=right_width,
-            dir_preview_max_entries=self.dir_preview_initial_max_entries,
+            dir_preview_max_entries=initial_dir_max_entries,
             dir_preview_truncated=initial_render.truncated,
             dir_preview_path=current_path if initial_render.is_directory else None,
             preview_image_path=initial_render.image_path,

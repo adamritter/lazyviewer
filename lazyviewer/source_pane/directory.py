@@ -11,7 +11,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..file_tree_model.doc_summary import clear_doc_summary_cache
+from ..file_tree_model.doc_summary import cached_top_file_doc_summary, clear_doc_summary_cache
 from ..file_tree_model.fs import list_directory_children, maybe_gitignore_matcher
 from ..git_status import format_git_status_badges
 from ..tree_model.rendering import TREE_SIZE_LABEL_MIN_BYTES
@@ -226,7 +226,7 @@ def build_directory_preview(
             show_hidden,
             ignore_matcher=ignore_matcher,
             git_status_overlay=git_status_overlay,
-            include_doc_summaries=True,
+            include_doc_summaries=False,
         )
         if directory_mtime_ns is not None:
             try:
@@ -262,8 +262,13 @@ def build_directory_preview(
                     except Exception:
                         resolved_file = child.path
                     watched_file_signatures[str(resolved_file)] = (child.mtime_ns, child.file_size)
-                if child.doc_summary:
-                    doc_label = f"{doc_color}  -- {child.doc_summary}{reset}"
+                doc_summary: str | None = None
+                try:
+                    doc_summary = cached_top_file_doc_summary(child.path, child.file_size)
+                except Exception:
+                    doc_summary = None
+                if doc_summary:
+                    doc_label = f"{doc_color}  -- {doc_summary}{reset}"
 
             badges = format_git_status_badges(child.path, git_status_overlay)
             lines_out.append(
