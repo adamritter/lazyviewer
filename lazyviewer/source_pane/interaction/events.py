@@ -14,6 +14,13 @@ from pathlib import Path
 
 from ...render.ansi import ANSI_ESCAPE_RE, char_display_width
 from ...runtime.state import AppState
+from ...tree_model import find_content_hit_index
+from ..diffmap import (
+    diff_preview_logical_line_is_removed,
+    diff_preview_uses_plain_markers,
+    diff_source_line_for_display_index,
+    iter_diff_logical_line_ranges,
+)
 
 _CLICK_SEARCH_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 _TRAILING_GIT_BADGES_RE = re.compile(r"^(.*?)(?:\s(?:\[(?:M|\?)\])+)$")
@@ -171,6 +178,75 @@ def clicked_preview_search_token(
     return details[0]
 
 
+def _logical_line_start_index(lines: list[str], display_idx: int) -> int:
+    """Return first display row index belonging to the same logical source line."""
+    idx = max(0, min(display_idx, len(lines) - 1))
+    while idx > 0 and not _line_has_newline_terminator(lines[idx - 1]):
+        idx -= 1
+    return idx
+
+
+def _logical_line_prefix_char_count(lines: list[str], start_idx: int, line_idx: int) -> int:
+    """Return character count of wrapped chunks before ``line_idx`` in one logical line."""
+    if line_idx <= start_idx:
+        return 0
+    count = 0
+    for idx in range(start_idx, line_idx):
+        chunk_plain = ANSI_ESCAPE_RE.sub("", lines[idx]).rstrip("\r\n")
+        count += len(chunk_plain)
+    return count
+
+
+def _clicked_preview_hit_anchor(
+    state: AppState,
+    selection_pos: tuple[int, int],
+    token_start: int,
+) -> tuple[Path, int | None, int | None] | None:
+    """Compute preferred search-hit anchor (path/line/column) for a clicked token."""
+    try:
+        preferred_path = state.current_path.resolve()
+    except Exception:
+        preferred_path = state.current_path
+    if not preferred_path.is_file():
+        return None
+
+    line_idx, _text_col = selection_pos
+    if line_idx < 0 or line_idx >= len(state.lines):
+        return preferred_path, None, None
+
+    if state.preview_is_git_diff:
+        source_line = diff_source_line_for_display_index(
+            state.lines,
+            line_idx,
+            state.wrap_text,
+        )
+        if state.wrap_text:
+            start_idx = 0
+            for range_start, range_end in iter_diff_logical_line_ranges(state.lines, True):
+                if range_start <= line_idx <= range_end:
+                    start_idx = range_start
+                    break
+        else:
+            start_idx = line_idx
+        prefix_chars = _logical_line_prefix_char_count(state.lines, start_idx, line_idx)
+        column = prefix_chars + token_start + 1
+
+        use_plain_markers = diff_preview_uses_plain_markers(state.lines, state.wrap_text)
+        if use_plain_markers:
+            first_chunk = state.lines[start_idx]
+            if diff_preview_logical_line_is_removed(first_chunk, use_plain_markers=True):
+                return preferred_path, None, None
+            column = max(1, column - 2)
+        return preferred_path, source_line, column
+
+    source_idx = _display_line_to_source_line(state.lines, state.wrap_text, line_idx)
+    source_line = source_idx + 1 if source_idx is not None else None
+    start_idx = _logical_line_start_index(state.lines, line_idx) if state.wrap_text else line_idx
+    prefix_chars = _logical_line_prefix_char_count(state.lines, start_idx, line_idx)
+    column = prefix_chars + token_start + 1
+    return preferred_path, source_line, column
+
+
 def _resolve_module_spec_to_path(
     state: AppState,
     module_spec: str,
@@ -274,6 +350,9 @@ def _open_content_search_for_token(
     query: str,
     open_tree_filter: Callable[[str], None],
     apply_tree_filter_query: Callable[..., None],
+    preferred_hit_path: Path | None = None,
+    preferred_hit_line: int | None = None,
+    preferred_hit_column: int | None = None,
 ) -> bool:
     """Open content-search UI and seed query from clicked token."""
     token = query.strip()
@@ -285,6 +364,17 @@ def _open_content_search_for_token(
         preview_selection=False,
         select_first_file=False,
     )
+    if preferred_hit_path is not None:
+        selected_hit_idx = find_content_hit_index(
+            state.tree_entries,
+            preferred_hit_path,
+            preferred_line=preferred_hit_line,
+            preferred_column=preferred_hit_column,
+        )
+        if selected_hit_idx is None:
+            selected_hit_idx = find_content_hit_index(state.tree_entries, preferred_hit_path)
+        if selected_hit_idx is not None:
+            state.selected_idx = selected_hit_idx
     state.tree_filter_editing = False
     state.dirty = True
     return True
@@ -319,14 +409,19 @@ def handle_preview_click(
         state.dirty = True
         return True
 
-    clicked_token = clicked_preview_search_token(state.lines, selection_pos)
-    if clicked_token is None:
+    token_details = _clicked_preview_token_details(state.lines, selection_pos)
+    if token_details is None:
         return False
+    clicked_token, token_start, _token_end, _plain_line, _clicked_index = token_details
     clear_source_selection()
     reset_source_selection_drag_state()
+    preferred_hit_anchor = _clicked_preview_hit_anchor(state, selection_pos, token_start)
     return _open_content_search_for_token(
         state,
         clicked_token,
         open_tree_filter,
         apply_tree_filter_query,
+        preferred_hit_path=(preferred_hit_anchor[0] if preferred_hit_anchor is not None else None),
+        preferred_hit_line=(preferred_hit_anchor[1] if preferred_hit_anchor is not None else None),
+        preferred_hit_column=(preferred_hit_anchor[2] if preferred_hit_anchor is not None else None),
     )

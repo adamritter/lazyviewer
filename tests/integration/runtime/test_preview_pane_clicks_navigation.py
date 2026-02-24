@@ -62,7 +62,11 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             file_path = root / "demo.py"
-            file_path.write_text("alpha_beta_name = other_value\n", encoding="utf-8")
+            file_path.write_text(
+                "alpha_beta_name = first_value\n"
+                "foo = alpha_beta_name + 1\n",
+                encoding="utf-8",
+            )
             search_calls: list[str] = []
             snapshots: dict[str, object] = {}
 
@@ -84,7 +88,13 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
                                     path=file_path.resolve(),
                                     line=1,
                                     column=1,
-                                    preview="alpha_beta_name = other_value",
+                                    preview="alpha_beta_name = first_value",
+                                ),
+                                ContentMatch(
+                                    path=file_path.resolve(),
+                                    line=2,
+                                    column=7,
+                                    preview="foo = alpha_beta_name + 1",
                                 )
                             ]
                         },
@@ -102,10 +112,10 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
 
                 for idx, line in enumerate(state.lines):
                     plain = app_runtime.ANSI_ESCAPE_RE.sub("", line).rstrip("\r\n")
-                    token_start = plain.find("alpha_beta_name")
-                    if token_start >= 0:
+                    token_start = plain.rfind("alpha_beta_name")
+                    if token_start >= 0 and plain.lstrip().startswith("foo"):
                         target_row = idx + 1
-                        target_col = right_start_col + token_start + len("alpha")
+                        target_col = right_start_col + token_start + len("alpha_beta")
                         break
 
                 self.assertIsNotNone(target_row)
@@ -125,6 +135,8 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
                 entry = state.tree_entries[state.selected_idx]
                 snapshots["selected_kind"] = entry.kind
                 snapshots["selected_path"] = entry.path.resolve()
+                snapshots["selected_line"] = entry.line
+                snapshots["selected_column"] = entry.column
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
@@ -152,8 +164,10 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
             self.assertFalse(bool(snapshots["tree_filter_editing"]))
             self.assertIsNone(snapshots["source_selection_anchor"])
             self.assertIsNone(snapshots["source_selection_focus"])
-            self.assertEqual(snapshots["selected_kind"], "path")
+            self.assertEqual(snapshots["selected_kind"], "search_hit")
             self.assertEqual(snapshots["selected_path"], file_path.resolve())
+            self.assertEqual(snapshots["selected_line"], 2)
+            self.assertEqual(snapshots["selected_column"], 7)
 
     def test_single_click_relative_import_module_in_preview_jumps_to_module_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
