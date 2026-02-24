@@ -31,17 +31,9 @@ from .git_jumps import (
     GitModifiedJumpNavigator,
 )
 from ..source_pane import SourcePane
-from .tree_sync import (
-    PreviewSelection,
-    TreeRefreshSync,
-)
 from .application import App
 from .index_warmup import TreeFilterIndexWarmupScheduler
 from .layout import PagerLayout
-from .watch_refresh import (
-    WatchRefreshContext,
-    _refresh_git_status_overlay,
-)
 from .config import (
     load_content_search_left_pane_percent,
     load_left_pane_percent,
@@ -129,7 +121,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     save_left_pane_width_for_mode = layout.save_left_pane_width_for_mode
     rebuild_screen_lines = layout.rebuild_screen_lines
     show_inline_error = layout.show_inline_error
-    watch_refresh = WatchRefreshContext()
+    watch_refresh = TreePane.WatchRefreshContext()
     mark_tree_watch_dirty = watch_refresh.mark_tree_dirty
     refresh_rendered_for_current_path = partial(
         SourcePane.refresh_rendered_for_current_path,
@@ -141,7 +133,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     )
 
     refresh_git_status_overlay = partial(
-        _refresh_git_status_overlay,
+        TreePane.refresh_git_status_overlay,
         state,
         refresh_rendered_for_current_path,
         collect_git_status_overlay=collect_git_status_overlay,
@@ -195,7 +187,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     tree_pane_runtime: TreePane
 
     sync_selected_target_after_tree_refresh: Callable[..., None]
-    preview_selection = PreviewSelection(
+    preview_selection = TreePane.PreviewSelection(
         state=state,
         clear_source_selection=clear_source_selection,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
@@ -233,7 +225,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         jump_to_path=tree_pane_runtime.navigation.jump_to_path,
         get_terminal_size=shutil.get_terminal_size,
     )
-    tree_refresh_sync = TreeRefreshSync(
+    tree_refresh_sync = TreePane.TreeRefreshSync(
         state=state,
         rebuild_tree_entries=tree_pane_runtime.filter.rebuild_tree_entries,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,

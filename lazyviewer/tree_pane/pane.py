@@ -9,10 +9,17 @@ from ..runtime.state import AppState
 from .events import TreePaneMouseHandlers
 from .panels.filter import TreeFilterController
 from .panels.picker import NavigationController
+from .sync import PreviewSelection, TreeRefreshSync
+from .watch import WatchRefreshContext, refresh_git_status_overlay
 
 
 class TreePane:
     """App-owned tree pane object exposing filter, navigation, and mouse ops."""
+
+    WatchRefreshContext = WatchRefreshContext
+    PreviewSelection = PreviewSelection
+    TreeRefreshSync = TreeRefreshSync
+    refresh_git_status_overlay = staticmethod(refresh_git_status_overlay)
 
     def __init__(
         self,
