@@ -105,8 +105,16 @@ def run_main_loop(
         refresh_command_picker_matches = tree_pane.navigation.refresh_command_picker_matches
         activate_picker_selection = tree_pane.navigation.activate_picker_selection
         refresh_active_picker_matches = tree_pane.navigation.refresh_active_picker_matches
-        handle_tree_mouse_wheel = source_pane.handle_tree_mouse_wheel
-        handle_tree_mouse_click = tree_pane.handle_tree_mouse_click
+        handle_tree_mouse_wheel = getattr(
+            callbacks,
+            "handle_tree_mouse_wheel",
+            source_pane.handle_tree_mouse_wheel,
+        )
+        handle_tree_mouse_click = getattr(
+            callbacks,
+            "handle_tree_mouse_click",
+            tree_pane.handle_tree_mouse_click,
+        )
         toggle_help_panel = tree_pane.navigation.toggle_help_panel
         close_tree_filter = tree_pane.filter.close_tree_filter
         activate_tree_filter_selection = tree_pane.filter.activate_tree_filter_selection
@@ -117,7 +125,13 @@ def run_main_loop(
         jump_to_named_mark = tree_pane.navigation.jump_to_named_mark
         jump_back_in_history = tree_pane.navigation.jump_back_in_history
         jump_forward_in_history = tree_pane.navigation.jump_forward_in_history
-        tick_source_selection_drag = tree_pane.tick_source_selection_drag
+        tick_source_selection_drag = getattr(
+            callbacks,
+            "tick_source_selection_drag",
+            source_pane.tick_source_selection_drag,
+        )
+        picker_key_dispatch = getattr(callbacks, "handle_picker_key", None)
+        tree_filter_key_dispatch = getattr(callbacks, "handle_tree_filter_key", None)
     else:
         get_tree_filter_loading_until = callbacks.get_tree_filter_loading_until
         tree_view_rows = callbacks.tree_view_rows
@@ -146,6 +160,8 @@ def run_main_loop(
         jump_back_in_history = callbacks.jump_back_in_history
         jump_forward_in_history = callbacks.jump_forward_in_history
         tick_source_selection_drag = callbacks.tick_source_selection_drag
+        picker_key_dispatch = None
+        tree_filter_key_dispatch = None
 
     maybe_refresh_tree_watch = callbacks.maybe_refresh_tree_watch
     maybe_refresh_git_watch = callbacks.maybe_refresh_git_watch
@@ -445,32 +461,39 @@ def run_main_loop(
                 open_command_picker()
                 continue
 
-            picker_handled, picker_should_quit = handle_picker_key(
-                key,
-                state,
-                timing.double_click_seconds,
-                close_picker=close_picker,
-                refresh_command_picker_matches=refresh_command_picker_matches,
-                activate_picker_selection=activate_picker_selection,
-                visible_content_rows=visible_content_rows,
-                refresh_active_picker_matches=refresh_active_picker_matches,
-            )
+            if picker_key_dispatch is not None:
+                picker_handled, picker_should_quit = picker_key_dispatch(key, timing.double_click_seconds)
+            else:
+                picker_handled, picker_should_quit = handle_picker_key(
+                    key,
+                    state,
+                    timing.double_click_seconds,
+                    close_picker=close_picker,
+                    refresh_command_picker_matches=refresh_command_picker_matches,
+                    activate_picker_selection=activate_picker_selection,
+                    visible_content_rows=visible_content_rows,
+                    refresh_active_picker_matches=refresh_active_picker_matches,
+                )
             if picker_should_quit:
                 break
             if picker_handled:
                 continue
-            if handle_tree_filter_key(
-                key,
-                state,
-                handle_tree_mouse_wheel=handle_tree_mouse_wheel,
-                handle_tree_mouse_click=handle_tree_mouse_click,
-                toggle_help_panel=toggle_help_panel,
-                close_tree_filter=close_tree_filter,
-                activate_tree_filter_selection=activate_tree_filter_selection,
-                move_tree_selection=move_tree_selection,
-                apply_tree_filter_query=apply_tree_filter_query,
-                jump_to_next_content_hit=jump_to_next_content_hit,
-            ):
+            if tree_filter_key_dispatch is not None:
+                tree_filter_handled = tree_filter_key_dispatch(key)
+            else:
+                tree_filter_handled = handle_tree_filter_key(
+                    key,
+                    state,
+                    handle_tree_mouse_wheel=handle_tree_mouse_wheel,
+                    handle_tree_mouse_click=handle_tree_mouse_click,
+                    toggle_help_panel=toggle_help_panel,
+                    close_tree_filter=close_tree_filter,
+                    activate_tree_filter_selection=activate_tree_filter_selection,
+                    move_tree_selection=move_tree_selection,
+                    apply_tree_filter_query=apply_tree_filter_query,
+                    jump_to_next_content_hit=jump_to_next_content_hit,
+                )
+            if tree_filter_handled:
                 continue
             if handle_normal_key(key, term.columns):
                 break

@@ -33,10 +33,6 @@ from .command_palette import COMMAND_PALETTE_ITEMS
 from .git_jumps import (
     GitModifiedJumpNavigator,
 )
-from ..input import (
-    TreeMouseCallbacks,
-    TreeMouseHandlers,
-)
 from ..source_pane import copy_selected_source_range as copy_source_selection_range
 from ..source_pane.pane import SourcePane
 from .tree_sync import (
@@ -228,6 +224,9 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         reset_git_watch_context=reset_git_watch_context,
         refresh_git_status_overlay=refresh_git_status_overlay,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+        copy_text_to_clipboard=_copy_text_to_clipboard,
+        double_click_seconds=DOUBLE_CLICK_SECONDS,
+        monotonic=time.monotonic,
         on_tree_filter_state_change=sync_left_width_for_tree_filter_mode,
     )
     preview_selection.bind_jump_to_line(tree_pane_runtime.navigation.jump_to_line)
@@ -236,6 +235,12 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         visible_content_rows=visible_content_rows,
         move_tree_selection=tree_pane_runtime.filter.move_tree_selection,
         maybe_grow_directory_preview=maybe_grow_directory_preview,
+        clear_source_selection=clear_source_selection,
+        copy_selected_source_range=copy_selected_source_range,
+        directory_preview_target_for_display_line=directory_preview_target_for_display_line,
+        open_tree_filter=tree_pane_runtime.filter.open_tree_filter,
+        apply_tree_filter_query=tree_pane_runtime.filter.apply_tree_filter_query,
+        jump_to_path=tree_pane_runtime.navigation.jump_to_path,
         get_terminal_size=shutil.get_terminal_size,
     )
     tree_refresh_sync = TreeRefreshSync(
@@ -254,32 +259,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         monotonic=time.monotonic,
         tree_watch_poll_seconds=TREE_WATCH_POLL_SECONDS,
     )
-    tree_mouse_callbacks = TreeMouseCallbacks(
-        visible_content_rows=visible_content_rows,
-        source_pane_col_bounds=source_pane_runtime.geometry.source_pane_col_bounds,
-        source_selection_position=source_pane_runtime.geometry.source_selection_position,
-        directory_preview_target_for_display_line=directory_preview_target_for_display_line,
-        max_horizontal_text_offset=source_pane_runtime.geometry.max_horizontal_text_offset,
-        maybe_grow_directory_preview=maybe_grow_directory_preview,
-        clear_source_selection=clear_source_selection,
-        copy_selected_source_range=copy_selected_source_range,
-        rebuild_tree_entries=tree_pane_runtime.filter.rebuild_tree_entries,
-        mark_tree_watch_dirty=mark_tree_watch_dirty,
-        coerce_tree_filter_result_index=tree_pane_runtime.filter.coerce_tree_filter_result_index,
-        preview_selected_entry=preview_selected_entry,
-        activate_tree_filter_selection=tree_pane_runtime.filter.activate_tree_filter_selection,
-        open_tree_filter=tree_pane_runtime.filter.open_tree_filter,
-        apply_tree_filter_query=tree_pane_runtime.filter.apply_tree_filter_query,
-        jump_to_path=tree_pane_runtime.navigation.jump_to_path,
-        copy_text_to_clipboard=_copy_text_to_clipboard,
-        monotonic=time.monotonic,
-    )
-    mouse_handlers = TreeMouseHandlers(
-        state,
-        tree_mouse_callbacks,
-        double_click_seconds=DOUBLE_CLICK_SECONDS,
-    )
-    tree_pane_runtime.attach_mouse(mouse_handlers)
 
     current_jump_location = tree_pane_runtime.navigation.current_jump_location
     record_jump_if_changed = tree_pane_runtime.navigation.record_jump_if_changed

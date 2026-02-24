@@ -51,7 +51,7 @@ def _callback(kwargs: dict[str, object], name: str):
         "refresh_git_status_overlay": callbacks.refresh_git_status_overlay,
         "save_left_pane_width": callbacks.save_left_pane_width,
         "set_named_mark": tree_pane.navigation.set_named_mark,
-        "tick_source_selection_drag": tree_pane.tick_source_selection_drag,
+        "tick_source_selection_drag": getattr(callbacks, "tick_source_selection_drag", lambda: None),
     }
     if name not in mapping:
         raise AttributeError(f"{type(callbacks).__name__} has no callback {name!r}")

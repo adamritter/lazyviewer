@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import time
 
-from ..input.mouse import TreeMouseHandlers
+from ..input import handle_picker_key as handle_picker_key_event
+from ..input import handle_tree_filter_key as handle_tree_filter_key_event
 from ..runtime.state import AppState
+from .events import TreePaneMouseHandlers
 from .panels.filter import TreeFilterController
 from .panels.picker import NavigationController
 
@@ -26,9 +29,13 @@ class TreePane:
         reset_git_watch_context: Callable[[], None],
         refresh_git_status_overlay: Callable[..., None],
         refresh_rendered_for_current_path: Callable[..., None],
+        copy_text_to_clipboard: Callable[[str], bool],
+        double_click_seconds: float,
+        monotonic: Callable[[], float] = time.monotonic,
         on_tree_filter_state_change: Callable[[], None] | None = None,
-        mouse_handlers: TreeMouseHandlers | None = None,
     ) -> None:
+        self.state = state
+        self.visible_content_rows = visible_content_rows
         self.filter = TreeFilterController(
             state=state,
             visible_content_rows=visible_content_rows,
@@ -54,18 +61,69 @@ class TreePane:
             refresh_rendered_for_current_path=refresh_rendered_for_current_path,
             open_tree_filter=self.filter.open_tree_filter,
         )
-        self.mouse = mouse_handlers
+        self.mouse = TreePaneMouseHandlers(
+            state=state,
+            visible_content_rows=visible_content_rows,
+            rebuild_tree_entries=self.filter.rebuild_tree_entries,
+            mark_tree_watch_dirty=mark_tree_watch_dirty,
+            coerce_tree_filter_result_index=self.filter.coerce_tree_filter_result_index,
+            preview_selected_entry=preview_selected_entry,
+            activate_tree_filter_selection=self.filter.activate_tree_filter_selection,
+            copy_text_to_clipboard=copy_text_to_clipboard,
+            double_click_seconds=double_click_seconds,
+            monotonic=monotonic,
+        )
 
-    def attach_mouse(self, mouse_handlers: TreeMouseHandlers) -> None:
-        """Attach mouse handler implementation once constructed."""
-        self.mouse = mouse_handlers
+    @staticmethod
+    def _parse_mouse_col_row(mouse_key: str) -> tuple[int | None, int | None]:
+        parts = mouse_key.split(":")
+        if len(parts) < 3:
+            return None, None
+        try:
+            return int(parts[1]), int(parts[2])
+        except Exception:
+            return None, None
 
     def handle_tree_mouse_click(self, mouse_key: str) -> bool:
-        if self.mouse is None:
+        is_left_down = mouse_key.startswith("MOUSE_LEFT_DOWN:")
+        is_left_up = mouse_key.startswith("MOUSE_LEFT_UP:")
+        if not (is_left_down or is_left_up):
             return False
-        return self.mouse.handle_tree_mouse_click(mouse_key)
+        col, row = self._parse_mouse_col_row(mouse_key)
+        if col is None or row is None:
+            return True
+        return self.mouse.handle_click(col, row, is_left_down=is_left_down)
 
-    def tick_source_selection_drag(self) -> None:
-        if self.mouse is None:
-            return
-        self.mouse.tick_source_selection_drag()
+    def handle_picker_key(self, key: str, double_click_seconds: float) -> tuple[bool, bool]:
+        """Dispatch one key through picker controller when picker is active."""
+        return handle_picker_key_event(
+            key,
+            self.state,
+            double_click_seconds,
+            close_picker=self.navigation.close_picker,
+            refresh_command_picker_matches=self.navigation.refresh_command_picker_matches,
+            activate_picker_selection=self.navigation.activate_picker_selection,
+            visible_content_rows=self.visible_content_rows,
+            refresh_active_picker_matches=self.navigation.refresh_active_picker_matches,
+        )
+
+    def handle_tree_filter_key(
+        self,
+        key: str,
+        *,
+        handle_tree_mouse_wheel: Callable[[str], bool],
+        handle_tree_mouse_click: Callable[[str], bool],
+    ) -> bool:
+        """Dispatch one key through tree-filter controller when filter is active."""
+        return handle_tree_filter_key_event(
+            key,
+            self.state,
+            handle_tree_mouse_wheel=handle_tree_mouse_wheel,
+            handle_tree_mouse_click=handle_tree_mouse_click,
+            toggle_help_panel=self.navigation.toggle_help_panel,
+            close_tree_filter=self.filter.close_tree_filter,
+            activate_tree_filter_selection=self.filter.activate_tree_filter_selection,
+            move_tree_selection=self.filter.move_tree_selection,
+            apply_tree_filter_query=self.filter.apply_tree_filter_query,
+            jump_to_next_content_hit=self.filter.jump_to_next_content_hit,
+        )

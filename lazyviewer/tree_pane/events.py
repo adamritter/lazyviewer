@@ -2,37 +2,16 @@
 
 The handlers in this module translate left-pane pointer coordinates into tree
 entry intents while staying thin on side effects. They centralize query-row
-focus rules, directory-arrow toggles, and double-click activation semantics so
-runtime wiring can inject preview/rebuild/copy behavior consistently.
+focus rules, directory-arrow toggles, and double-click activation semantics.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 import time
 
 from ..runtime.state import AppState
-
-
-@dataclass(frozen=True)
-class TreePaneMouseCallbacks:
-    """Dependencies required by :class:`TreePaneMouseHandlers`.
-
-    The handlers are intentionally side-effect thin: they compute click intent and
-    delegate tree rebuild, preview, and clipboard behavior to injected callbacks so
-    runtime wiring and tests can control those effects.
-    """
-
-    visible_content_rows: Callable[[], int]
-    rebuild_tree_entries: Callable[..., None]
-    mark_tree_watch_dirty: Callable[[], None]
-    coerce_tree_filter_result_index: Callable[[int], int | None]
-    preview_selected_entry: Callable[..., None]
-    activate_tree_filter_selection: Callable[[], None]
-    copy_text_to_clipboard: Callable[[str], bool]
-    monotonic: Callable[[], float] = time.monotonic
 
 
 class TreePaneMouseHandlers:
@@ -45,27 +24,42 @@ class TreePaneMouseHandlers:
 
     def __init__(
         self,
+        *,
         state: AppState,
-        callbacks: TreePaneMouseCallbacks,
+        visible_content_rows: Callable[[], int],
+        rebuild_tree_entries: Callable[..., None],
+        mark_tree_watch_dirty: Callable[[], None],
+        coerce_tree_filter_result_index: Callable[[int], int | None],
+        preview_selected_entry: Callable[..., None],
+        activate_tree_filter_selection: Callable[[], None],
+        copy_text_to_clipboard: Callable[[str], bool],
         double_click_seconds: float,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         """Create click handlers bound to shared app state.
 
         Args:
             state: Mutable runtime state to update in place.
-            callbacks: Side-effect callbacks used to rebuild/preview/copy.
+            visible_content_rows: Visible tree row count provider.
+            rebuild_tree_entries: Tree rebuild hook.
+            mark_tree_watch_dirty: Tree-watch invalidation hook.
+            coerce_tree_filter_result_index: Filter-result row resolver.
+            preview_selected_entry: Selection preview hook.
+            activate_tree_filter_selection: Active filter-row activation hook.
+            copy_text_to_clipboard: Clipboard copy hook.
             double_click_seconds: Max interval between clicks to treat as a
                 double-click on the same row.
+            monotonic: Monotonic clock provider used for double-click timing.
         """
         self._state = state
-        self._visible_content_rows = callbacks.visible_content_rows
-        self._rebuild_tree_entries = callbacks.rebuild_tree_entries
-        self._mark_tree_watch_dirty = callbacks.mark_tree_watch_dirty
-        self._coerce_tree_filter_result_index = callbacks.coerce_tree_filter_result_index
-        self._preview_selected_entry = callbacks.preview_selected_entry
-        self._activate_tree_filter_selection = callbacks.activate_tree_filter_selection
-        self._copy_text_to_clipboard = callbacks.copy_text_to_clipboard
-        self._monotonic = callbacks.monotonic
+        self._visible_content_rows = visible_content_rows
+        self._rebuild_tree_entries = rebuild_tree_entries
+        self._mark_tree_watch_dirty = mark_tree_watch_dirty
+        self._coerce_tree_filter_result_index = coerce_tree_filter_result_index
+        self._preview_selected_entry = preview_selected_entry
+        self._activate_tree_filter_selection = activate_tree_filter_selection
+        self._copy_text_to_clipboard = copy_text_to_clipboard
+        self._monotonic = monotonic
         self._double_click_seconds = double_click_seconds
 
     def handle_click(self, col: int, row: int, is_left_down: bool) -> bool:

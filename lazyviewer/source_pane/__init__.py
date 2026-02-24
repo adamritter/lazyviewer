@@ -28,7 +28,6 @@ from .directory import (
 from ..tree_model.rendering import TREE_SIZE_LABEL_MIN_BYTES
 from .interaction import (
     SourcePaneClickResult,
-    SourcePaneMouseCallbacks,
     SourcePaneMouseHandlers,
     SourcePaneGeometry,
     copy_selected_source_range,
@@ -91,7 +90,6 @@ __all__ = [
     "clear_directory_preview_cache",
     "build_rendered_for_path",
     "SourcePaneClickResult",
-    "SourcePaneMouseCallbacks",
     "SourcePaneMouseHandlers",
     "SourcePaneGeometry",
     "SourcePaneRenderer",

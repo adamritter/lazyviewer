@@ -12,7 +12,6 @@ from .keys import (
     handle_picker_key,
     handle_tree_filter_key,
 )
-from .mouse import TreeMouseCallbacks, TreeMouseHandlers, _handle_tree_mouse_wheel
 
 __all__ = [
     "read_key",
@@ -23,7 +22,4 @@ __all__ = [
     "handle_picker_key",
     "handle_tree_filter_key",
     "handle_normal_key",
-    "TreeMouseCallbacks",
-    "TreeMouseHandlers",
-    "_handle_tree_mouse_wheel",
 ]

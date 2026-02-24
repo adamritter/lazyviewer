@@ -51,23 +51,6 @@ class SourceSelectionDragState:
 
 
 @dataclass(frozen=True)
-class SourcePaneMouseCallbacks:
-    """Side-effect callbacks required by ``SourcePaneMouseHandlers``."""
-
-    visible_content_rows: Callable[[], int]
-    source_pane_col_bounds: Callable[[], tuple[int, int]]
-    source_selection_position: Callable[[int, int], tuple[int, int] | None]
-    directory_preview_target_for_display_line: Callable[[int], Path | None]
-    max_horizontal_text_offset: Callable[[], int]
-    maybe_grow_directory_preview: Callable[[], bool]
-    clear_source_selection: Callable[[], bool]
-    copy_selected_source_range: Callable[[tuple[int, int], tuple[int, int]], bool]
-    open_tree_filter: Callable[[str], None]
-    apply_tree_filter_query: Callable[..., None]
-    jump_to_path: Callable[[Path], None]
-
-
-@dataclass(frozen=True)
 class SourcePaneClickResult:
     """Outcome of source-pane click handling."""
 
@@ -80,22 +63,33 @@ class SourcePaneMouseHandlers:
 
     def __init__(
         self,
+        *,
         state: AppState,
-        callbacks: SourcePaneMouseCallbacks,
+        visible_content_rows: Callable[[], int],
+        source_pane_col_bounds: Callable[[], tuple[int, int]],
+        source_selection_position: Callable[[int, int], tuple[int, int] | None],
+        directory_preview_target_for_display_line: Callable[[int], Path | None],
+        max_horizontal_text_offset: Callable[[], int],
+        maybe_grow_directory_preview: Callable[[], bool],
+        clear_source_selection: Callable[[], bool],
+        copy_selected_source_range: Callable[[tuple[int, int], tuple[int, int]], bool],
+        open_tree_filter: Callable[[str], None],
+        apply_tree_filter_query: Callable[..., None],
+        jump_to_path: Callable[[Path], None],
     ) -> None:
-        """Bind source-pane mouse handlers to app state and callback hooks."""
+        """Bind source-pane mouse handlers to app state and pane operations."""
         self._state = state
-        self._visible_content_rows = callbacks.visible_content_rows
-        self._source_pane_col_bounds = callbacks.source_pane_col_bounds
-        self._source_selection_position = callbacks.source_selection_position
-        self._directory_preview_target_for_display_line = callbacks.directory_preview_target_for_display_line
-        self._max_horizontal_text_offset = callbacks.max_horizontal_text_offset
-        self._maybe_grow_directory_preview = callbacks.maybe_grow_directory_preview
-        self._clear_source_selection = callbacks.clear_source_selection
-        self._copy_selected_source_range = callbacks.copy_selected_source_range
-        self._open_tree_filter = callbacks.open_tree_filter
-        self._apply_tree_filter_query = callbacks.apply_tree_filter_query
-        self._jump_to_path = callbacks.jump_to_path
+        self._visible_content_rows = visible_content_rows
+        self._source_pane_col_bounds = source_pane_col_bounds
+        self._source_selection_position = source_selection_position
+        self._directory_preview_target_for_display_line = directory_preview_target_for_display_line
+        self._max_horizontal_text_offset = max_horizontal_text_offset
+        self._maybe_grow_directory_preview = maybe_grow_directory_preview
+        self._clear_source_selection = clear_source_selection
+        self._copy_selected_source_range = copy_selected_source_range
+        self._open_tree_filter = open_tree_filter
+        self._apply_tree_filter_query = apply_tree_filter_query
+        self._jump_to_path = jump_to_path
         self._drag = SourceSelectionDragState()
 
     def reset_source_selection_drag_state(self) -> None:

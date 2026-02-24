@@ -64,6 +64,35 @@ class App:
         self.save_left_pane_width = save_left_pane_width
         self._run_main_loop = run_main_loop_fn
 
+    def handle_tree_mouse_wheel(self, mouse_key: str) -> bool:
+        """Forward wheel events to source-pane controller."""
+        return self.source_pane.handle_tree_mouse_wheel(mouse_key)
+
+    def handle_tree_mouse_click(self, mouse_key: str) -> bool:
+        """Route click events through source pane first, then tree pane."""
+        source_result = self.source_pane.handle_tree_mouse_click(mouse_key)
+        if source_result.handled:
+            return True
+        if source_result.route_to_tree:
+            return self.tree_pane.handle_tree_mouse_click(mouse_key)
+        return False
+
+    def tick_source_selection_drag(self) -> None:
+        """Advance active source-selection drag state."""
+        self.source_pane.tick_source_selection_drag()
+
+    def handle_picker_key(self, key: str, double_click_seconds: float) -> tuple[bool, bool]:
+        """Dispatch one key through tree-pane picker behavior."""
+        return self.tree_pane.handle_picker_key(key, double_click_seconds)
+
+    def handle_tree_filter_key(self, key: str) -> bool:
+        """Dispatch one key through tree-filter behavior and pane mouse routing."""
+        return self.tree_pane.handle_tree_filter_key(
+            key,
+            handle_tree_mouse_wheel=self.handle_tree_mouse_wheel,
+            handle_tree_mouse_click=self.handle_tree_mouse_click,
+        )
+
     def handle_normal_key(self, key: str, term_columns: int) -> bool:
         """Handle one normal-mode key by dispatching directly to pane controllers."""
         return handle_normal_key_event(
@@ -82,8 +111,8 @@ class App:
             toggle_help_panel=self.tree_pane.navigation.toggle_help_panel,
             toggle_git_features=self.toggle_git_features,
             launch_lazygit=self.launch_lazygit,
-            handle_tree_mouse_wheel=self.source_pane.handle_tree_mouse_wheel,
-            handle_tree_mouse_click=self.tree_pane.handle_tree_mouse_click,
+            handle_tree_mouse_wheel=self.handle_tree_mouse_wheel,
+            handle_tree_mouse_click=self.handle_tree_mouse_click,
             move_tree_selection=self.tree_pane.filter.move_tree_selection,
             rebuild_tree_entries=self.tree_pane.filter.rebuild_tree_entries,
             preview_selected_entry=self.preview_selected_entry,
