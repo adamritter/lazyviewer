@@ -10,7 +10,7 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
-from lazyviewer.ansi import build_screen_lines
+from lazyviewer.render.ansi import build_screen_lines
 from lazyviewer.picker_panel import (
     NavigationPickerDeps,
     NavigationPickerOps,

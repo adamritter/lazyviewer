@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lazyviewer.ansi import ANSI_ESCAPE_RE
+from lazyviewer.render.ansi import ANSI_ESCAPE_RE
 from lazyviewer.search.content import ContentMatch
 from lazyviewer.search.fuzzy import fuzzy_match_file_index, to_project_relative
 from lazyviewer.tree_pane.model import (

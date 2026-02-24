@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..ansi import ANSI_ESCAPE_RE
+from ..render.ansi import ANSI_ESCAPE_RE
 from .syntax import read_text
 from ..source_pane.symbols import SymbolEntry, collect_sticky_symbol_headers, next_symbol_start_line
 from .diffmap import diff_source_line_for_display_index

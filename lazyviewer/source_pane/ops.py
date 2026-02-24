@@ -10,7 +10,7 @@ import os
 import shutil
 from collections.abc import Callable
 
-from ..ansi import ANSI_ESCAPE_RE, char_display_width
+from ..render.ansi import ANSI_ESCAPE_RE, char_display_width
 from ..state import AppState
 
 

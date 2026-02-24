@@ -7,7 +7,7 @@ appear visually but do not consume source line numbers.
 
 from __future__ import annotations
 
-from ..ansi import ANSI_ESCAPE_RE, clip_ansi_line, slice_ansi_line
+from ..render.ansi import ANSI_ESCAPE_RE, clip_ansi_line, slice_ansi_line
 from ..source_pane.symbols import SymbolEntry
 from .diffmap import (
     diff_preview_logical_line_is_removed,

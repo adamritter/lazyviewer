@@ -6,7 +6,7 @@ These cases protect status and viewport math from line-shaping regressions.
 
 import unittest
 
-from lazyviewer import ansi as ansi_mod
+from lazyviewer.render import ansi as ansi_mod
 
 
 class BuildScreenLinesTests(unittest.TestCase):

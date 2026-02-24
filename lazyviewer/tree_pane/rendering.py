@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line
+from ..render.ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line
 from .model import TreeEntry, format_tree_entry
 
 FILTER_SPINNER_FRAMES: tuple[str, ...] = ("|", "/", "-", "\\")

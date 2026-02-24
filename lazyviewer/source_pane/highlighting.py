@@ -6,7 +6,7 @@ emphasis for query matches and source-selection ranges.
 
 from __future__ import annotations
 
-from ..ansi import ANSI_ESCAPE_RE, clip_ansi_line, slice_ansi_line
+from ..render.ansi import ANSI_ESCAPE_RE, clip_ansi_line, slice_ansi_line
 
 SOURCE_SELECTION_BG_SGR = "48;2;58;92;188"
 

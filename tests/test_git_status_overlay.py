@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lazyviewer.ansi import ANSI_ESCAPE_RE
+from lazyviewer.render.ansi import ANSI_ESCAPE_RE
 from lazyviewer.source_pane.diff import (
     _ADDED_BG_SGR,
     _apply_line_background,

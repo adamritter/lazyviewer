@@ -7,7 +7,7 @@ colorized content and expose scroll-percentage helpers shared by render paths.
 
 from __future__ import annotations
 
-from ..ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line
+from ..render.ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line
 
 
 def plain_display_width(text: str) -> int:

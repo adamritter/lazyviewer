@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..ansi import ANSI_ESCAPE_RE
+from ..render.ansi import ANSI_ESCAPE_RE
 
 
 def _line_has_git_change_marker(line: str) -> bool:

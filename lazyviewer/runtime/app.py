@@ -15,7 +15,7 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
-from ..ansi import ANSI_ESCAPE_RE, build_screen_lines
+from ..render.ansi import ANSI_ESCAPE_RE, build_screen_lines
 from .git_jumps import (
     GitModifiedJumpDeps,
 )

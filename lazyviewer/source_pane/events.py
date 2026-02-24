@@ -12,7 +12,7 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-from ..ansi import ANSI_ESCAPE_RE, char_display_width
+from ..render.ansi import ANSI_ESCAPE_RE, char_display_width
 from ..state import AppState
 
 _CLICK_SEARCH_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")

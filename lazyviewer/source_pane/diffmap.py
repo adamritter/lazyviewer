@@ -6,7 +6,7 @@ lines even when rendered diff previews include removed-line-only rows.
 
 from __future__ import annotations
 
-from ..ansi import ANSI_ESCAPE_RE
+from ..render.ansi import ANSI_ESCAPE_RE
 from .text import line_has_newline_terminator
 
 DIFF_REMOVED_BG_SGR = "48;2;92;43;49"
