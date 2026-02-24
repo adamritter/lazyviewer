@@ -48,7 +48,7 @@ from ..config import (
     save_left_pane_percent,
     load_show_hidden,
 )
-from ..editor import launch_editor
+from ..source_pane.editor import launch_editor
 from ..git_status import collect_git_status_overlay
 from ..source_pane.syntax import colorize_source
 from ..input import NormalKeyOps, handle_normal_key as handle_normal_key_event
