@@ -1,0 +1,233 @@
+"""Integration-heavy tests for ``lazyviewer.runtime.app`` wiring.
+
+Covers git/watch refresh behavior, key-driven state transitions, and search flows.
+These tests ensure runtime callbacks and state orchestration stay coherent.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+import unittest
+from unittest import mock
+
+from lazyviewer.runtime import app as app_runtime
+from lazyviewer.render.ansi import ANSI_ESCAPE_RE
+from lazyviewer.runtime.screen import (
+    _centered_scroll_start,
+    _first_git_change_screen_line,
+    _tree_order_key_for_relative_path,
+)
+from lazyviewer.git_status import GIT_STATUS_CHANGED
+from lazyviewer.runtime.navigation import JumpLocation
+from lazyviewer.render import help_panel_row_count, render_dual_page
+from lazyviewer.search.content import ContentMatch
+
+
+def _callback(kwargs: dict[str, object], name: str):
+    callbacks = kwargs["callbacks"]
+    return getattr(callbacks, name)
+
+class AppRuntimeContentSearchTestsPart2(unittest.TestCase):
+    def test_content_search_selected_hit_stays_visible_when_help_toggles_on(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            file_path = root / "demo.py"
+            file_path.write_text("line\n" * 120, encoding="utf-8")
+            snapshots: dict[str, object] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_search_content(_root, _query, _show_hidden, **_kwargs):
+                return (
+                    {
+                        file_path.resolve(): [
+                            ContentMatch(
+                                path=file_path.resolve(),
+                                line=120,
+                                column=1,
+                                preview="line",
+                            )
+                        ]
+                    },
+                    False,
+                    None,
+                )
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                open_tree_filter = _callback(kwargs, "open_tree_filter")
+                apply_tree_filter_query = _callback(kwargs, "apply_tree_filter_query")
+                handle_normal_key = _callback(kwargs, "handle_normal_key")
+
+                open_tree_filter("content")
+                apply_tree_filter_query("line", preview_selection=True, select_first_file=True)
+                before_help_start = state.start
+
+                handle_normal_key("?", 120)
+
+                selected_entry = state.tree_entries[state.selected_idx]
+                selected_line = (selected_entry.line or 1) - 1
+                help_rows = help_panel_row_count(
+                    state.usable,
+                    state.show_help,
+                    browser_visible=state.browser_visible,
+                    tree_filter_active=state.tree_filter_active,
+                    tree_filter_mode=state.tree_filter_mode,
+                    tree_filter_editing=state.tree_filter_editing,
+                )
+                visible_rows = max(1, state.usable - help_rows)
+                snapshots["before_help_start"] = before_help_start
+                snapshots["after_help_start"] = state.start
+                snapshots["selected_line"] = selected_line
+                snapshots["visible_rows"] = visible_rows
+                snapshots["show_help"] = state.show_help
+
+            with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=fake_search_content
+            ), mock.patch("lazyviewer.runtime.app.os.isatty", return_value=True), mock.patch(
+                "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.runtime.app.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.runtime.app.load_left_pane_percent", return_value=None
+            ), mock.patch(
+                "lazyviewer.runtime.app.load_content_search_left_pane_percent",
+                return_value=None,
+                create=True,
+            ), mock.patch(
+                "lazyviewer.runtime.app.shutil.get_terminal_size", return_value=os.terminal_size((120, 24))
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            self.assertTrue(bool(snapshots["show_help"]))
+            selected_line = int(snapshots["selected_line"])
+            after_help_start = int(snapshots["after_help_start"])
+            visible_rows = int(snapshots["visible_rows"])
+            self.assertGreaterEqual(after_help_start, int(snapshots["before_help_start"]))
+            self.assertGreaterEqual(selected_line, after_help_start)
+            self.assertLessEqual(selected_line, after_help_start + visible_rows - 1)
+
+    def test_content_search_uses_separate_left_pane_width_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "demo.py").write_text("print('x')\n", encoding="utf-8")
+            snapshots: dict[str, int] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_search_content(_root, _query, _show_hidden, **_kwargs):
+                return {}, False, None
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                open_tree_filter = _callback(kwargs, "open_tree_filter")
+                apply_tree_filter_query = _callback(kwargs, "apply_tree_filter_query")
+                close_tree_filter = _callback(kwargs, "close_tree_filter")
+                save_left_pane_width = _callback(kwargs, "save_left_pane_width")
+
+                snapshots["initial_left"] = state.left_width
+                save_left_pane_width(100, state.left_width)
+
+                open_tree_filter("content")
+                apply_tree_filter_query("needle", preview_selection=False, select_first_file=True)
+                snapshots["content_left"] = state.left_width
+                save_left_pane_width(100, state.left_width)
+
+                close_tree_filter(clear_query=True)
+                snapshots["restored_left"] = state.left_width
+                save_left_pane_width(100, state.left_width)
+
+            with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=fake_search_content
+            ), mock.patch("lazyviewer.runtime.app.shutil.get_terminal_size", return_value=os.terminal_size((100, 24))), mock.patch(
+                "lazyviewer.runtime.app.load_left_pane_percent", return_value=30.0
+            ), mock.patch(
+                "lazyviewer.runtime.app.load_content_search_left_pane_percent", return_value=65.0
+            ), mock.patch(
+                "lazyviewer.runtime.app.save_left_pane_percent"
+            ) as save_normal, mock.patch(
+                "lazyviewer.runtime.app.save_content_search_left_pane_percent"
+            ) as save_content, mock.patch(
+                "lazyviewer.runtime.app.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.runtime.app.load_show_hidden", return_value=False
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            self.assertEqual(snapshots["initial_left"], 30)
+            self.assertEqual(snapshots["content_left"], 65)
+            self.assertEqual(snapshots["restored_left"], 30)
+            save_content.assert_called_once_with(100, 65)
+            self.assertEqual(save_normal.call_count, 2)
+
+    def test_content_search_backspace_reuses_cached_rg_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "demo.py").write_text("alpha\nbeta\n", encoding="utf-8")
+            snapshots: dict[str, int] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_search_content(_root, _query, _show_hidden, **_kwargs):
+                return {}, False, None
+
+            def fake_run_main_loop(**kwargs) -> None:
+                open_tree_filter = _callback(kwargs, "open_tree_filter")
+                apply_tree_filter_query = _callback(kwargs, "apply_tree_filter_query")
+                open_tree_filter("content")
+                apply_tree_filter_query("a", preview_selection=False, select_first_file=True)
+                apply_tree_filter_query("ab", preview_selection=False, select_first_file=True)
+                apply_tree_filter_query("a", preview_selection=False, select_first_file=True)
+                snapshots["done"] = 1
+
+            with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=fake_search_content
+            ) as search_mock, mock.patch(
+                "lazyviewer.runtime.app.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.runtime.app.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.runtime.app.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            self.assertEqual(snapshots.get("done"), 1)
+            self.assertEqual(search_mock.call_count, 2)
