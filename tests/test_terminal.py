@@ -12,17 +12,17 @@ import termios
 import unittest
 from unittest import mock
 
-from lazyviewer.terminal import TerminalController
+from lazyviewer.runtime.terminal import TerminalController
 
 
 class TerminalBehaviorTests(unittest.TestCase):
     def test_enable_and_disable_tui_mode_use_alternate_screen_sequences(self) -> None:
         saved_state = [1, 2, 3]
 
-        with mock.patch("lazyviewer.terminal.termios.tcgetattr", return_value=saved_state), mock.patch(
-            "lazyviewer.terminal.tty.setraw"
-        ) as setraw_mock, mock.patch("lazyviewer.terminal.os.write") as write_mock, mock.patch(
-            "lazyviewer.terminal.termios.tcsetattr"
+        with mock.patch("lazyviewer.runtime.terminal.termios.tcgetattr", return_value=saved_state), mock.patch(
+            "lazyviewer.runtime.terminal.tty.setraw"
+        ) as setraw_mock, mock.patch("lazyviewer.runtime.terminal.os.write") as write_mock, mock.patch(
+            "lazyviewer.runtime.terminal.termios.tcsetattr"
         ) as setattr_mock:
             controller = TerminalController(stdin_fd=0, stdout_fd=1)
             controller.enable_tui_mode()
@@ -34,7 +34,7 @@ class TerminalBehaviorTests(unittest.TestCase):
         setattr_mock.assert_called_once_with(0, termios.TCSAFLUSH, saved_state)
 
     def test_raw_mode_restores_terminal_after_exception(self) -> None:
-        with mock.patch("lazyviewer.terminal.termios.tcgetattr", return_value=[0]):
+        with mock.patch("lazyviewer.runtime.terminal.termios.tcgetattr", return_value=[0]):
             controller = TerminalController(stdin_fd=0, stdout_fd=1)
 
         with mock.patch.object(controller, "enable_tui_mode") as enable_mock, mock.patch.object(
@@ -48,21 +48,21 @@ class TerminalBehaviorTests(unittest.TestCase):
         disable_mock.assert_called_once()
 
     def test_supports_kitty_graphics_checks_term_and_env(self) -> None:
-        with mock.patch("lazyviewer.terminal.termios.tcgetattr", return_value=[0]):
+        with mock.patch("lazyviewer.runtime.terminal.termios.tcgetattr", return_value=[0]):
             controller = TerminalController(stdin_fd=0, stdout_fd=1)
 
-        with mock.patch.dict("lazyviewer.terminal.os.environ", {"TERM": "xterm-kitty"}, clear=True):
+        with mock.patch.dict("lazyviewer.runtime.terminal.os.environ", {"TERM": "xterm-kitty"}, clear=True):
             self.assertTrue(controller.supports_kitty_graphics())
 
-        with mock.patch.dict("lazyviewer.terminal.os.environ", {"KITTY_WINDOW_ID": "12"}, clear=True):
+        with mock.patch.dict("lazyviewer.runtime.terminal.os.environ", {"KITTY_WINDOW_ID": "12"}, clear=True):
             self.assertTrue(controller.supports_kitty_graphics())
 
-        with mock.patch.dict("lazyviewer.terminal.os.environ", {"TERM": "xterm-256color"}, clear=True):
+        with mock.patch.dict("lazyviewer.runtime.terminal.os.environ", {"TERM": "xterm-256color"}, clear=True):
             self.assertFalse(controller.supports_kitty_graphics())
 
     def test_set_mouse_reporting_toggles_and_is_idempotent(self) -> None:
-        with mock.patch("lazyviewer.terminal.termios.tcgetattr", return_value=[0]), mock.patch(
-            "lazyviewer.terminal.os.write"
+        with mock.patch("lazyviewer.runtime.terminal.termios.tcgetattr", return_value=[0]), mock.patch(
+            "lazyviewer.runtime.terminal.os.write"
         ) as write_mock:
             controller = TerminalController(stdin_fd=0, stdout_fd=1)
             controller.set_mouse_reporting(False)
@@ -79,8 +79,8 @@ class TerminalBehaviorTests(unittest.TestCase):
         )
 
     def test_kitty_graphics_commands_emit_expected_sequences(self) -> None:
-        with mock.patch("lazyviewer.terminal.termios.tcgetattr", return_value=[0]), mock.patch(
-            "lazyviewer.terminal.os.write"
+        with mock.patch("lazyviewer.runtime.terminal.termios.tcgetattr", return_value=[0]), mock.patch(
+            "lazyviewer.runtime.terminal.os.write"
         ) as write_mock:
             controller = TerminalController(stdin_fd=0, stdout_fd=1)
             controller.kitty_clear_images()

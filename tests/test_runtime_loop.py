@@ -9,7 +9,7 @@ from unittest import mock
 
 from lazyviewer.runtime import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
 from lazyviewer.state import AppState
-from lazyviewer.terminal import TerminalController
+from lazyviewer.runtime.terminal import TerminalController
 from lazyviewer.tree_pane.model import TreeEntry
 
 
@@ -138,10 +138,10 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
         writes: list[bytes] = []
         keys = iter(["q"])
 
-        with mock.patch("lazyviewer.terminal.termios.tcgetattr", return_value=[0]), mock.patch(
-            "lazyviewer.terminal.tty.setraw"
-        ), mock.patch("lazyviewer.terminal.termios.tcsetattr"), mock.patch(
-            "lazyviewer.terminal.os.write",
+        with mock.patch("lazyviewer.runtime.terminal.termios.tcgetattr", return_value=[0]), mock.patch(
+            "lazyviewer.runtime.terminal.tty.setraw"
+        ), mock.patch("lazyviewer.runtime.terminal.termios.tcsetattr"), mock.patch(
+            "lazyviewer.runtime.terminal.os.write",
             side_effect=lambda _fd, data: writes.append(data) or len(data),
         ), mock.patch(
             "lazyviewer.runtime.loop.shutil.get_terminal_size",

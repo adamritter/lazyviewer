@@ -21,7 +21,7 @@ from ..input import (
 )
 from ..render import RenderContext, render_dual_page_context
 from ..state import AppState
-from ..terminal import TerminalController
+from .terminal import TerminalController
 from ..tree_pane.model import clamp_left_width
 
 
