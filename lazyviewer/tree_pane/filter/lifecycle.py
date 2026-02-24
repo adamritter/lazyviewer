@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..runtime.navigation import JumpLocation
+from ...runtime.navigation import JumpLocation
 
 
 class TreeFilterLifecycleMixin:

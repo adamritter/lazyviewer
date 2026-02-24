@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..tree_pane.model import next_file_entry_index
+from ..model import next_file_entry_index
 
 
 class TreeFilterNavigationMixin:

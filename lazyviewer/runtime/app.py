@@ -64,7 +64,7 @@ from ..source_pane.events import directory_preview_target_for_display_line as pr
 from ..render import help_panel_row_count
 from .loop import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
 from ..picker_panel import NavigationPickerDeps, NavigationPickerOps
-from ..filter_panel import TreeFilterDeps, TreeFilterOps
+from ..tree_pane.filter import TreeFilterDeps, TreeFilterOps
 from ..search.fuzzy import collect_project_file_labels
 from .state import AppState
 from .terminal import TerminalController
