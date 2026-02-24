@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from lazyviewer.runtime.state import AppState
-from lazyviewer.source_pane.interaction.ops import SourcePaneOps
+from lazyviewer.source_pane.interaction.geometry import SourcePaneGeometry
 from lazyviewer.tree_model import TreeEntry
 
 
@@ -36,18 +36,18 @@ def _make_state(lines: list[str]) -> AppState:
     )
 
 
-class SourcePaneOpsTests(unittest.TestCase):
+class SourcePaneGeometryTests(unittest.TestCase):
     def test_max_horizontal_text_offset_caches_line_width_scan(self) -> None:
         lines = [f"line_{idx:04d}" + ("x" * 120) for idx in range(200)]
         state = _make_state(lines)
-        ops = SourcePaneOps(
+        ops = SourcePaneGeometry(
             state=state,
             visible_content_rows=lambda: 20,
             get_terminal_size=lambda _fallback: os.terminal_size((120, 24)),
         )
 
         with mock.patch(
-            "lazyviewer.source_pane.interaction.ops._rendered_line_display_width",
+            "lazyviewer.source_pane.interaction.geometry._rendered_line_display_width",
             side_effect=lambda line: len(line),
         ) as width_mock:
             first = ops.max_horizontal_text_offset()
@@ -59,14 +59,14 @@ class SourcePaneOpsTests(unittest.TestCase):
     def test_max_horizontal_text_offset_recomputes_after_lines_object_changes(self) -> None:
         lines = [f"line_{idx:04d}" + ("x" * 80) for idx in range(50)]
         state = _make_state(lines)
-        ops = SourcePaneOps(
+        ops = SourcePaneGeometry(
             state=state,
             visible_content_rows=lambda: 20,
             get_terminal_size=lambda _fallback: os.terminal_size((100, 24)),
         )
 
         with mock.patch(
-            "lazyviewer.source_pane.interaction.ops._rendered_line_display_width",
+            "lazyviewer.source_pane.interaction.geometry._rendered_line_display_width",
             side_effect=lambda line: len(line),
         ) as width_mock:
             ops.max_horizontal_text_offset()

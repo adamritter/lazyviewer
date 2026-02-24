@@ -14,8 +14,6 @@ from pathlib import Path
 
 from ..input import read_key
 from ..input import (
-    PickerKeyCallbacks,
-    TreeFilterKeyCallbacks,
     handle_picker_key,
     handle_tree_filter_key,
 )
@@ -88,24 +86,72 @@ def run_main_loop(
     Each iteration handles terminal resize bookkeeping, optional rendering,
     input decoding/dispatch, and periodic idle refresh hooks.
     """
-    ops = callbacks
-    picker_key_callbacks = PickerKeyCallbacks(
-        close_picker=ops.close_picker,
-        refresh_command_picker_matches=ops.refresh_command_picker_matches,
-        activate_picker_selection=ops.activate_picker_selection,
-        visible_content_rows=ops.visible_content_rows,
-        refresh_active_picker_matches=ops.refresh_active_picker_matches,
-    )
-    tree_filter_key_callbacks = TreeFilterKeyCallbacks(
-        handle_tree_mouse_wheel=ops.handle_tree_mouse_wheel,
-        handle_tree_mouse_click=ops.handle_tree_mouse_click,
-        toggle_help_panel=ops.toggle_help_panel,
-        close_tree_filter=ops.close_tree_filter,
-        activate_tree_filter_selection=ops.activate_tree_filter_selection,
-        move_tree_selection=ops.move_tree_selection,
-        apply_tree_filter_query=ops.apply_tree_filter_query,
-        jump_to_next_content_hit=ops.jump_to_next_content_hit,
-    )
+    tree_pane = getattr(callbacks, "tree_pane", None)
+    source_pane = getattr(callbacks, "source_pane", None)
+    layout = getattr(callbacks, "layout", None)
+
+    if tree_pane is not None and source_pane is not None and layout is not None:
+        get_tree_filter_loading_until = tree_pane.filter.get_loading_until
+        tree_view_rows = tree_pane.filter.tree_view_rows
+        tree_filter_prompt_prefix = tree_pane.filter.tree_filter_prompt_prefix
+        tree_filter_placeholder = tree_pane.filter.tree_filter_placeholder
+        visible_content_rows = source_pane.geometry.visible_content_rows
+        rebuild_screen_lines = layout.rebuild_screen_lines
+        current_preview_image_path = layout.current_preview_image_path
+        current_preview_image_geometry = layout.current_preview_image_geometry
+        open_tree_filter = tree_pane.filter.open_tree_filter
+        open_command_picker = tree_pane.navigation.open_command_picker
+        close_picker = tree_pane.navigation.close_picker
+        refresh_command_picker_matches = tree_pane.navigation.refresh_command_picker_matches
+        activate_picker_selection = tree_pane.navigation.activate_picker_selection
+        refresh_active_picker_matches = tree_pane.navigation.refresh_active_picker_matches
+        handle_tree_mouse_wheel = source_pane.handle_tree_mouse_wheel
+        handle_tree_mouse_click = tree_pane.handle_tree_mouse_click
+        toggle_help_panel = tree_pane.navigation.toggle_help_panel
+        close_tree_filter = tree_pane.filter.close_tree_filter
+        activate_tree_filter_selection = tree_pane.filter.activate_tree_filter_selection
+        move_tree_selection = tree_pane.filter.move_tree_selection
+        apply_tree_filter_query = tree_pane.filter.apply_tree_filter_query
+        jump_to_next_content_hit = tree_pane.filter.jump_to_next_content_hit
+        set_named_mark = tree_pane.navigation.set_named_mark
+        jump_to_named_mark = tree_pane.navigation.jump_to_named_mark
+        jump_back_in_history = tree_pane.navigation.jump_back_in_history
+        jump_forward_in_history = tree_pane.navigation.jump_forward_in_history
+        tick_source_selection_drag = tree_pane.tick_source_selection_drag
+    else:
+        get_tree_filter_loading_until = callbacks.get_tree_filter_loading_until
+        tree_view_rows = callbacks.tree_view_rows
+        tree_filter_prompt_prefix = callbacks.tree_filter_prompt_prefix
+        tree_filter_placeholder = callbacks.tree_filter_placeholder
+        visible_content_rows = callbacks.visible_content_rows
+        rebuild_screen_lines = callbacks.rebuild_screen_lines
+        current_preview_image_path = callbacks.current_preview_image_path
+        current_preview_image_geometry = callbacks.current_preview_image_geometry
+        open_tree_filter = callbacks.open_tree_filter
+        open_command_picker = callbacks.open_command_picker
+        close_picker = callbacks.close_picker
+        refresh_command_picker_matches = callbacks.refresh_command_picker_matches
+        activate_picker_selection = callbacks.activate_picker_selection
+        refresh_active_picker_matches = callbacks.refresh_active_picker_matches
+        handle_tree_mouse_wheel = callbacks.handle_tree_mouse_wheel
+        handle_tree_mouse_click = callbacks.handle_tree_mouse_click
+        toggle_help_panel = callbacks.toggle_help_panel
+        close_tree_filter = callbacks.close_tree_filter
+        activate_tree_filter_selection = callbacks.activate_tree_filter_selection
+        move_tree_selection = callbacks.move_tree_selection
+        apply_tree_filter_query = callbacks.apply_tree_filter_query
+        jump_to_next_content_hit = callbacks.jump_to_next_content_hit
+        set_named_mark = callbacks.set_named_mark
+        jump_to_named_mark = callbacks.jump_to_named_mark
+        jump_back_in_history = callbacks.jump_back_in_history
+        jump_forward_in_history = callbacks.jump_forward_in_history
+        tick_source_selection_drag = callbacks.tick_source_selection_drag
+
+    maybe_refresh_tree_watch = callbacks.maybe_refresh_tree_watch
+    maybe_refresh_git_watch = callbacks.maybe_refresh_git_watch
+    refresh_git_status_overlay = callbacks.refresh_git_status_overlay
+    handle_normal_key = callbacks.handle_normal_key
+    save_left_pane_width = callbacks.save_left_pane_width
     kitty_image_state: tuple[str, int, int, int, int] | None = None
     tree_filter_cursor_visible = True
     tree_filter_spinner_frame = 0
@@ -116,25 +162,25 @@ def run_main_loop(
         state.left_width = clamp_left_width(term_columns, state.left_width + delta)
         if state.left_width == prev_left:
             return
-        ops.save_left_pane_width(term_columns, state.left_width)
+        save_left_pane_width(term_columns, state.left_width)
         state.right_width = max(1, term_columns - state.left_width - 2)
         if state.right_width != state.last_right_width:
             state.last_right_width = state.right_width
-            ops.rebuild_screen_lines(columns=term_columns)
+            rebuild_screen_lines(columns=term_columns)
         state.dirty = True
 
     def toggle_tree_filter_mode(mode: str) -> None:
         """Open/switch/close tree filter UI based on current editing state."""
         if state.tree_filter_active:
             if state.tree_filter_mode == mode and state.tree_filter_editing:
-                ops.close_tree_filter(clear_query=True)
+                close_tree_filter(clear_query=True)
             elif state.tree_filter_mode != mode:
-                ops.open_tree_filter(mode)
+                open_tree_filter(mode)
             else:
                 state.tree_filter_editing = True
                 state.dirty = True
             return
-        ops.open_tree_filter(mode)
+        open_tree_filter(mode)
 
     with terminal.raw_mode():
         while True:
@@ -156,12 +202,12 @@ def run_main_loop(
             state.right_width = max(1, term.columns - state.left_width - 2)
             if state.right_width != state.last_right_width:
                 state.last_right_width = state.right_width
-                ops.rebuild_screen_lines(columns=term.columns)
+                rebuild_screen_lines(columns=term.columns)
                 state.dirty = True
-            state.max_start = max(0, len(state.lines) - ops.visible_content_rows())
+            state.max_start = max(0, len(state.lines) - visible_content_rows())
 
             prev_tree_start = state.tree_start
-            visible_tree_rows = ops.tree_view_rows()
+            visible_tree_rows = tree_view_rows()
             if state.selected_idx < state.tree_start:
                 state.tree_start = state.selected_idx
             elif state.selected_idx >= state.tree_start + visible_tree_rows:
@@ -174,7 +220,7 @@ def run_main_loop(
                 state.dirty = True
 
             if state.picker_active and state.picker_mode in {"symbols", "commands"}:
-                picker_rows = max(1, ops.visible_content_rows() - 1)
+                picker_rows = max(1, visible_content_rows() - 1)
                 max_picker_start = max(0, len(state.picker_match_labels) - picker_rows)
                 prev_picker_start = state.picker_list_start
                 if state.picker_selected < state.picker_list_start:
@@ -204,7 +250,7 @@ def run_main_loop(
                 state.tree_filter_active
                 and state.tree_filter_query
                 and not state.picker_active
-                and time.monotonic() < ops.get_tree_filter_loading_until()
+                and time.monotonic() < get_tree_filter_loading_until()
             )
             if loading_active != state.tree_filter_loading:
                 state.tree_filter_loading = loading_active
@@ -216,7 +262,7 @@ def run_main_loop(
                     state.dirty = True
 
             if state.dirty:
-                preview_image_path = ops.current_preview_image_path()
+                preview_image_path = current_preview_image_path()
                 render_lines = [""] if preview_image_path is not None else state.lines
                 render_start = 0 if preview_image_path is not None else state.start
                 render_context = RenderContext(
@@ -247,8 +293,8 @@ def run_main_loop(
                     tree_filter_truncated=state.tree_filter_truncated,
                     tree_filter_loading=state.tree_filter_loading,
                     tree_filter_spinner_frame=tree_filter_spinner_frame,
-                    tree_filter_prefix=ops.tree_filter_prompt_prefix(),
-                    tree_filter_placeholder=ops.tree_filter_placeholder(),
+                    tree_filter_prefix=tree_filter_prompt_prefix(),
+                    tree_filter_placeholder=tree_filter_placeholder(),
                     picker_active=state.picker_active,
                     picker_mode=state.picker_mode,
                     picker_query=state.picker_query,
@@ -299,7 +345,7 @@ def run_main_loop(
                 render_dual_page_context(render_context)
                 desired_image_state: tuple[str, int, int, int, int] | None = None
                 if preview_image_path is not None:
-                    image_col, image_row, image_width, image_height = ops.current_preview_image_geometry(
+                    image_col, image_row, image_width, image_height = current_preview_image_geometry(
                         term.columns
                     )
                     desired_image_state = (
@@ -329,11 +375,11 @@ def run_main_loop(
                 # Ignore SIGINT-style interrupts so terminal copy shortcuts do not exit the app.
                 continue
             if key == "":
-                ops.maybe_refresh_tree_watch()
-                ops.maybe_refresh_git_watch()
-                ops.refresh_git_status_overlay()
-                if ops.tick_source_selection_drag is not None:
-                    ops.tick_source_selection_drag()
+                maybe_refresh_tree_watch()
+                maybe_refresh_git_watch()
+                refresh_git_status_overlay()
+                if tick_source_selection_drag is not None:
+                    tick_source_selection_drag()
                 continue
             if state.skip_next_lf and key == "ENTER_LF":
                 state.skip_next_lf = False
@@ -364,7 +410,7 @@ def run_main_loop(
                 state.count_buffer = ""
                 if key == "ESC":
                     continue
-                if ops.set_named_mark(key):
+                if set_named_mark(key):
                     state.dirty = True
                 continue
 
@@ -374,7 +420,7 @@ def run_main_loop(
                 state.count_buffer = ""
                 if key == "ESC":
                     continue
-                if ops.jump_to_named_mark(key):
+                if jump_to_named_mark(key):
                     state.dirty = True
                 continue
 
@@ -383,7 +429,7 @@ def run_main_loop(
 
             if key in {"ALT_LEFT", "ALT_RIGHT"} and nav_hotkeys_enabled:
                 state.count_buffer = ""
-                moved = ops.jump_back_in_history() if key == "ALT_LEFT" else ops.jump_forward_in_history()
+                moved = jump_back_in_history() if key == "ALT_LEFT" else jump_forward_in_history()
                 if moved:
                     state.dirty = True
                 continue
@@ -396,14 +442,18 @@ def run_main_loop(
 
             if key == ":" and not state.picker_active:
                 state.count_buffer = ""
-                ops.open_command_picker()
+                open_command_picker()
                 continue
 
             picker_handled, picker_should_quit = handle_picker_key(
                 key,
                 state,
                 timing.double_click_seconds,
-                picker_key_callbacks,
+                close_picker=close_picker,
+                refresh_command_picker_matches=refresh_command_picker_matches,
+                activate_picker_selection=activate_picker_selection,
+                visible_content_rows=visible_content_rows,
+                refresh_active_picker_matches=refresh_active_picker_matches,
             )
             if picker_should_quit:
                 break
@@ -412,8 +462,15 @@ def run_main_loop(
             if handle_tree_filter_key(
                 key,
                 state,
-                tree_filter_key_callbacks,
+                handle_tree_mouse_wheel=handle_tree_mouse_wheel,
+                handle_tree_mouse_click=handle_tree_mouse_click,
+                toggle_help_panel=toggle_help_panel,
+                close_tree_filter=close_tree_filter,
+                activate_tree_filter_selection=activate_tree_filter_selection,
+                move_tree_selection=move_tree_selection,
+                apply_tree_filter_query=apply_tree_filter_query,
+                jump_to_next_content_hit=jump_to_next_content_hit,
             ):
                 continue
-            if ops.handle_normal_key(key, term.columns):
+            if handle_normal_key(key, term.columns):
                 break

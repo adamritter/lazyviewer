@@ -52,7 +52,7 @@ def _sorted_git_modified_file_paths(state: AppState) -> list[Path]:
 
 
 @dataclass(frozen=True)
-class GitModifiedJumpDeps:
+class GitModifiedJumpNavigator:
     """Dependency bundle for jumping across git-modified locations."""
 
     state: AppState

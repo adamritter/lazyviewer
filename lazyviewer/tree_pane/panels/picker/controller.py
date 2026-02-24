@@ -16,7 +16,7 @@ from .line_map import first_display_index_for_source_line, source_line_for_displ
 PICKER_RESULT_LIMIT = 200
 
 
-class NavigationPickerOps:
+class NavigationController:
     """State-bound picker/navigation operations used by key handlers."""
 
     def __init__(
@@ -33,6 +33,7 @@ class NavigationPickerOps:
         refresh_git_status_overlay: Callable[..., None],
         visible_content_rows: Callable[[], int],
         refresh_rendered_for_current_path: Callable[..., None],
+        open_tree_filter: Callable[[str], None],
     ) -> None:
         """Bind controller methods from explicit runtime hooks."""
 
@@ -47,11 +48,7 @@ class NavigationPickerOps:
         self.refresh_git_status_overlay = refresh_git_status_overlay
         self.visible_content_rows = visible_content_rows
         self.refresh_rendered_for_current_path = refresh_rendered_for_current_path
-        self.open_tree_filter_fn: Callable[[str], None] | None = None
-
-    def set_open_tree_filter(self, callback: Callable[[str], None]) -> None:
-        """Register callback used by command palette filter/search actions."""
-        self.open_tree_filter_fn = callback
+        self.open_tree_filter = open_tree_filter
 
     # matching
     def refresh_symbol_picker_matches(self, reset_selection: bool = False) -> None:
@@ -320,12 +317,10 @@ class NavigationPickerOps:
     def execute_command_palette_action(self, command_id: str) -> bool:
         """Execute command-palette action by id, returning ``True`` to quit."""
         if command_id == "filter_files":
-            if self.open_tree_filter_fn is not None:
-                self.open_tree_filter_fn("files")
+            self.open_tree_filter("files")
             return False
         if command_id == "search_content":
-            if self.open_tree_filter_fn is not None:
-                self.open_tree_filter_fn("content")
+            self.open_tree_filter("content")
             return False
         if command_id == "open_symbols":
             self.open_symbol_picker()

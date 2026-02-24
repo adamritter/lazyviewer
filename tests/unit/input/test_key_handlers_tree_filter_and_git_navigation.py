@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 from lazyviewer.input import (
-    NormalKeyOps,
+    NormalKeyActions,
     PickerKeyCallbacks,
     TreeFilterKeyCallbacks,
     handle_normal_key,
@@ -62,7 +62,7 @@ class KeyHandlersBehaviorTestsPart2(unittest.TestCase):
     ) -> bool:
         if launch_editor_for_path is None:
             launch_editor_for_path = lambda _path: None
-        ops = NormalKeyOps(
+        actions = NormalKeyActions(
             current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
             record_jump_if_changed=lambda _origin: None,
             open_symbol_picker=open_symbol_picker,
@@ -94,7 +94,7 @@ class KeyHandlersBehaviorTestsPart2(unittest.TestCase):
             key=key,
             term_columns=120,
             state=state,
-            ops=ops,
+            actions=actions,
         )
 
     def test_n_jumps_to_git_modified_when_enabled(self) -> None:

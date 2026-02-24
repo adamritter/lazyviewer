@@ -25,17 +25,39 @@ class TreeFilterKeyCallbacks:
 def handle_tree_filter_key(
     key: str,
     state: AppState,
-    callbacks: TreeFilterKeyCallbacks,
+    callbacks: TreeFilterKeyCallbacks | None = None,
+    *,
+    handle_tree_mouse_wheel: Callable[[str], bool] | None = None,
+    handle_tree_mouse_click: Callable[[str], bool] | None = None,
+    toggle_help_panel: Callable[[], None] | None = None,
+    close_tree_filter: Callable[..., None] | None = None,
+    activate_tree_filter_selection: Callable[[], None] | None = None,
+    move_tree_selection: Callable[[int], bool] | None = None,
+    apply_tree_filter_query: Callable[..., None] | None = None,
+    jump_to_next_content_hit: Callable[[int], bool] | None = None,
 ) -> bool:
     """Handle keys for tree filter prompt, list navigation, and hit jumps."""
-    handle_tree_mouse_wheel = callbacks.handle_tree_mouse_wheel
-    handle_tree_mouse_click = callbacks.handle_tree_mouse_click
-    toggle_help_panel = callbacks.toggle_help_panel
-    close_tree_filter = callbacks.close_tree_filter
-    activate_tree_filter_selection = callbacks.activate_tree_filter_selection
-    move_tree_selection = callbacks.move_tree_selection
-    apply_tree_filter_query = callbacks.apply_tree_filter_query
-    jump_to_next_content_hit = callbacks.jump_to_next_content_hit
+    if callbacks is not None:
+        handle_tree_mouse_wheel = callbacks.handle_tree_mouse_wheel
+        handle_tree_mouse_click = callbacks.handle_tree_mouse_click
+        toggle_help_panel = callbacks.toggle_help_panel
+        close_tree_filter = callbacks.close_tree_filter
+        activate_tree_filter_selection = callbacks.activate_tree_filter_selection
+        move_tree_selection = callbacks.move_tree_selection
+        apply_tree_filter_query = callbacks.apply_tree_filter_query
+        jump_to_next_content_hit = callbacks.jump_to_next_content_hit
+
+    if (
+        handle_tree_mouse_wheel is None
+        or handle_tree_mouse_click is None
+        or toggle_help_panel is None
+        or close_tree_filter is None
+        or activate_tree_filter_selection is None
+        or move_tree_selection is None
+        or apply_tree_filter_query is None
+        or jump_to_next_content_hit is None
+    ):
+        raise TypeError("handle_tree_filter_key requires callbacks or all explicit tree-filter handlers.")
     if not state.tree_filter_active:
         return False
 

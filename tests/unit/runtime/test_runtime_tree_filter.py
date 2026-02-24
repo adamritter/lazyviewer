@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.tree_pane.panels.filter import TreeFilterOps
+from lazyviewer.tree_pane.panels.filter import TreeFilterController
 from lazyviewer.runtime.state import AppState
 from lazyviewer.tree_model import TreeEntry
 
@@ -50,7 +50,7 @@ class RuntimeTreeFilterTests(unittest.TestCase):
             state.tree_filter_active = True
             state.tree_filter_mode = "content"
 
-            ops = TreeFilterOps(
+            ops = TreeFilterController(
                 state=state,
                 visible_content_rows=lambda: 20,
                 rebuild_screen_lines=lambda **_kwargs: None,

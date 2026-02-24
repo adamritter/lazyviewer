@@ -16,7 +16,7 @@ from functools import partial
 from pathlib import Path
 
 from ..render.ansi import ANSI_ESCAPE_RE, build_screen_lines
-from .app_bootstrap import AppStateBootstrapDeps, build_initial_app_state
+from .app_bootstrap import AppStateBootstrap
 from .app_helpers import (
     clear_source_selection as _clear_source_selection,
     clear_status_message as _clear_status_message,
@@ -31,7 +31,7 @@ from .app_helpers import (
 )
 from .command_palette import COMMAND_PALETTE_ITEMS
 from .git_jumps import (
-    GitModifiedJumpDeps,
+    GitModifiedJumpNavigator,
 )
 from ..input import (
     TreeMouseCallbacks,
@@ -45,7 +45,7 @@ from .tree_sync import (
 )
 from .application import App
 from .index_warmup import TreeFilterIndexWarmupScheduler
-from .layout import PagerLayoutOps
+from .layout import PagerLayout
 from .watch_refresh import (
     WatchRefreshContext,
     _refresh_git_status_overlay,
@@ -61,7 +61,7 @@ from .config import (
 from .editor import launch_editor
 from ..git_status import collect_git_status_overlay
 from ..source_pane.syntax import colorize_source
-from ..input import NormalKeyOps
+from ..input import NormalKeyActions
 from ..source_pane import (
     DIR_PREVIEW_INITIAL_MAX_ENTRIES,
     build_rendered_for_path,
@@ -100,7 +100,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         sys.stdout.write(content if no_color else rendered)
         return
 
-    state_bootstrap_deps = AppStateBootstrapDeps(
+    state_bootstrap = AppStateBootstrap(
         skip_gitignored_for_hidden_mode=_skip_gitignored_for_hidden_mode,
         load_show_hidden=load_show_hidden,
         load_named_marks=load_named_marks,
@@ -113,12 +113,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         tree_size_labels_default_enabled=TREE_SIZE_LABELS_DEFAULT_ENABLED,
         dir_preview_initial_max_entries=DIR_PREVIEW_INITIAL_MAX_ENTRIES,
     )
-    state = build_initial_app_state(
-        path=path,
-        style=style,
-        no_color=no_color,
-        deps=state_bootstrap_deps,
-    )
+    state = state_bootstrap.build_state(path=path, style=style, no_color=no_color)
 
     stdin_fd = sys.stdin.fileno()
     stdout_fd = sys.stdout.fileno()
@@ -129,7 +124,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         skip_gitignored_for_hidden_mode=_skip_gitignored_for_hidden_mode,
     )
     schedule_tree_filter_index_warmup = partial(index_warmup_scheduler.schedule_for_state, state)
-    layout_ops = PagerLayoutOps(
+    layout = PagerLayout(
         state,
         kitty_graphics_supported,
         help_panel_row_count=help_panel_row_count,
@@ -144,11 +139,11 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         content_search_left_pane_min_percent=CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT,
         content_search_left_pane_fallback_delta_percent=CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT,
     )
-    visible_content_rows = layout_ops.visible_content_rows
-    sync_left_width_for_tree_filter_mode = layout_ops.sync_left_width_for_tree_filter_mode
-    save_left_pane_width_for_mode = layout_ops.save_left_pane_width_for_mode
-    rebuild_screen_lines = layout_ops.rebuild_screen_lines
-    show_inline_error = layout_ops.show_inline_error
+    visible_content_rows = layout.visible_content_rows
+    sync_left_width_for_tree_filter_mode = layout.sync_left_width_for_tree_filter_mode
+    save_left_pane_width_for_mode = layout.save_left_pane_width_for_mode
+    rebuild_screen_lines = layout.rebuild_screen_lines
+    show_inline_error = layout.show_inline_error
     watch_refresh = WatchRefreshContext()
     mark_tree_watch_dirty = watch_refresh.mark_tree_dirty
     refresh_rendered_for_current_path = partial(
@@ -262,10 +257,10 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     )
     tree_mouse_callbacks = TreeMouseCallbacks(
         visible_content_rows=visible_content_rows,
-        source_pane_col_bounds=source_pane_runtime.source_pane_col_bounds,
-        source_selection_position=source_pane_runtime.source_selection_position,
+        source_pane_col_bounds=source_pane_runtime.geometry.source_pane_col_bounds,
+        source_selection_position=source_pane_runtime.geometry.source_selection_position,
         directory_preview_target_for_display_line=directory_preview_target_for_display_line,
-        max_horizontal_text_offset=source_pane_runtime.max_horizontal_text_offset,
+        max_horizontal_text_offset=source_pane_runtime.geometry.max_horizontal_text_offset,
         maybe_grow_directory_preview=maybe_grow_directory_preview,
         clear_source_selection=clear_source_selection,
         copy_selected_source_range=copy_selected_source_range,
@@ -289,7 +284,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
     current_jump_location = tree_pane_runtime.navigation.current_jump_location
     record_jump_if_changed = tree_pane_runtime.navigation.record_jump_if_changed
-    git_modified_jump_deps = GitModifiedJumpDeps(
+    git_modified_jump_navigator = GitModifiedJumpNavigator(
         state=state,
         visible_content_rows=visible_content_rows,
         refresh_git_status_overlay=refresh_git_status_overlay,
@@ -299,7 +294,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         clear_status_message=partial(_clear_status_message, state),
         set_status_message=partial(_set_status_message, state),
     )
-    jump_to_next_git_modified = git_modified_jump_deps.jump_to_next_git_modified
+    jump_to_next_git_modified = git_modified_jump_navigator.jump_to_next_git_modified
 
     schedule_tree_filter_index_warmup()
     watch_refresh.tree_signature = build_tree_watch_signature(
@@ -327,7 +322,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         mark_tree_watch_dirty,
     )
 
-    normal_key_ops = NormalKeyOps(
+    normal_key_actions = NormalKeyActions(
         current_jump_location=current_jump_location,
         record_jump_if_changed=record_jump_if_changed,
         open_symbol_picker=tree_pane_runtime.navigation.open_symbol_picker,
@@ -365,13 +360,13 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         terminal=terminal,
         stdin_fd=stdin_fd,
         timing=loop_timing,
-        layout=layout_ops,
+        layout=layout,
         source_pane=source_pane_runtime,
         tree_pane=tree_pane_runtime,
         maybe_refresh_tree_watch=maybe_refresh_tree_watch,
         maybe_refresh_git_watch=maybe_refresh_git_watch,
         refresh_git_status_overlay=refresh_git_status_overlay,
-        normal_key_ops=normal_key_ops,
+        normal_key_actions=normal_key_actions,
         save_left_pane_width=save_left_pane_width_for_mode,
         run_main_loop_fn=run_main_loop,
     )

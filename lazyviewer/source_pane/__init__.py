@@ -30,7 +30,7 @@ from .interaction import (
     SourcePaneClickResult,
     SourcePaneMouseCallbacks,
     SourcePaneMouseHandlers,
-    SourcePaneOps,
+    SourcePaneGeometry,
     copy_selected_source_range,
 )
 from .renderer import SourcePaneRenderer
@@ -93,7 +93,7 @@ __all__ = [
     "SourcePaneClickResult",
     "SourcePaneMouseCallbacks",
     "SourcePaneMouseHandlers",
-    "SourcePaneOps",
+    "SourcePaneGeometry",
     "SourcePaneRenderer",
     "copy_selected_source_range",
 ]

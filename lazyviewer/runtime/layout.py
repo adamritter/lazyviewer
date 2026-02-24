@@ -16,7 +16,7 @@ from pathlib import Path
 from .state import AppState
 
 
-class PagerLayoutOps:
+class PagerLayout:
     """Layout/state helpers for pane sizing and preview geometry."""
 
     def __init__(

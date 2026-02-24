@@ -15,7 +15,7 @@ from unittest import mock
 from lazyviewer.source_pane.diff import _ADDED_BG_SGR, _REMOVED_BG_SGR, _apply_line_background
 from lazyviewer.runtime.navigation import JumpLocation
 from lazyviewer.render import render_dual_page
-from lazyviewer.tree_pane.panels.filter import TreeFilterOps
+from lazyviewer.tree_pane.panels.filter import TreeFilterController
 from lazyviewer.search.fuzzy import (
     clear_project_files_cache,
     collect_project_file_labels,
@@ -143,7 +143,7 @@ class PerformanceBudgetTests(unittest.TestCase):
             state.tree_filter_active = True
             state.tree_filter_mode = "content"
 
-            ops = TreeFilterOps(
+            ops = TreeFilterController(
                 state=state,
                 visible_content_rows=lambda: 20,
                 rebuild_screen_lines=lambda **_kwargs: None,

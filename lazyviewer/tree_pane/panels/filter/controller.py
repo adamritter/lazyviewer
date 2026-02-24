@@ -31,7 +31,7 @@ from .limits import (
 )
 
 
-class TreeFilterOps:
+class TreeFilterController:
     """Stateful controller for tree-filter lifecycle and navigation."""
 
     def __init__(

@@ -12,7 +12,7 @@ from unittest import mock
 
 from lazyviewer.render.ansi import build_screen_lines
 from lazyviewer.tree_pane.panels.picker import (
-    NavigationPickerOps,
+    NavigationController,
     _first_display_index_for_source_line,
     _source_line_for_display_index,
 )
@@ -78,7 +78,7 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
             if state.wrap_text:
                 state.text_x = 0
 
-        ops = NavigationPickerOps(
+        ops = NavigationController(
             state=state,
             command_palette_items=(),
             rebuild_screen_lines=rebuild_screen_lines,
@@ -90,6 +90,7 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
             refresh_git_status_overlay=lambda **_kwargs: None,
             visible_content_rows=lambda: visible_rows,
             refresh_rendered_for_current_path=lambda **_kwargs: None,
+            open_tree_filter=lambda _mode: None,
         )
 
         ops.toggle_wrap_mode()
@@ -115,7 +116,7 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
             if state.wrap_text:
                 state.text_x = 0
 
-        ops = NavigationPickerOps(
+        ops = NavigationController(
             state=state,
             command_palette_items=(),
             rebuild_screen_lines=rebuild_screen_lines,
@@ -127,6 +128,7 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
             refresh_git_status_overlay=lambda **_kwargs: None,
             visible_content_rows=lambda: visible_rows,
             refresh_rendered_for_current_path=lambda **_kwargs: None,
+            open_tree_filter=lambda _mode: None,
         )
 
         ops.toggle_wrap_mode()
@@ -142,7 +144,7 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
         state.start = 5
         state.text_x = 2
 
-        ops = NavigationPickerOps(
+        ops = NavigationController(
             state=state,
             command_palette_items=(),
             rebuild_screen_lines=lambda **_kwargs: None,
@@ -154,6 +156,7 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
             refresh_git_status_overlay=lambda **_kwargs: None,
             visible_content_rows=lambda: visible_rows,
             refresh_rendered_for_current_path=lambda **_kwargs: None,
+            open_tree_filter=lambda _mode: None,
         )
 
         with mock.patch("lazyviewer.tree_pane.panels.picker.navigation.save_named_marks") as save_named_marks:

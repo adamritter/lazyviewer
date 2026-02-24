@@ -23,7 +23,7 @@ def _rendered_line_display_width(line: str) -> int:
     return col
 
 
-class SourcePaneOps:
+class SourcePaneGeometry:
     """Stateful source-pane geometry helpers bound to ``AppState``."""
 
     def __init__(

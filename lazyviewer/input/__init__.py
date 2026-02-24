@@ -8,7 +8,7 @@ from .reader import ESC_SEQUENCE_TIMEOUT_MS, _PENDING_BYTES, read_key
 from .keys import (
     KeyComboBinding,
     KeyComboRegistry,
-    NormalKeyOps,
+    NormalKeyActions,
     PickerKeyCallbacks,
     TreeFilterKeyCallbacks,
     handle_normal_key,
@@ -25,7 +25,7 @@ __all__ = [
     "KeyComboRegistry",
     "PickerKeyCallbacks",
     "TreeFilterKeyCallbacks",
-    "NormalKeyOps",
+    "NormalKeyActions",
     "handle_picker_key",
     "handle_tree_filter_key",
     "handle_normal_key",

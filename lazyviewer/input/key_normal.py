@@ -18,7 +18,7 @@ from .key_registry import KeyComboBinding, KeyComboRegistry
 
 
 @dataclass(frozen=True)
-class NormalKeyOps:
+class NormalKeyActions:
     """Injected runtime operations used by normal-mode key processing."""
 
     current_jump_location: Callable[[], JumpLocation]
@@ -53,35 +53,35 @@ def handle_normal_key(
     key: str,
     term_columns: int,
     state: AppState,
-    ops: NormalKeyOps,
+    actions: NormalKeyActions,
 ) -> bool:
     """Handle one normal-mode key and return ``True`` when app should quit."""
-    current_jump_location = ops.current_jump_location
-    record_jump_if_changed = ops.record_jump_if_changed
-    open_symbol_picker = ops.open_symbol_picker
-    reroot_to_parent = ops.reroot_to_parent
-    reroot_to_selected_target = ops.reroot_to_selected_target
-    toggle_hidden_files = ops.toggle_hidden_files
-    toggle_tree_pane = ops.toggle_tree_pane
-    toggle_wrap_mode = ops.toggle_wrap_mode
-    toggle_tree_size_labels = ops.toggle_tree_size_labels
-    toggle_help_panel = ops.toggle_help_panel
-    toggle_git_features = ops.toggle_git_features
-    launch_lazygit = ops.launch_lazygit
-    handle_tree_mouse_wheel = ops.handle_tree_mouse_wheel
-    handle_tree_mouse_click = ops.handle_tree_mouse_click
-    move_tree_selection = ops.move_tree_selection
-    rebuild_tree_entries = ops.rebuild_tree_entries
-    preview_selected_entry = ops.preview_selected_entry
-    refresh_rendered_for_current_path = ops.refresh_rendered_for_current_path
-    refresh_git_status_overlay = ops.refresh_git_status_overlay
-    maybe_grow_directory_preview = ops.maybe_grow_directory_preview
-    max_horizontal_text_offset = ops.max_horizontal_text_offset
-    visible_content_rows = ops.visible_content_rows
-    rebuild_screen_lines = ops.rebuild_screen_lines
-    mark_tree_watch_dirty = ops.mark_tree_watch_dirty
-    launch_editor_for_path = ops.launch_editor_for_path
-    jump_to_next_git_modified = ops.jump_to_next_git_modified
+    current_jump_location = actions.current_jump_location
+    record_jump_if_changed = actions.record_jump_if_changed
+    open_symbol_picker = actions.open_symbol_picker
+    reroot_to_parent = actions.reroot_to_parent
+    reroot_to_selected_target = actions.reroot_to_selected_target
+    toggle_hidden_files = actions.toggle_hidden_files
+    toggle_tree_pane = actions.toggle_tree_pane
+    toggle_wrap_mode = actions.toggle_wrap_mode
+    toggle_tree_size_labels = actions.toggle_tree_size_labels
+    toggle_help_panel = actions.toggle_help_panel
+    toggle_git_features = actions.toggle_git_features
+    launch_lazygit = actions.launch_lazygit
+    handle_tree_mouse_wheel = actions.handle_tree_mouse_wheel
+    handle_tree_mouse_click = actions.handle_tree_mouse_click
+    move_tree_selection = actions.move_tree_selection
+    rebuild_tree_entries = actions.rebuild_tree_entries
+    preview_selected_entry = actions.preview_selected_entry
+    refresh_rendered_for_current_path = actions.refresh_rendered_for_current_path
+    refresh_git_status_overlay = actions.refresh_git_status_overlay
+    maybe_grow_directory_preview = actions.maybe_grow_directory_preview
+    max_horizontal_text_offset = actions.max_horizontal_text_offset
+    visible_content_rows = actions.visible_content_rows
+    rebuild_screen_lines = actions.rebuild_screen_lines
+    mark_tree_watch_dirty = actions.mark_tree_watch_dirty
+    launch_editor_for_path = actions.launch_editor_for_path
+    jump_to_next_git_modified = actions.jump_to_next_git_modified
     key_lower = key.lower()
 
     def set_directory_expanded_state(resolved: Path, expanded: bool) -> None:
