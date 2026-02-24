@@ -23,7 +23,7 @@ from lazyviewer.git_status import (
     GIT_STATUS_UNTRACKED,
     collect_git_status_overlay,
 )
-from lazyviewer.tree import TreeEntry, format_tree_entry
+from lazyviewer.tree_pane.model import TreeEntry, format_tree_entry
 
 
 class GitDiffPreviewColorContrastTests(unittest.TestCase):

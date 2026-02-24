@@ -20,7 +20,7 @@ from .help import (
     help_panel_row_count,
     render_help_page,
 )
-from ..tree import TreeEntry, clamp_left_width
+from ..tree_pane.model import TreeEntry, clamp_left_width
 
 
 @dataclass

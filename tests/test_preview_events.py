@@ -8,7 +8,7 @@ from pathlib import Path
 
 from lazyviewer.source_pane.events import directory_preview_target_for_display_line
 from lazyviewer.state import AppState
-from lazyviewer.tree import TreeEntry
+from lazyviewer.tree_pane.model import TreeEntry
 
 
 def _build_state_for_rendered_directory(root: Path, rendered: str) -> AppState:

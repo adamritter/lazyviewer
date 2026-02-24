@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 from lazyviewer.search.fuzzy import fuzzy_match_file_index
-from lazyviewer.tree import filter_tree_entries_for_files
+from lazyviewer.tree_pane.model import filter_tree_entries_for_files
 
 
 class _CountingList(list[str]):

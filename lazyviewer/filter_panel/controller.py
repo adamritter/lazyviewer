@@ -22,7 +22,7 @@ from ..search.fuzzy import (
     fuzzy_match_label_index,
 )
 from ..state import AppState
-from ..tree import (
+from ..tree_pane.model import (
     build_tree_entries,
     filter_tree_entries_for_content_matches,
     filter_tree_entries_for_files,

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from ..navigation import JumpLocation
 from ..state import AppState
-from ..tree import (
+from ..tree_pane.model import (
     next_directory_entry_index,
     next_index_after_directory_subtree,
     next_opened_directory_entry_index,

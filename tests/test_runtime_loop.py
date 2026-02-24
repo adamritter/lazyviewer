@@ -10,7 +10,7 @@ from unittest import mock
 from lazyviewer.runtime import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
 from lazyviewer.state import AppState
 from lazyviewer.terminal import TerminalController
-from lazyviewer.tree import TreeEntry
+from lazyviewer.tree_pane.model import TreeEntry
 
 
 def _make_state() -> AppState:

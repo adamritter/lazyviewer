@@ -13,7 +13,7 @@ from pathlib import Path
 from lazyviewer.ansi import ANSI_ESCAPE_RE
 from lazyviewer.search.content import ContentMatch
 from lazyviewer.search.fuzzy import fuzzy_match_file_index, to_project_relative
-from lazyviewer.tree import (
+from lazyviewer.tree_pane.model import (
     TreeEntry,
     build_tree_entries,
     filter_tree_entries_for_content_matches,

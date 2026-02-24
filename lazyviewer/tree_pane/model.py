@@ -10,9 +10,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .git_status import format_git_status_badges
-from .gitignore import get_gitignore_matcher
-from .search.content import ContentMatch
+from ..git_status import format_git_status_badges
+from ..gitignore import get_gitignore_matcher
+from ..search.content import ContentMatch
 
 
 @dataclass(frozen=True)

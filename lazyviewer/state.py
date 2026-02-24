@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .navigation import JumpHistory, JumpLocation
-from .tree import TreeEntry
+from .tree_pane.model import TreeEntry
 
 
 @dataclass

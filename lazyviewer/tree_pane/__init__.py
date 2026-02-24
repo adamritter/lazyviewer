@@ -1,10 +1,9 @@
-"""Tree-pane UI components."""
+"""Tree-pane modules.
 
-from .events import TreePaneMouseCallbacks, TreePaneMouseHandlers
-from .rendering import TreePaneRenderer
+Import concrete modules directly:
+- ``lazyviewer.tree_pane.model``
+- ``lazyviewer.tree_pane.rendering``
+- ``lazyviewer.tree_pane.events``
+"""
 
-__all__ = [
-    "TreePaneMouseCallbacks",
-    "TreePaneMouseHandlers",
-    "TreePaneRenderer",
-]
+__all__: list[str] = []
