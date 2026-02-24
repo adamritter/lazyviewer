@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ...gitignore import get_gitignore_matcher
+from ..gitignore import get_gitignore_matcher
 from .types import TreeEntry
 
 

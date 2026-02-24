@@ -21,11 +21,11 @@ from .directory import (
     DIR_PREVIEW_GROWTH_STEP,
     DIR_PREVIEW_HARD_MAX_ENTRIES,
     DIR_PREVIEW_INITIAL_MAX_ENTRIES,
-    TREE_SIZE_LABEL_MIN_BYTES,
     _DIR_PREVIEW_CACHE,
     build_directory_preview,
     clear_directory_preview_cache,
 )
+from ..tree_model.rendering import TREE_SIZE_LABEL_MIN_BYTES
 from .interaction import (
     SourcePaneClickResult,
     SourcePaneMouseCallbacks,

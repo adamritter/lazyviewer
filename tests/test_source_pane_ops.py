@@ -9,7 +9,7 @@ from unittest import mock
 
 from lazyviewer.runtime.state import AppState
 from lazyviewer.source_pane.interaction.ops import SourcePaneOps
-from lazyviewer.tree_pane.model import TreeEntry
+from lazyviewer.tree_model import TreeEntry
 
 
 def _make_state(lines: list[str]) -> AppState:

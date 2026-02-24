@@ -73,7 +73,7 @@ from ..tree_pane.panels.picker import NavigationPickerDeps, NavigationPickerOps
 from ..tree_pane.panels.filter import TreeFilterDeps, TreeFilterOps
 from ..search.fuzzy import collect_project_file_labels
 from .terminal import TerminalController
-from ..tree_pane.model import (
+from ..tree_model import (
     build_tree_entries,
     clamp_left_width,
     compute_left_width,

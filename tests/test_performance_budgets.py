@@ -22,7 +22,7 @@ from lazyviewer.search.fuzzy import (
     fuzzy_match_label_index,
 )
 from lazyviewer.runtime.state import AppState
-from lazyviewer.tree_pane.model import TreeEntry, build_tree_entries
+from lazyviewer.tree_model import TreeEntry, build_tree_entries
 
 
 def _make_state(root: Path) -> AppState:

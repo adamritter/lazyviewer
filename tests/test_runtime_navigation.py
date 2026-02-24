@@ -18,7 +18,7 @@ from lazyviewer.tree_pane.panels.picker import (
     _source_line_for_display_index,
 )
 from lazyviewer.runtime.state import AppState
-from lazyviewer.tree_pane.model import TreeEntry
+from lazyviewer.tree_model import TreeEntry
 
 
 def _make_state(*, wrap_text: bool, rendered: str, visible_rows: int, width: int) -> AppState:

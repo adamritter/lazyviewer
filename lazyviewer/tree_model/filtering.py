@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
-from ...search.content import ContentMatch
+from ..search.content import ContentMatch
 from .build import safe_file_size
 from .types import TreeEntry
 

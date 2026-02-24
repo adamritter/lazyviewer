@@ -7,6 +7,7 @@ and git diff preview integration boundaries.
 from __future__ import annotations
 
 import re
+import os
 import shutil
 import subprocess
 import tempfile
@@ -113,6 +114,34 @@ class PreviewBehaviorTests(unittest.TestCase):
             )
             second_plain = strip_ansi(second_rendered)
             self.assertIn("new.txt", second_plain)
+
+    def test_build_directory_preview_invalidates_cache_when_file_summary_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            target = root / "module.py"
+            target.write_text("# alpha summary\nvalue = 1\n", encoding="utf-8")
+
+            first_rendered, _ = preview.build_directory_preview(
+                root,
+                show_hidden=False,
+                max_depth=2,
+                max_entries=100,
+            )
+            first_plain = strip_ansi(first_rendered)
+            self.assertIn("module.py  -- alpha summary", first_plain)
+
+            previous = target.stat()
+            target.write_text("# bravo summary\nvalue = 1\n", encoding="utf-8")
+            os.utime(target, ns=(int(previous.st_atime_ns), int(previous.st_mtime_ns) + 1_000_000))
+
+            second_rendered, _ = preview.build_directory_preview(
+                root,
+                show_hidden=False,
+                max_depth=2,
+                max_entries=100,
+            )
+            second_plain = strip_ansi(second_rendered)
+            self.assertIn("module.py  -- bravo summary", second_plain)
 
     def test_build_directory_preview_appends_git_status_badges(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

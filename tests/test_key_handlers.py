@@ -20,7 +20,7 @@ from lazyviewer.input import (
 )
 from lazyviewer.runtime.navigation import JumpLocation
 from lazyviewer.runtime.state import AppState
-from lazyviewer.tree_pane.model import TreeEntry
+from lazyviewer.tree_model import TreeEntry
 
 
 def _make_state() -> AppState:

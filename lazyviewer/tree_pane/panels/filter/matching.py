@@ -12,7 +12,7 @@ from ....search.fuzzy import (
     collect_project_file_labels,
     fuzzy_match_label_index,
 )
-from ...model import (
+from ....tree_model import (
     build_tree_entries,
     filter_tree_entries_for_content_matches,
     filter_tree_entries_for_files,

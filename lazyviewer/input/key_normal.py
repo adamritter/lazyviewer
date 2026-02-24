@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ..runtime.navigation import JumpLocation
 from ..runtime.state import AppState
-from ..tree_pane.model import (
+from ..tree_model import (
     next_directory_entry_index,
     next_index_after_directory_subtree,
     next_opened_directory_entry_index,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ...git_status import format_git_status_badges
+from ..git_status import format_git_status_badges
 from .types import TreeEntry
 
 TREE_SIZE_LABEL_MIN_BYTES = 10 * 1024

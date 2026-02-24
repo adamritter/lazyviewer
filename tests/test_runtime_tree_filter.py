@@ -15,7 +15,7 @@ from unittest import mock
 from lazyviewer.runtime.navigation import JumpLocation
 from lazyviewer.tree_pane.panels.filter import TreeFilterDeps, TreeFilterOps
 from lazyviewer.runtime.state import AppState
-from lazyviewer.tree_pane.model import TreeEntry
+from lazyviewer.tree_model import TreeEntry
 
 
 def _make_state(root: Path) -> AppState:
