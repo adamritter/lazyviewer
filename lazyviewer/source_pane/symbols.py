@@ -8,181 +8,31 @@ from __future__ import annotations
 
 import re
 from collections import OrderedDict
-from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from .syntax import read_text
-
-LANGUAGE_BY_SUFFIX: dict[str, str] = {
-    ".py": "python",
-    ".pyi": "python",
-    ".pyw": "python",
-    ".js": "javascript",
-    ".mjs": "javascript",
-    ".cjs": "javascript",
-    ".jsx": "javascript",
-    ".ts": "typescript",
-    ".tsx": "tsx",
-    ".go": "go",
-    ".rs": "rust",
-    ".java": "java",
-    ".c": "c",
-    ".h": "c",
-    ".cc": "cpp",
-    ".cpp": "cpp",
-    ".cxx": "cpp",
-    ".hpp": "cpp",
-    ".hxx": "cpp",
-    ".rb": "ruby",
-    ".php": "php",
-    ".swift": "swift",
-    ".kt": "kotlin",
-    ".scala": "scala",
-    ".lua": "lua",
-    ".sh": "bash",
-    ".bash": "bash",
-    ".zsh": "bash",
-}
-
-FUNCTION_NODE_TYPES = {
-    "function_definition",
-    "function_declaration",
-    "function_item",
-    "method_definition",
-    "method_declaration",
-}
-CLASS_NODE_TYPES = {
-    "class_definition",
-    "class_declaration",
-    "class_specifier",
-}
-IMPORT_NODE_TYPES = {
-    "import_statement",
-    "import_from_statement",
-    "import_declaration",
-    "using_directive",
-    "using_declaration",
-}
-IDENTIFIER_NODE_TYPES = {
-    "identifier",
-    "type_identifier",
-    "property_identifier",
-    "field_identifier",
-    "namespace_identifier",
-}
-
-MISSING_PARSER_ERROR = "Tree-sitter parser package not found. Install tree-sitter-languages."
-SYMBOL_CONTEXT_CACHE_MAX = 128
-
-_FALLBACK_PATTERNS_BY_LANGUAGE: dict[str, tuple[tuple[str, re.Pattern[str]], ...]] = {
-    "python": (
-        ("class", re.compile(r"^\s*class\s+(?P<name>[A-Za-z_][\w]*)")),
-        ("fn", re.compile(r"^\s*(?:async\s+)?def\s+(?P<name>[A-Za-z_][\w]*)")),
-    ),
-    "javascript": (
-        ("class", re.compile(r"^\s*(?:export\s+)?class\s+(?P<name>[A-Za-z_$][\w$]*)")),
-        (
-            "fn",
-            re.compile(r"^\s*(?:export\s+)?(?:async\s+)?function\s+(?P<name>[A-Za-z_$][\w$]*)"),
-        ),
-        (
-            "fn",
-            re.compile(
-                r"^\s*(?:export\s+)?(?:const|let|var)\s+(?P<name>[A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>"
-            ),
-        ),
-    ),
-    "typescript": (
-        ("class", re.compile(r"^\s*(?:export\s+)?class\s+(?P<name>[A-Za-z_$][\w$]*)")),
-        (
-            "fn",
-            re.compile(r"^\s*(?:export\s+)?(?:async\s+)?function\s+(?P<name>[A-Za-z_$][\w$]*)"),
-        ),
-        (
-            "fn",
-            re.compile(
-                r"^\s*(?:export\s+)?(?:const|let|var)\s+(?P<name>[A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>"
-            ),
-        ),
-    ),
-    "tsx": (
-        ("class", re.compile(r"^\s*(?:export\s+)?class\s+(?P<name>[A-Za-z_$][\w$]*)")),
-        (
-            "fn",
-            re.compile(r"^\s*(?:export\s+)?(?:async\s+)?function\s+(?P<name>[A-Za-z_$][\w$]*)"),
-        ),
-        (
-            "fn",
-            re.compile(
-                r"^\s*(?:export\s+)?(?:const|let|var)\s+(?P<name>[A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>"
-            ),
-        ),
-    ),
-    "go": (
-        ("class", re.compile(r"^\s*type\s+(?P<name>[A-Za-z_][\w]*)\s+(?:struct|interface)\b")),
-        ("fn", re.compile(r"^\s*func\s+(?:\([^)]*\)\s*)?(?P<name>[A-Za-z_][\w]*)\s*\(")),
-    ),
-    "rust": (
-        ("class", re.compile(r"^\s*(?:pub\s+)?(?:struct|enum|trait)\s+(?P<name>[A-Za-z_][\w]*)\b")),
-        ("fn", re.compile(r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+(?P<name>[A-Za-z_][\w]*)\s*\(")),
-    ),
-    "java": (
-        ("class", re.compile(r"^\s*(?:public\s+|private\s+|protected\s+)?class\s+(?P<name>[A-Za-z_][\w]*)\b")),
-    ),
-    "ruby": (
-        ("class", re.compile(r"^\s*class\s+(?P<name>[A-Za-z_][\w:]*)")),
-        ("fn", re.compile(r"^\s*def\s+(?P<name>[A-Za-z_][\w!?=]*)")),
-    ),
-    "php": (
-        ("class", re.compile(r"^\s*(?:final\s+|abstract\s+)?class\s+(?P<name>[A-Za-z_][\w]*)")),
-        ("fn", re.compile(r"^\s*(?:public|private|protected|static|final|abstract|\s)*function\s+(?P<name>[A-Za-z_][\w]*)")),
-    ),
-    "swift": (
-        ("class", re.compile(r"^\s*(?:public\s+|private\s+|internal\s+|open\s+)?class\s+(?P<name>[A-Za-z_][\w]*)")),
-        ("fn", re.compile(r"^\s*(?:public\s+|private\s+|internal\s+|open\s+)?func\s+(?P<name>[A-Za-z_][\w]*)")),
-    ),
-    "kotlin": (
-        ("class", re.compile(r"^\s*(?:public\s+|private\s+|internal\s+|open\s+)?class\s+(?P<name>[A-Za-z_][\w]*)")),
-        ("fn", re.compile(r"^\s*(?:public\s+|private\s+|internal\s+|open\s+|suspend\s+)*fun\s+(?P<name>[A-Za-z_][\w]*)")),
-    ),
-    "scala": (
-        ("class", re.compile(r"^\s*(?:case\s+)?class\s+(?P<name>[A-Za-z_][\w]*)")),
-        ("fn", re.compile(r"^\s*def\s+(?P<name>[A-Za-z_][\w]*)")),
-    ),
-    "lua": (
-        ("fn", re.compile(r"^\s*function\s+(?P<name>[A-Za-z_][\w\.:]*)")),
-    ),
-    "bash": (
-        ("fn", re.compile(r"^\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{")),
-        ("fn", re.compile(r"^\s*function\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b")),
-    ),
-}
-
-_GENERIC_FALLBACK_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("class", re.compile(r"^\s*(?:export\s+)?class\s+(?P<name>[A-Za-z_][\w$]*)")),
-    ("class", re.compile(r"^\s*(?:pub\s+)?(?:struct|enum|trait)\s+(?P<name>[A-Za-z_][\w]*)\b")),
-    ("fn", re.compile(r"^\s*(?:async\s+)?def\s+(?P<name>[A-Za-z_][\w]*)")),
-    ("fn", re.compile(r"^\s*(?:export\s+)?(?:async\s+)?function\s+(?P<name>[A-Za-z_$][\w$]*)")),
-    ("fn", re.compile(r"^\s*func\s+(?:\([^)]*\)\s*)?(?P<name>[A-Za-z_][\w]*)\s*\(")),
-    ("fn", re.compile(r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+(?P<name>[A-Za-z_][\w]*)\s*\(")),
+from .symbols_config import (
+    CLASS_NODE_TYPES,
+    FALLBACK_PATTERNS_BY_LANGUAGE as _FALLBACK_PATTERNS_BY_LANGUAGE,
+    FUNCTION_NODE_TYPES,
+    GENERIC_FALLBACK_PATTERNS as _GENERIC_FALLBACK_PATTERNS,
+    IDENTIFIER_NODE_TYPES,
+    IMPORT_NODE_TYPES,
+    LANGUAGE_BY_SUFFIX,
+    MISSING_PARSER_ERROR,
+    SYMBOL_CONTEXT_CACHE_MAX,
 )
+from .symbols_sticky import (
+    collect_sticky_symbol_headers as _collect_sticky_symbol_headers,
+)
+from .symbols_sticky import next_symbol_start_line as _next_symbol_start_line
+from .symbols_types import SymbolEntry
+from .syntax import read_text
 
 _SYMBOL_CONTEXT_CACHE: OrderedDict[
     tuple[str, int, int, int],
     tuple[tuple[SymbolEntry, ...], str | None],
 ] = OrderedDict()
-
-
-@dataclass(frozen=True)
-class SymbolEntry:
-    """Normalized symbol record used by picker and sticky-header features."""
-
-    kind: str
-    name: str
-    line: int
-    column: int
-    label: str
 
 
 def _normalize_whitespace(text: str) -> str:
@@ -415,94 +265,21 @@ def clear_symbol_context_cache() -> None:
     _SYMBOL_CONTEXT_CACHE.clear()
 
 
-def _leading_indent_columns(text: str) -> int:
-    """Return leading indentation width where tabs count as four columns."""
-    count = 0
-    for ch in text:
-        if ch == " ":
-            count += 1
-            continue
-        if ch == "\t":
-            count += 4
-            continue
-        break
-    return count
-
-
-def _enclosing_sticky_symbol_chain(
-    candidates: list[SymbolEntry],
-    source_lines: list[str],
-) -> list[SymbolEntry]:
-    """Reduce candidates to indentation-based enclosing symbol stack."""
-    if not candidates:
-        return []
-
-    if not source_lines:
-        return candidates
-
-    stack: list[tuple[SymbolEntry, int]] = []
-    for symbol in candidates:
-        line_index = symbol.line
-        if 0 <= line_index < len(source_lines):
-            indent = _leading_indent_columns(source_lines[line_index])
-        else:
-            indent = 0
-
-        while stack and indent <= stack[-1][1]:
-            stack.pop()
-        stack.append((symbol, indent))
-
-    return [symbol for symbol, _indent in stack]
-
-
 def collect_sticky_symbol_headers(
     path: Path,
     visible_start_line: int,
     max_headers: int = 1,
 ) -> list[SymbolEntry]:
     """Return enclosing class/function headers above the visible top line."""
-    if max_headers <= 0:
-        return []
-    start_line = max(1, int(visible_start_line))
-    if start_line <= 1:
-        return []
-
-    symbols, error = _collect_symbols_cached(path, max_symbols=4000)
-    if error is not None or not symbols:
-        return []
-
-    all_candidates = [
-        symbol
-        for symbol in symbols
-        if symbol.kind in {"class", "fn"} and (symbol.line + 1) < start_line
-    ]
-    if not all_candidates:
-        return []
-
-    try:
-        source_lines = read_text(path).splitlines()
-    except Exception:
-        source_lines = []
-
-    chain = _enclosing_sticky_symbol_chain(all_candidates, source_lines)
-    if not chain:
-        return []
-
-    if max_headers >= len(chain):
-        return chain
-    return chain[-max_headers:]
-
+    return _collect_sticky_symbol_headers(
+        path,
+        visible_start_line,
+        max_headers,
+        collect_symbols_cached=_collect_symbols_cached,
+        read_text_fn=read_text,
+    )
 
 
 def next_symbol_start_line(path: Path, after_line: int) -> int | None:
     """Return the next class/function declaration line (1-based) after ``after_line``."""
-    start_line = max(1, int(after_line))
-    symbols, error = _collect_symbols_cached(path, max_symbols=4000)
-    if error is not None or not symbols:
-        return None
-
-    for symbol in symbols:
-        symbol_line = symbol.line + 1
-        if symbol.kind in {"class", "fn"} and symbol_line > start_line:
-            return symbol_line
-    return None
+    return _next_symbol_start_line(path, after_line, collect_symbols_cached=_collect_symbols_cached)
