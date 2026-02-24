@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Union
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,7 @@ class DirectoryEntry:
     children: tuple["FileTreeEntry", ...] = ()
 
 
-FileTreeEntry = DirectoryEntry | FileEntry
+FileTreeEntry = Union[DirectoryEntry, FileEntry]
 
 
 __all__ = [
