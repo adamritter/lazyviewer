@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from ..input import NormalKeyContext, NormalKeyHandler
+from ..input import NormalKeyHandler
 from ..source_pane.pane import SourcePane
 from ..tree_pane.pane import TreePane
 from .layout import PagerLayout
@@ -63,37 +63,7 @@ class App:
         self.jump_to_next_git_modified = jump_to_next_git_modified
         self.save_left_pane_width = save_left_pane_width
         self._run_main_loop = run_main_loop_fn
-        self._normal_key_handler = NormalKeyHandler(
-            NormalKeyContext(
-                state=self.state,
-                current_jump_location=self.tree_pane.navigation.current_jump_location,
-                record_jump_if_changed=self.tree_pane.navigation.record_jump_if_changed,
-                open_symbol_picker=self.tree_pane.picker_panel.open_symbol_picker,
-                reroot_to_parent=self.tree_pane.navigation.reroot_to_parent,
-                reroot_to_selected_target=self.tree_pane.navigation.reroot_to_selected_target,
-                toggle_hidden_files=self.tree_pane.navigation.toggle_hidden_files,
-                toggle_tree_pane=self.tree_pane.navigation.toggle_tree_pane,
-                toggle_wrap_mode=self.tree_pane.navigation.toggle_wrap_mode,
-                toggle_tree_size_labels=self.toggle_tree_size_labels,
-                toggle_help_panel=self.tree_pane.navigation.toggle_help_panel,
-                toggle_git_features=self.toggle_git_features,
-                launch_lazygit=self.launch_lazygit,
-                handle_tree_mouse_wheel=self.handle_tree_mouse_wheel,
-                handle_tree_mouse_click=self.handle_tree_mouse_click,
-                move_tree_selection=self.tree_pane.filter.move_tree_selection,
-                rebuild_tree_entries=self.tree_pane.filter.rebuild_tree_entries,
-                preview_selected_entry=self.preview_selected_entry,
-                refresh_rendered_for_current_path=self.refresh_rendered_for_current_path,
-                refresh_git_status_overlay=self.refresh_git_status_overlay,
-                maybe_grow_directory_preview=self.maybe_grow_directory_preview,
-                visible_content_rows=self.source_pane.geometry.visible_content_rows,
-                rebuild_screen_lines=self.layout.rebuild_screen_lines,
-                mark_tree_watch_dirty=self.mark_tree_watch_dirty,
-                launch_editor_for_path=self.launch_editor_for_path,
-                jump_to_next_git_modified=self.jump_to_next_git_modified,
-                max_horizontal_text_offset=self.source_pane.geometry.max_horizontal_text_offset,
-            )
-        )
+        self._normal_key_handler = NormalKeyHandler(self)
 
     def handle_tree_mouse_wheel(self, mouse_key: str) -> bool:
         """Forward wheel events to source-pane controller."""

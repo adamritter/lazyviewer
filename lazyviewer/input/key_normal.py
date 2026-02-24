@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 from ..runtime.navigation import JumpLocation
 from ..runtime.state import AppState
@@ -50,15 +51,64 @@ class NormalKeyContext:
     max_horizontal_text_offset: Callable[[], int] = default_max_horizontal_text_offset
 
 
+class _ContextHostAdapter:
+    """Adapt legacy ``NormalKeyContext`` to the app-style UI host interface."""
+
+    def __init__(self, context: NormalKeyContext) -> None:
+        self._context = context
+        self.state = context.state
+        self.toggle_tree_size_labels = context.toggle_tree_size_labels
+        self.toggle_git_features = context.toggle_git_features
+        self.launch_lazygit = context.launch_lazygit
+        self.preview_selected_entry = context.preview_selected_entry
+        self.refresh_rendered_for_current_path = context.refresh_rendered_for_current_path
+        self.refresh_git_status_overlay = context.refresh_git_status_overlay
+        self.maybe_grow_directory_preview = context.maybe_grow_directory_preview
+        self.mark_tree_watch_dirty = context.mark_tree_watch_dirty
+        self.launch_editor_for_path = context.launch_editor_for_path
+        self.jump_to_next_git_modified = context.jump_to_next_git_modified
+        self.tree_pane = SimpleNamespace(
+            picker_panel=SimpleNamespace(open_symbol_picker=context.open_symbol_picker),
+            navigation=SimpleNamespace(
+                current_jump_location=context.current_jump_location,
+                record_jump_if_changed=context.record_jump_if_changed,
+                reroot_to_parent=context.reroot_to_parent,
+                reroot_to_selected_target=context.reroot_to_selected_target,
+                toggle_hidden_files=context.toggle_hidden_files,
+                toggle_tree_pane=context.toggle_tree_pane,
+                toggle_wrap_mode=context.toggle_wrap_mode,
+                toggle_help_panel=context.toggle_help_panel,
+            ),
+            filter=SimpleNamespace(
+                move_tree_selection=context.move_tree_selection,
+                rebuild_tree_entries=context.rebuild_tree_entries,
+            ),
+        )
+        self.source_pane = SimpleNamespace(
+            geometry=SimpleNamespace(
+                visible_content_rows=context.visible_content_rows,
+                max_horizontal_text_offset=context.max_horizontal_text_offset,
+            ),
+            handle_tree_mouse_wheel=context.handle_tree_mouse_wheel,
+        )
+        self.layout = SimpleNamespace(rebuild_screen_lines=context.rebuild_screen_lines)
+
+    def handle_tree_mouse_click(self, mouse_key: str) -> bool:
+        return self._context.handle_tree_mouse_click(mouse_key)
+
+    def handle_tree_mouse_wheel(self, mouse_key: str) -> bool:
+        return self._context.handle_tree_mouse_wheel(mouse_key)
+
+
 class NormalKeyHandler:
     """Reusable normal-mode handler with bound runtime dependencies."""
 
-    def __init__(self, context: NormalKeyContext) -> None:
-        self.context = context
+    def __init__(self, host: object) -> None:
+        self.host = _ContextHostAdapter(host) if isinstance(host, NormalKeyContext) else host
 
     def handle(self, key: str, term_columns: int) -> bool:
         """Handle one normal-mode key and return ``True`` when app should quit."""
-        return handle_normal_key(key, term_columns, self.context)
+        return _handle_normal_key(key, term_columns, self.host)
 
 
 def handle_normal_key(
@@ -67,33 +117,54 @@ def handle_normal_key(
     context: NormalKeyContext,
 ) -> bool:
     """Handle one normal-mode key and return ``True`` when app should quit."""
-    state = context.state
-    current_jump_location = context.current_jump_location
-    record_jump_if_changed = context.record_jump_if_changed
-    open_symbol_picker = context.open_symbol_picker
-    reroot_to_parent = context.reroot_to_parent
-    reroot_to_selected_target = context.reroot_to_selected_target
-    toggle_hidden_files = context.toggle_hidden_files
-    toggle_tree_pane = context.toggle_tree_pane
-    toggle_wrap_mode = context.toggle_wrap_mode
-    toggle_tree_size_labels = context.toggle_tree_size_labels
-    toggle_help_panel = context.toggle_help_panel
-    toggle_git_features = context.toggle_git_features
-    launch_lazygit = context.launch_lazygit
-    handle_tree_mouse_wheel = context.handle_tree_mouse_wheel
-    handle_tree_mouse_click = context.handle_tree_mouse_click
-    move_tree_selection = context.move_tree_selection
-    rebuild_tree_entries = context.rebuild_tree_entries
-    preview_selected_entry = context.preview_selected_entry
-    refresh_rendered_for_current_path = context.refresh_rendered_for_current_path
-    refresh_git_status_overlay = context.refresh_git_status_overlay
-    maybe_grow_directory_preview = context.maybe_grow_directory_preview
-    visible_content_rows = context.visible_content_rows
-    rebuild_screen_lines = context.rebuild_screen_lines
-    mark_tree_watch_dirty = context.mark_tree_watch_dirty
-    launch_editor_for_path = context.launch_editor_for_path
-    jump_to_next_git_modified = context.jump_to_next_git_modified
-    max_horizontal_text_offset = context.max_horizontal_text_offset
+    return NormalKeyHandler(context).handle(key, term_columns)
+
+
+def _handle_normal_key(
+    key: str,
+    term_columns: int,
+    host: object,
+) -> bool:
+    """Handle one normal-mode key and return ``True`` when app should quit."""
+    state = host.state
+    tree_pane = host.tree_pane
+    source_pane = host.source_pane
+    navigation = host.tree_pane.navigation
+    current_jump_location = navigation.current_jump_location
+    record_jump_if_changed = navigation.record_jump_if_changed
+    open_symbol_picker = tree_pane.picker_panel.open_symbol_picker
+    reroot_to_parent = navigation.reroot_to_parent
+    reroot_to_selected_target = navigation.reroot_to_selected_target
+    toggle_hidden_files = navigation.toggle_hidden_files
+    toggle_tree_pane = navigation.toggle_tree_pane
+    toggle_wrap_mode = navigation.toggle_wrap_mode
+    toggle_tree_size_labels = host.toggle_tree_size_labels
+    toggle_help_panel = navigation.toggle_help_panel
+    toggle_git_features = host.toggle_git_features
+    launch_lazygit = host.launch_lazygit
+    handle_tree_mouse_wheel = getattr(host, "handle_tree_mouse_wheel", source_pane.handle_tree_mouse_wheel)
+    handle_tree_mouse_click = getattr(host, "handle_tree_mouse_click", None)
+    if handle_tree_mouse_click is None:
+        def handle_tree_mouse_click(mouse_key: str) -> bool:
+            source_result = source_pane.handle_tree_mouse_click(mouse_key)
+            if source_result.handled:
+                return True
+            if source_result.route_to_tree:
+                return tree_pane.handle_tree_mouse_click(mouse_key)
+            return False
+
+    move_tree_selection = tree_pane.filter.move_tree_selection
+    rebuild_tree_entries = tree_pane.filter.rebuild_tree_entries
+    preview_selected_entry = host.preview_selected_entry
+    refresh_rendered_for_current_path = host.refresh_rendered_for_current_path
+    refresh_git_status_overlay = host.refresh_git_status_overlay
+    maybe_grow_directory_preview = host.maybe_grow_directory_preview
+    visible_content_rows = source_pane.geometry.visible_content_rows
+    rebuild_screen_lines = host.layout.rebuild_screen_lines
+    mark_tree_watch_dirty = host.mark_tree_watch_dirty
+    launch_editor_for_path = host.launch_editor_for_path
+    jump_to_next_git_modified = host.jump_to_next_git_modified
+    max_horizontal_text_offset = source_pane.geometry.max_horizontal_text_offset
     key_lower = key.lower()
 
     def set_directory_expanded_state(resolved: Path, expanded: bool) -> None:
