@@ -13,10 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..input import read_key
-from ..input import (
-    handle_picker_key,
-    handle_tree_filter_key,
-)
 from ..render import RenderContext, render_dual_page_context
 from .state import AppState
 from .terminal import TerminalController
@@ -131,8 +127,16 @@ def run_main_loop(
             "tick_source_selection_drag",
             source_pane.tick_source_selection_drag,
         )
-        picker_key_dispatch = getattr(callbacks, "handle_picker_key", None)
-        tree_filter_key_dispatch = getattr(callbacks, "handle_tree_filter_key", None)
+        picker_key_dispatch = getattr(callbacks, "handle_picker_key", tree_pane.handle_picker_key)
+        tree_filter_key_dispatch = getattr(
+            callbacks,
+            "handle_tree_filter_key",
+            lambda key: tree_pane.handle_tree_filter_key(
+                key,
+                handle_tree_mouse_wheel=handle_tree_mouse_wheel,
+                handle_tree_mouse_click=handle_tree_mouse_click,
+            ),
+        )
     else:
         get_tree_filter_loading_until = callbacks.get_tree_filter_loading_until
         tree_view_rows = callbacks.tree_view_rows
@@ -161,8 +165,35 @@ def run_main_loop(
         jump_back_in_history = callbacks.jump_back_in_history
         jump_forward_in_history = callbacks.jump_forward_in_history
         tick_source_selection_drag = callbacks.tick_source_selection_drag
-        picker_key_dispatch = None
-        tree_filter_key_dispatch = None
+        from ..input import handle_picker_key as _fallback_handle_picker_key
+        from ..input import handle_tree_filter_key as _fallback_handle_tree_filter_key
+
+        def picker_key_dispatch(key: str, double_click_seconds: float) -> tuple[bool, bool]:
+            return _fallback_handle_picker_key(
+                key,
+                state,
+                double_click_seconds,
+                close_picker=close_picker,
+                refresh_command_picker_matches=refresh_command_picker_matches,
+                activate_picker_selection=activate_picker_selection,
+                visible_content_rows=visible_content_rows,
+                refresh_active_picker_matches=refresh_active_picker_matches,
+            )
+
+        def tree_filter_key_dispatch(key: str) -> bool:
+            return _fallback_handle_tree_filter_key(
+                key,
+                state,
+                handle_tree_mouse_wheel=handle_tree_mouse_wheel,
+                handle_tree_mouse_click=handle_tree_mouse_click,
+                toggle_help_panel=toggle_help_panel,
+                close_tree_filter=close_tree_filter,
+                activate_tree_filter_selection=activate_tree_filter_selection,
+                move_tree_selection=move_tree_selection,
+                apply_tree_filter_query=apply_tree_filter_query,
+                jump_to_next_content_hit=jump_to_next_content_hit,
+            )
+
         def toggle_tree_filter_mode(mode: str) -> None:
             """Open/switch/close tree filter UI based on current editing state."""
             if state.tree_filter_active:
@@ -461,38 +492,12 @@ def run_main_loop(
                 open_command_picker()
                 continue
 
-            if picker_key_dispatch is not None:
-                picker_handled, picker_should_quit = picker_key_dispatch(key, timing.double_click_seconds)
-            else:
-                picker_handled, picker_should_quit = handle_picker_key(
-                    key,
-                    state,
-                    timing.double_click_seconds,
-                    close_picker=close_picker,
-                    refresh_command_picker_matches=refresh_command_picker_matches,
-                    activate_picker_selection=activate_picker_selection,
-                    visible_content_rows=visible_content_rows,
-                    refresh_active_picker_matches=refresh_active_picker_matches,
-                )
+            picker_handled, picker_should_quit = picker_key_dispatch(key, timing.double_click_seconds)
             if picker_should_quit:
                 break
             if picker_handled:
                 continue
-            if tree_filter_key_dispatch is not None:
-                tree_filter_handled = tree_filter_key_dispatch(key)
-            else:
-                tree_filter_handled = handle_tree_filter_key(
-                    key,
-                    state,
-                    handle_tree_mouse_wheel=handle_tree_mouse_wheel,
-                    handle_tree_mouse_click=handle_tree_mouse_click,
-                    toggle_help_panel=toggle_help_panel,
-                    close_tree_filter=close_tree_filter,
-                    activate_tree_filter_selection=activate_tree_filter_selection,
-                    move_tree_selection=move_tree_selection,
-                    apply_tree_filter_query=apply_tree_filter_query,
-                    jump_to_next_content_hit=jump_to_next_content_hit,
-                )
+            tree_filter_handled = tree_filter_key_dispatch(key)
             if tree_filter_handled:
                 continue
             if handle_normal_key(key, term.columns):

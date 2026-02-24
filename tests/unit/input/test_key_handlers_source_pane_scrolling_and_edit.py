@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 
 from lazyviewer.input import (
+    NormalKeyContext,
     handle_normal_key,
 )
 from lazyviewer.runtime.navigation import JumpLocation
@@ -57,9 +58,7 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
     ) -> bool:
         if launch_editor_for_path is None:
             launch_editor_for_path = lambda _path: None
-        return handle_normal_key(
-            key=key,
-            term_columns=120,
+        context = NormalKeyContext(
             state=state,
             current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
             record_jump_if_changed=lambda _origin: None,
@@ -88,6 +87,7 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
             launch_editor_for_path=launch_editor_for_path,
             jump_to_next_git_modified=jump_to_next_git_modified,
         )
+        return handle_normal_key(key, 120, context)
 
     def test_e_launches_current_directory_when_browser_hidden(self) -> None:
         state = _make_state()
@@ -257,9 +257,7 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
         state.current_path = Path("/tmp").resolve()
         refresh_calls: list[dict[str, object]] = []
 
-        should_quit = handle_normal_key(
-            key="e",
-            term_columns=120,
+        context = NormalKeyContext(
             state=state,
             current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
             record_jump_if_changed=lambda _origin: None,
@@ -288,6 +286,7 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
             launch_editor_for_path=lambda _path: None,
             jump_to_next_git_modified=lambda _direction: False,
         )
+        should_quit = handle_normal_key("e", 120, context)
 
         self.assertFalse(should_quit)
         self.assertEqual(len(refresh_calls), 1)
