@@ -85,6 +85,35 @@ class PreviewBehaviorTests(unittest.TestCase):
             self.assertEqual(first, second)
             self.assertEqual(call_count, 1)
 
+    def test_build_directory_preview_invalidates_cache_when_nested_directory_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            nested = root / "nested"
+            nested.mkdir()
+            existing = nested / "existing.txt"
+            existing.write_text("old\n", encoding="utf-8")
+
+            first_rendered, _ = preview.build_directory_preview(
+                root,
+                show_hidden=False,
+                max_depth=4,
+                max_entries=100,
+            )
+            first_plain = strip_ansi(first_rendered)
+            self.assertIn("existing.txt", first_plain)
+            self.assertNotIn("new.txt", first_plain)
+
+            (nested / "new.txt").write_text("new\n", encoding="utf-8")
+
+            second_rendered, _ = preview.build_directory_preview(
+                root,
+                show_hidden=False,
+                max_depth=4,
+                max_entries=100,
+            )
+            second_plain = strip_ansi(second_rendered)
+            self.assertIn("new.txt", second_plain)
+
     def test_build_directory_preview_appends_git_status_badges(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()

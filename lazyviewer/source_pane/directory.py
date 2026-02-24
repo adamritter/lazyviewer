@@ -2,12 +2,14 @@
 
 Preview output is ANSI-formatted tree text used by the source pane when the
 selected path is a directory. Results are memoized with keys that include root
-mtime and git-overlay signature.
+mtime and git-overlay signature, then validated against scanned directory mtimes
+to avoid stale nested previews.
 """
 
 from __future__ import annotations
 
 from collections import OrderedDict
+from dataclasses import dataclass
 import os
 import re
 from pathlib import Path
@@ -30,7 +32,19 @@ _CODING_COOKIE_RE = re.compile(r"^#.*coding[:=]\s*[-\w.]+")
 _TRIPLE_QUOTE_PREFIXES = ('"""', "'''")
 _LINE_COMMENT_PREFIXES = ("#", "//", "--", ";")
 
-_DIR_PREVIEW_CACHE: OrderedDict[tuple[str, bool, int, int, bool, bool, int, int], tuple[str, bool]] = OrderedDict()
+
+@dataclass(frozen=True)
+class _DirectoryPreviewCacheEntry:
+    """Cached directory preview payload plus watched-directory mtimes."""
+
+    preview: str
+    truncated: bool
+    watched_directory_mtimes: tuple[tuple[str, int], ...]
+
+
+_DIR_PREVIEW_CACHE: OrderedDict[tuple[str, bool, int, int, bool, bool, int, int], _DirectoryPreviewCacheEntry] = (
+    OrderedDict()
+)
 
 
 def _normalize_doc_summary(text: str) -> str | None:
@@ -174,6 +188,18 @@ def _cache_key_for_directory(
     )
 
 
+def _watched_directory_mtimes_match(watched_directory_mtimes: tuple[tuple[str, int], ...]) -> bool:
+    """Return whether directory mtimes captured for a cached preview are unchanged."""
+    for path_text, cached_mtime_ns in watched_directory_mtimes:
+        try:
+            current_mtime_ns = Path(path_text).stat().st_mtime_ns
+        except Exception:
+            return False
+        if int(current_mtime_ns) != int(cached_mtime_ns):
+            return False
+    return True
+
+
 def _cache_get(key: tuple[str, bool, int, int, bool, bool, int, int] | None) -> tuple[str, bool] | None:
     """Return cached preview/truncation pair and refresh LRU order."""
     if key is None:
@@ -181,15 +207,27 @@ def _cache_get(key: tuple[str, bool, int, int, bool, bool, int, int] | None) -> 
     cached = _DIR_PREVIEW_CACHE.get(key)
     if cached is None:
         return None
+    if not _watched_directory_mtimes_match(cached.watched_directory_mtimes):
+        _DIR_PREVIEW_CACHE.pop(key, None)
+        return None
     _DIR_PREVIEW_CACHE.move_to_end(key)
-    return cached
+    return cached.preview, cached.truncated
 
 
-def _cache_put(key: tuple[str, bool, int, int, bool, bool, int, int] | None, preview: str, truncated: bool) -> None:
+def _cache_put(
+    key: tuple[str, bool, int, int, bool, bool, int, int] | None,
+    preview: str,
+    truncated: bool,
+    watched_directory_mtimes: tuple[tuple[str, int], ...],
+) -> None:
     """Insert preview result into LRU cache with bounded size."""
     if key is None:
         return
-    _DIR_PREVIEW_CACHE[key] = (preview, truncated)
+    _DIR_PREVIEW_CACHE[key] = _DirectoryPreviewCacheEntry(
+        preview=preview,
+        truncated=truncated,
+        watched_directory_mtimes=watched_directory_mtimes,
+    )
     _DIR_PREVIEW_CACHE.move_to_end(key)
     while len(_DIR_PREVIEW_CACHE) > DIR_PREVIEW_CACHE_MAX:
         _DIR_PREVIEW_CACHE.popitem(last=False)
@@ -276,9 +314,19 @@ def build_directory_preview(
     root_badges = format_git_status_badges(root_dir, git_status_overlay)
     lines_out: list[str] = [f"{dir_color}{root_label}{reset}{root_badges}", ""]
     emitted = 0
+    watched_directory_mtimes: dict[str, int] = {}
 
     def iter_children(directory: Path) -> tuple[list[tuple[str, Path, bool, int | None]], Exception | None]:
         """Scan and sort one directory's visible children for preview rendering."""
+        try:
+            resolved_directory = directory.resolve()
+        except Exception:
+            resolved_directory = directory
+        try:
+            watched_directory_mtimes[str(resolved_directory)] = int(resolved_directory.stat().st_mtime_ns)
+        except Exception:
+            pass
+
         children: list[tuple[str, Path, bool, int | None]] = []
         try:
             with os.scandir(directory) as entries:
@@ -349,5 +397,10 @@ def build_directory_preview(
         lines_out.append(f"{note_color}... truncated after {max_entries} entries ...{reset}")
 
     preview = "\n".join(lines_out)
-    _cache_put(cache_key, preview, truncated)
+    _cache_put(
+        cache_key,
+        preview,
+        truncated,
+        watched_directory_mtimes=tuple(watched_directory_mtimes.items()),
+    )
     return preview, truncated
