@@ -16,6 +16,7 @@ The test suite follows a hybrid layout:
 ## Current Unit Mirrors
 
 - `tests/unit/cli`
+- `tests/unit/file_tree_model`
 - `tests/unit/input`
 - `tests/unit/render`
 - `tests/unit/runtime`

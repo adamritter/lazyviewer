@@ -11,8 +11,9 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..file_tree_model.doc_summary import clear_doc_summary_cache
+from ..file_tree_model.fs import list_directory_children, maybe_gitignore_matcher
 from ..git_status import format_git_status_badges
-from ..tree_model import clear_doc_summary_cache, list_directory_children, maybe_gitignore_matcher
 from ..tree_model.rendering import TREE_SIZE_LABEL_MIN_BYTES
 
 DIR_PREVIEW_DEFAULT_DEPTH = 32

@@ -1,7 +1,8 @@
-"""Tree-model creation, filtering, navigation, and row formatting.
+"""Tree-pane row projection, filtering, navigation, and row formatting.
 
-Defines ``TreeEntry`` and helpers for directory/file projection views.
-Also formats rows with search-hit text and git status badges.
+This package is the UI-facing tree-pane view model layer. Domain filesystem
+entries now live in ``lazyviewer.file_tree_model`` and are flattened into
+``TreeEntry`` rows here for rendering/filter/navigation behavior.
 """
 
 from __future__ import annotations

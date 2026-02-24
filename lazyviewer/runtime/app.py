@@ -78,7 +78,7 @@ from ..tree_model import (
     clamp_left_width,
     compute_left_width,
 )
-from ..watch import build_git_watch_signature, build_tree_watch_signature, resolve_git_paths
+from ..file_tree_model.watch import build_git_watch_signature, build_tree_watch_signature, resolve_git_paths
 
 DOUBLE_CLICK_SECONDS = 0.35
 FILTER_CURSOR_BLINK_SECONDS = 0.5

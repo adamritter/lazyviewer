@@ -14,7 +14,7 @@ import re
 import subprocess
 
 from .syntax import colorize_source, read_text, sanitize_terminal_text
-from ..watch import build_git_watch_signature
+from ..file_tree_model.watch import build_git_watch_signature
 
 GIT_DIFF_PREVIEW_CACHE_MAX = 128
 
