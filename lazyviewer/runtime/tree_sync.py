@@ -15,14 +15,18 @@ from pathlib import Path
 from .state import AppState
 
 
-@dataclass(frozen=True)
-class PreviewSelectionDeps:
-    """Dependencies for syncing preview content with tree selection."""
+@dataclass
+class PreviewSelection:
+    """Sync preview content with tree selection and optional line jumps."""
 
     state: AppState
     clear_source_selection: Callable[[], bool]
     refresh_rendered_for_current_path: Callable[..., None]
-    jump_to_line: Callable[[int], None]
+    jump_to_line: Callable[[int], None] | None = None
+
+    def bind_jump_to_line(self, jump_to_line: Callable[[int], None]) -> None:
+        """Attach jump callback once navigation wiring is available."""
+        self.jump_to_line = jump_to_line
 
     def preview_selected_entry(
         self,
@@ -44,7 +48,7 @@ class PreviewSelectionDeps:
             if force or selected_target != state.current_path.resolve():
                 state.current_path = selected_target
                 self.refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
-            if entry.line is not None:
+            if entry.line is not None and self.jump_to_line is not None:
                 self.jump_to_line(max(0, entry.line - 1))
             return
         if not force and selected_target == state.current_path.resolve():
@@ -54,7 +58,7 @@ class PreviewSelectionDeps:
 
 
 @dataclass(frozen=True)
-class TreeRefreshSyncDeps:
+class TreeRefreshSync:
     """Dependencies for reconciling selected path after tree rebuilds."""
 
     state: AppState

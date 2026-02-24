@@ -40,8 +40,8 @@ from ..input import (
 from ..source_pane import copy_selected_source_range as copy_source_selection_range
 from ..source_pane.pane import SourcePane
 from .tree_sync import (
-    PreviewSelectionDeps,
-    TreeRefreshSyncDeps,
+    PreviewSelection,
+    TreeRefreshSync,
 )
 from .application import App
 from .index_warmup import TreeFilterIndexWarmupScheduler
@@ -212,22 +212,16 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         copy_text_to_clipboard=_copy_text_to_clipboard,
     )
     source_pane_runtime: SourcePane
-    tree_pane_runtime: TreePane | None = None
+    tree_pane_runtime: TreePane
 
     sync_selected_target_after_tree_refresh: Callable[..., None]
-
-    def jump_to_line_for_preview(line_number: int) -> None:
-        assert tree_pane_runtime is not None
-        tree_pane_runtime.navigation.jump_to_line(line_number)
-
-    preview_selection_deps = PreviewSelectionDeps(
+    preview_selection = PreviewSelection(
         state=state,
         clear_source_selection=clear_source_selection,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
-        jump_to_line=jump_to_line_for_preview,
     )
 
-    preview_selected_entry = preview_selection_deps.preview_selected_entry
+    preview_selected_entry = preview_selection.preview_selected_entry
 
     tree_pane_runtime = TreePane(
         state=state,
@@ -242,6 +236,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
         on_tree_filter_state_change=sync_left_width_for_tree_filter_mode,
     )
+    preview_selection.bind_jump_to_line(tree_pane_runtime.navigation.jump_to_line)
     source_pane_runtime = SourcePane(
         state=state,
         visible_content_rows=visible_content_rows,
@@ -249,14 +244,14 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         maybe_grow_directory_preview=maybe_grow_directory_preview,
         get_terminal_size=shutil.get_terminal_size,
     )
-    tree_refresh_sync_deps = TreeRefreshSyncDeps(
+    tree_refresh_sync = TreeRefreshSync(
         state=state,
         rebuild_tree_entries=tree_pane_runtime.filter.rebuild_tree_entries,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
         schedule_tree_filter_index_warmup=schedule_tree_filter_index_warmup,
         refresh_git_status_overlay=refresh_git_status_overlay,
     )
-    sync_selected_target_after_tree_refresh = tree_refresh_sync_deps.sync_selected_target_after_tree_refresh
+    sync_selected_target_after_tree_refresh = tree_refresh_sync.sync_selected_target_after_tree_refresh
     maybe_refresh_tree_watch = partial(
         watch_refresh.maybe_refresh_tree,
         state,
