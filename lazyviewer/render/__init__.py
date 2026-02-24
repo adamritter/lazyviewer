@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line
-from ..source_pane import SourcePaneRenderer
+from ..source_pane.renderer import SourcePaneRenderer
 from ..tree_pane.rendering import TreePaneRenderer
 from .help import (
     help_panel_lines,

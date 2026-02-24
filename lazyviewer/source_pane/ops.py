@@ -36,6 +36,8 @@ class SourcePaneOps:
         self.state = state
         self.visible_content_rows = visible_content_rows
         self._get_terminal_size = get_terminal_size
+        self._max_text_offset_cache_key: tuple[int, int] | None = None
+        self._max_text_offset_cache_value = 0
 
     def preview_pane_width(self) -> int:
         """Return current preview pane width in columns."""
@@ -49,10 +51,16 @@ class SourcePaneOps:
         if self.state.wrap_text or not self.state.lines:
             return 0
         viewport_width = self.preview_pane_width()
+        cache_key = (id(self.state.lines), viewport_width)
+        if self._max_text_offset_cache_key == cache_key:
+            return self._max_text_offset_cache_value
         max_width = 0
         for line in self.state.lines:
             max_width = max(max_width, _rendered_line_display_width(line))
-        return max(0, max_width - viewport_width)
+        max_offset = max(0, max_width - viewport_width)
+        self._max_text_offset_cache_key = cache_key
+        self._max_text_offset_cache_value = max_offset
+        return max_offset
 
     def source_pane_col_bounds(self) -> tuple[int, int]:
         """Return inclusive terminal column bounds of source pane."""

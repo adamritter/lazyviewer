@@ -58,6 +58,7 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         open_symbol_picker=lambda: None,
         launch_lazygit=lambda: None,
         launch_editor_for_path=None,
+        max_horizontal_text_offset=lambda: 10_000,
         visible_rows: int = 20,
     ) -> bool:
         if launch_editor_for_path is None:
@@ -83,6 +84,7 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
             refresh_rendered_for_current_path=lambda **_kwargs: None,
             refresh_git_status_overlay=lambda **_kwargs: None,
             maybe_grow_directory_preview=lambda: False,
+            max_horizontal_text_offset=max_horizontal_text_offset,
             visible_content_rows=lambda: visible_rows,
             rebuild_screen_lines=lambda **_kwargs: None,
             mark_tree_watch_dirty=lambda: None,
@@ -516,6 +518,23 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
         self.assertFalse(should_quit)
         self.assertEqual(state.start, 2)
 
+    def test_right_scroll_clamps_to_max_horizontal_offset(self) -> None:
+        state = _make_state()
+        state.browser_visible = False
+        state.wrap_text = False
+        state.text_x = 10_000
+
+        should_quit = self._invoke(
+            state=state,
+            key="RIGHT",
+            toggle_git_features=lambda: None,
+            jump_to_next_git_modified=lambda _direction: False,
+            max_horizontal_text_offset=lambda: 120,
+        )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(state.text_x, 120)
+
     def test_e_forces_preview_rebuild_after_successful_edit(self) -> None:
         state = _make_state()
         state.browser_visible = False
@@ -542,6 +561,7 @@ class KeyHandlersBehaviorTests(unittest.TestCase):
             refresh_rendered_for_current_path=lambda **kwargs: refresh_calls.append(kwargs),
             refresh_git_status_overlay=lambda **_kwargs: None,
             maybe_grow_directory_preview=lambda: False,
+            max_horizontal_text_offset=lambda: 10_000,
             visible_content_rows=lambda: 20,
             rebuild_screen_lines=lambda **_kwargs: None,
             mark_tree_watch_dirty=lambda: None,

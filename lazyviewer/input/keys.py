@@ -37,6 +37,11 @@ def _parse_mouse_col_row(mouse_key: str) -> tuple[int | None, int | None]:
         return None, None
 
 
+def _default_max_horizontal_text_offset() -> int:
+    """Fallback clamp for contexts that do not inject source-pane geometry ops."""
+    return 10_000_000
+
+
 @dataclass(frozen=True)
 class KeyComboBinding:
     """Mapping from one or more key tokens to a single action callback."""
@@ -416,6 +421,7 @@ class NormalKeyOps:
     mark_tree_watch_dirty: Callable[[], None]
     launch_editor_for_path: Callable[[Path], str | None]
     jump_to_next_git_modified: Callable[[int], bool]
+    max_horizontal_text_offset: Callable[[], int] = _default_max_horizontal_text_offset
 
 
 def handle_normal_key(
@@ -445,6 +451,7 @@ def handle_normal_key(
     refresh_rendered_for_current_path = ops.refresh_rendered_for_current_path
     refresh_git_status_overlay = ops.refresh_git_status_overlay
     maybe_grow_directory_preview = ops.maybe_grow_directory_preview
+    max_horizontal_text_offset = ops.max_horizontal_text_offset
     visible_content_rows = ops.visible_content_rows
     rebuild_screen_lines = ops.rebuild_screen_lines
     mark_tree_watch_dirty = ops.mark_tree_watch_dirty
@@ -832,7 +839,7 @@ def handle_normal_key(
         state.text_x = max(0, state.text_x - max(1, step))
     elif (key == "RIGHT" or (not state.browser_visible and key_lower == "l")) and not state.wrap_text:
         step = count if count is not None else 4
-        state.text_x += max(1, step)
+        state.text_x = min(max_horizontal_text_offset(), state.text_x + max(1, step))
     elif key == "HOME":
         state.start = 0
     elif key == "END":
