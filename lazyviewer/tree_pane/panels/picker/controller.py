@@ -9,10 +9,9 @@ from pathlib import Path
 from ....runtime.config import save_show_hidden
 from ....runtime.state import AppState
 from ....search.fuzzy import fuzzy_match_labels
-from . import key_dispatch
-from . import lifecycle
 from . import navigation as picker_navigation
 from .line_map import first_display_index_for_source_line, source_line_for_display_index
+from .panel import PickerPanel
 
 PICKER_RESULT_LIMIT = 200
 
@@ -50,6 +49,7 @@ class NavigationController:
         self.visible_content_rows = visible_content_rows
         self.refresh_rendered_for_current_path = refresh_rendered_for_current_path
         self.open_tree_filter = open_tree_filter
+        self.panel = PickerPanel(self)
 
     # matching
     def refresh_symbol_picker_matches(self, reset_selection: bool = False) -> None:
@@ -106,7 +106,7 @@ class NavigationController:
     # picker key handling
     def handle_picker_key(self, key: str, double_click_seconds: float) -> tuple[bool, bool]:
         """Handle one key while picker is active."""
-        return key_dispatch.handle_picker_key(self, key, double_click_seconds)
+        return self.panel.handle_key(key, double_click_seconds)
 
     # history/navigation
     def current_jump_location(self) -> picker_navigation.JumpLocation:
@@ -364,20 +364,20 @@ class NavigationController:
     # picker lifecycle
     def resolve_symbol_target(self) -> Path | None:
         """Resolve file path whose symbols should populate the symbol picker."""
-        return lifecycle.resolve_symbol_target(self)
+        return self.panel.resolve_symbol_target()
 
     def open_symbol_picker(self) -> None:
         """Enter symbol-picker mode and populate symbols for current file target."""
-        lifecycle.open_symbol_picker(self)
+        self.panel.open_symbol_picker()
 
     def open_command_picker(self) -> None:
         """Enter command-palette mode and load command label/id lists."""
-        lifecycle.open_command_picker(self)
+        self.panel.open_command_picker()
 
     def close_picker(self, reset_query: bool = True) -> None:
         """Close picker UI and restore non-picker browser visibility state."""
-        lifecycle.close_picker(self, reset_query=reset_query)
+        self.panel.close_picker(reset_query=reset_query)
 
     def activate_picker_selection(self) -> bool:
         """Activate current picker row for symbols or command palette actions."""
-        return lifecycle.activate_picker_selection(self)
+        return self.panel.activate_picker_selection()

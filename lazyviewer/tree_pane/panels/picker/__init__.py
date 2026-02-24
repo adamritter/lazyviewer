@@ -9,9 +9,11 @@ from .line_map import (
     first_display_index_for_source_line as _first_display_index_for_source_line,
 )
 from .line_map import source_line_for_display_index as _source_line_for_display_index
+from .panel import PickerPanel
 
 __all__ = [
     "NavigationController",
+    "PickerPanel",
     "_source_line_for_display_index",
     "_first_display_index_for_source_line",
 ]

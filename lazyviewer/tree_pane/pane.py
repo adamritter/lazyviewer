@@ -58,6 +58,8 @@ class TreePane:
             refresh_rendered_for_current_path=refresh_rendered_for_current_path,
             open_tree_filter=self.filter.open_tree_filter,
         )
+        self.filter_panel = self.filter.panel
+        self.picker_panel = self.navigation.panel
         self.mouse = TreePaneMouseHandlers(
             state=state,
             visible_content_rows=visible_content_rows,
@@ -65,7 +67,7 @@ class TreePane:
             mark_tree_watch_dirty=mark_tree_watch_dirty,
             coerce_tree_filter_result_index=self.filter.coerce_tree_filter_result_index,
             preview_selected_entry=preview_selected_entry,
-            activate_tree_filter_selection=self.filter.activate_tree_filter_selection,
+            activate_tree_filter_selection=self.filter_panel.activate_selection,
             copy_text_to_clipboard=copy_text_to_clipboard,
             double_click_seconds=double_click_seconds,
             monotonic=monotonic,
@@ -93,11 +95,11 @@ class TreePane:
 
     def toggle_tree_filter_mode(self, mode: str) -> None:
         """Open/switch/close tree filter UI based on current editing state."""
-        self.filter.toggle_tree_filter_mode(mode)
+        self.filter_panel.toggle_mode(mode)
 
     def handle_picker_key(self, key: str, double_click_seconds: float) -> tuple[bool, bool]:
         """Dispatch one key through picker controller when picker is active."""
-        return self.navigation.handle_picker_key(key, double_click_seconds)
+        return self.picker_panel.handle_key(key, double_click_seconds)
 
     def handle_tree_filter_key(
         self,
@@ -107,7 +109,7 @@ class TreePane:
         handle_tree_mouse_click: Callable[[str], bool],
     ) -> bool:
         """Dispatch one key through tree-filter controller when filter is active."""
-        return self.filter.handle_tree_filter_key(
+        return self.filter_panel.handle_key(
             key,
             handle_tree_mouse_wheel=handle_tree_mouse_wheel,
             handle_tree_mouse_click=handle_tree_mouse_click,

@@ -68,7 +68,7 @@ class App:
                 state=self.state,
                 current_jump_location=self.tree_pane.navigation.current_jump_location,
                 record_jump_if_changed=self.tree_pane.navigation.record_jump_if_changed,
-                open_symbol_picker=self.tree_pane.navigation.open_symbol_picker,
+                open_symbol_picker=self.tree_pane.picker_panel.open_symbol_picker,
                 reroot_to_parent=self.tree_pane.navigation.reroot_to_parent,
                 reroot_to_selected_target=self.tree_pane.navigation.reroot_to_selected_target,
                 toggle_hidden_files=self.tree_pane.navigation.toggle_hidden_files,

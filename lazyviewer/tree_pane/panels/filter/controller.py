@@ -21,8 +21,6 @@ from ....tree_model import (
     find_content_hit_index,
     next_file_entry_index,
 )
-from . import lifecycle
-from . import key_dispatch
 from . import matching as filter_matching
 from .helpers import skip_gitignored_for_hidden_mode
 from .limits import (
@@ -31,6 +29,7 @@ from .limits import (
     content_search_match_limit_for_query,
     tree_filter_match_limit_for_query,
 )
+from .panel import FilterPanel
 
 
 class TreeFilterController:
@@ -62,6 +61,7 @@ class TreeFilterController:
         self.on_tree_filter_state_change = on_tree_filter_state_change
         self.loading_until = 0.0
         self.init_content_search_cache()
+        self.panel = FilterPanel(self)
 
     # lifecycle
     def get_loading_until(self) -> float:
@@ -90,19 +90,19 @@ class TreeFilterController:
 
     def open_tree_filter(self, mode: str = "files") -> None:
         """Open filter panel in requested mode and initialize session fields."""
-        lifecycle.open_tree_filter(self, mode)
+        self.panel.open(mode)
 
     def toggle_tree_filter_mode(self, mode: str) -> None:
         """Open/switch/close tree filter UI based on current editing state."""
-        key_dispatch.toggle_tree_filter_mode(self, mode)
+        self.panel.toggle_mode(mode)
 
     def close_tree_filter(self, clear_query: bool = True, restore_origin: bool = False) -> None:
         """Close filter panel, optionally restoring original content-search position."""
-        lifecycle.close_tree_filter(self, clear_query=clear_query, restore_origin=restore_origin)
+        self.panel.close(clear_query=clear_query, restore_origin=restore_origin)
 
     def activate_tree_filter_selection(self) -> None:
         """Activate selected filter result according to current filter mode."""
-        lifecycle.activate_tree_filter_selection(self)
+        self.panel.activate_selection()
 
     def handle_tree_filter_key(
         self,
@@ -113,8 +113,7 @@ class TreeFilterController:
         toggle_help_panel: Callable[[], None],
     ) -> bool:
         """Handle one key for tree-filter prompt, list navigation, and hit jumps."""
-        return key_dispatch.handle_tree_filter_key(
-            self,
+        return self.panel.handle_key(
             key,
             handle_tree_mouse_wheel=handle_tree_mouse_wheel,
             handle_tree_mouse_click=handle_tree_mouse_click,

@@ -5,7 +5,9 @@ and content-search result navigation in the left pane.
 """
 
 from .controller import TreeFilterController
+from .panel import FilterPanel
 
 __all__ = [
     "TreeFilterController",
+    "FilterPanel",
 ]

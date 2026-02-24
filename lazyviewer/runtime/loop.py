@@ -95,11 +95,11 @@ def run_main_loop(
         rebuild_screen_lines = layout.rebuild_screen_lines
         current_preview_image_path = layout.current_preview_image_path
         current_preview_image_geometry = layout.current_preview_image_geometry
-        open_tree_filter = tree_pane.filter.open_tree_filter
-        open_command_picker = tree_pane.navigation.open_command_picker
-        close_picker = tree_pane.navigation.close_picker
+        open_tree_filter = tree_pane.filter_panel.open
+        open_command_picker = tree_pane.picker_panel.open_command_picker
+        close_picker = tree_pane.picker_panel.close_picker
         refresh_command_picker_matches = tree_pane.navigation.refresh_command_picker_matches
-        activate_picker_selection = tree_pane.navigation.activate_picker_selection
+        activate_picker_selection = tree_pane.picker_panel.activate_picker_selection
         refresh_active_picker_matches = tree_pane.navigation.refresh_active_picker_matches
         handle_tree_mouse_wheel = getattr(
             callbacks,
@@ -112,8 +112,8 @@ def run_main_loop(
             tree_pane.handle_tree_mouse_click,
         )
         toggle_help_panel = tree_pane.navigation.toggle_help_panel
-        close_tree_filter = tree_pane.filter.close_tree_filter
-        activate_tree_filter_selection = tree_pane.filter.activate_tree_filter_selection
+        close_tree_filter = tree_pane.filter_panel.close
+        activate_tree_filter_selection = tree_pane.filter_panel.activate_selection
         move_tree_selection = tree_pane.filter.move_tree_selection
         apply_tree_filter_query = tree_pane.filter.apply_tree_filter_query
         jump_to_next_content_hit = tree_pane.filter.jump_to_next_content_hit
@@ -121,7 +121,7 @@ def run_main_loop(
         jump_to_named_mark = tree_pane.navigation.jump_to_named_mark
         jump_back_in_history = tree_pane.navigation.jump_back_in_history
         jump_forward_in_history = tree_pane.navigation.jump_forward_in_history
-        toggle_tree_filter_mode = tree_pane.toggle_tree_filter_mode
+        toggle_tree_filter_mode = tree_pane.filter_panel.toggle_mode
         tick_source_selection_drag = getattr(
             callbacks,
             "tick_source_selection_drag",

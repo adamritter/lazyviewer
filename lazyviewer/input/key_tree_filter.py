@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from ..runtime.state import AppState
-from ..tree_pane.panels.filter import key_dispatch
+from ..tree_pane.panels.filter.panel import FilterPanel
 
 
-class _TreeFilterDispatchAdapter:
-    """Adapter exposing TreeFilterController-like API over callback functions."""
+class _TreeFilterPanelAdapter:
+    """Adapter exposing FilterPanel owner API over callback functions."""
 
     def __init__(
         self,
@@ -67,7 +67,7 @@ def handle_tree_filter_key(
     jump_to_next_content_hit: Callable[[int], bool],
 ) -> bool:
     """Handle keys for tree filter prompt, list navigation, and hit jumps."""
-    adapter = _TreeFilterDispatchAdapter(
+    adapter = _TreeFilterPanelAdapter(
         state=state,
         close_tree_filter=close_tree_filter,
         activate_tree_filter_selection=activate_tree_filter_selection,
@@ -75,8 +75,7 @@ def handle_tree_filter_key(
         apply_tree_filter_query=apply_tree_filter_query,
         jump_to_next_content_hit=jump_to_next_content_hit,
     )
-    return key_dispatch.handle_tree_filter_key(
-        adapter,
+    return FilterPanel(adapter).handle_key(
         key,
         handle_tree_mouse_wheel=handle_tree_mouse_wheel,
         handle_tree_mouse_click=handle_tree_mouse_click,

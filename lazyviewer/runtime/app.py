@@ -238,7 +238,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         clear_source_selection=clear_source_selection,
         copy_selected_source_range=copy_selected_source_range,
         directory_preview_target_for_display_line=directory_preview_target_for_display_line,
-        open_tree_filter=tree_pane_runtime.filter.open_tree_filter,
+        open_tree_filter=tree_pane_runtime.filter_panel.open,
         apply_tree_filter_query=tree_pane_runtime.filter.apply_tree_filter_query,
         jump_to_path=tree_pane_runtime.navigation.jump_to_path,
         get_terminal_size=shutil.get_terminal_size,

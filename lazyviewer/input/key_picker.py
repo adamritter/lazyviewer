@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from ..runtime.state import AppState
-from ..tree_pane.panels.picker import key_dispatch
+from ..tree_pane.panels.picker.panel import PickerPanel
 
 
-class _PickerDispatchAdapter:
-    """Adapter exposing NavigationController-like API over callback functions."""
+class _PickerPanelAdapter:
+    """Adapter exposing PickerPanel owner API over callback functions."""
 
     def __init__(
         self,
@@ -60,7 +60,7 @@ def handle_picker_key(
     Returns ``(handled, should_quit)`` so the main loop can stop event
     propagation and optionally terminate the application.
     """
-    adapter = _PickerDispatchAdapter(
+    adapter = _PickerPanelAdapter(
         state=state,
         close_picker=close_picker,
         refresh_command_picker_matches=refresh_command_picker_matches,
@@ -68,4 +68,4 @@ def handle_picker_key(
         visible_content_rows=visible_content_rows,
         refresh_active_picker_matches=refresh_active_picker_matches,
     )
-    return key_dispatch.handle_picker_key(adapter, key, double_click_seconds)
+    return PickerPanel(adapter).handle_key(key, double_click_seconds)
