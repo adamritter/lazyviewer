@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..state import AppState
+from .state import AppState
 from .screen import (
     _centered_scroll_start,
     _git_change_block_start_lines,

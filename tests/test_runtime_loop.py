@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 
 from lazyviewer.runtime import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
-from lazyviewer.state import AppState
+from lazyviewer.runtime.state import AppState
 from lazyviewer.runtime.terminal import TerminalController
 from lazyviewer.tree_pane.model import TreeEntry
 

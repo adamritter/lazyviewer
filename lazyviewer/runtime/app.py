@@ -66,7 +66,7 @@ from .loop import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
 from ..picker_panel import NavigationPickerDeps, NavigationPickerOps
 from ..filter_panel import TreeFilterDeps, TreeFilterOps
 from ..search.fuzzy import collect_project_file_labels
-from ..state import AppState
+from .state import AppState
 from .terminal import TerminalController
 from ..tree_pane.model import (
     build_tree_entries,

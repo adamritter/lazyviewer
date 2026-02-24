@@ -21,7 +21,7 @@ from ..search.fuzzy import (
     collect_project_file_labels,
     fuzzy_match_label_index,
 )
-from ..state import AppState
+from ..runtime.state import AppState
 from ..tree_pane.model import (
     build_tree_entries,
     filter_tree_entries_for_content_matches,

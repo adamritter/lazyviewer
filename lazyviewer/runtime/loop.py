@@ -20,7 +20,7 @@ from ..input import (
     handle_tree_filter_key,
 )
 from ..render import RenderContext, render_dual_page_context
-from ..state import AppState
+from .state import AppState
 from .terminal import TerminalController
 from ..tree_pane.model import clamp_left_width
 

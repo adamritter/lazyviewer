@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import time
 
-from ..state import AppState
+from ..runtime.state import AppState
 
 
 @dataclass(frozen=True)

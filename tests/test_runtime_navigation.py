@@ -17,7 +17,7 @@ from lazyviewer.picker_panel import (
     _first_display_index_for_source_line,
     _source_line_for_display_index,
 )
-from lazyviewer.state import AppState
+from lazyviewer.runtime.state import AppState
 from lazyviewer.tree_pane.model import TreeEntry
 
 

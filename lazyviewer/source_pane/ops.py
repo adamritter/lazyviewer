@@ -11,7 +11,7 @@ import shutil
 from collections.abc import Callable
 
 from ..render.ansi import ANSI_ESCAPE_RE, char_display_width
-from ..state import AppState
+from ..runtime.state import AppState
 
 
 def _rendered_line_display_width(line: str) -> int:

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..source_pane import SourcePaneMouseCallbacks, SourcePaneMouseHandlers
-from ..state import AppState
+from ..runtime.state import AppState
 from ..tree_pane.events import TreePaneMouseCallbacks, TreePaneMouseHandlers
 
 

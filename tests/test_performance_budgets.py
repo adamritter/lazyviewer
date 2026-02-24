@@ -21,7 +21,7 @@ from lazyviewer.search.fuzzy import (
     collect_project_file_labels,
     fuzzy_match_label_index,
 )
-from lazyviewer.state import AppState
+from lazyviewer.runtime.state import AppState
 from lazyviewer.tree_pane.model import TreeEntry, build_tree_entries
 
 
