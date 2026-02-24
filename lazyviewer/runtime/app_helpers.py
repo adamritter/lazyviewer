@@ -9,14 +9,7 @@ import sys
 import time
 from collections.abc import Callable
 
-from ..source_pane import (
-    DIR_PREVIEW_GROWTH_STEP,
-    DIR_PREVIEW_HARD_MAX_ENTRIES,
-    DIR_PREVIEW_INITIAL_MAX_ENTRIES,
-    build_rendered_for_path,
-    clear_directory_preview_cache,
-)
-from ..source_pane.diff import clear_diff_preview_cache
+from ..source_pane import SourcePane
 from .screen import _centered_scroll_start, _first_git_change_screen_line
 from .state import AppState
 from .terminal import TerminalController
@@ -98,23 +91,23 @@ def refresh_rendered_for_current_path(
 ) -> None:
     """Rebuild rendered preview text for ``state.current_path`` and sync derived fields."""
     if force_rebuild:
-        clear_directory_preview_cache()
-        clear_diff_preview_cache()
+        SourcePane.clear_directory_preview_cache()
+        SourcePane.clear_diff_preview_cache()
     resolved_target = state.current_path.resolve()
     is_dir_target = resolved_target.is_dir()
     if is_dir_target:
         if reset_dir_budget or state.dir_preview_path != resolved_target:
-            state.dir_preview_max_entries = DIR_PREVIEW_INITIAL_MAX_ENTRIES
+            state.dir_preview_max_entries = SourcePane.DIR_PREVIEW_INITIAL_MAX_ENTRIES
         dir_limit = state.dir_preview_max_entries
     else:
-        dir_limit = DIR_PREVIEW_INITIAL_MAX_ENTRIES
+        dir_limit = SourcePane.DIR_PREVIEW_INITIAL_MAX_ENTRIES
 
     prefer_git_diff = state.git_features_enabled and not (
         state.tree_filter_active
         and state.tree_filter_mode == "content"
         and bool(state.tree_filter_query)
     )
-    rendered_for_path = build_rendered_for_path(
+    rendered_for_path = SourcePane.build_rendered_for_path(
         state.current_path,
         state.show_hidden,
         style,
@@ -154,7 +147,7 @@ def maybe_grow_directory_preview(
         return False
     if state.current_path.resolve() != state.dir_preview_path:
         return False
-    if state.dir_preview_max_entries >= DIR_PREVIEW_HARD_MAX_ENTRIES:
+    if state.dir_preview_max_entries >= SourcePane.DIR_PREVIEW_HARD_MAX_ENTRIES:
         return False
 
     # Only grow when the user is effectively at the end of the current preview.
@@ -164,8 +157,8 @@ def maybe_grow_directory_preview(
 
     previous_line_count = len(state.lines)
     state.dir_preview_max_entries = min(
-        DIR_PREVIEW_HARD_MAX_ENTRIES,
-        state.dir_preview_max_entries + DIR_PREVIEW_GROWTH_STEP,
+        SourcePane.DIR_PREVIEW_HARD_MAX_ENTRIES,
+        state.dir_preview_max_entries + SourcePane.DIR_PREVIEW_GROWTH_STEP,
     )
     refresh_rendered_for_current_path_fn(reset_scroll=False, reset_dir_budget=False)
     return len(state.lines) > previous_line_count

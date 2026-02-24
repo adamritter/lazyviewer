@@ -33,8 +33,7 @@ from .command_palette import COMMAND_PALETTE_ITEMS
 from .git_jumps import (
     GitModifiedJumpNavigator,
 )
-from ..source_pane import copy_selected_source_range as copy_source_selection_range
-from ..source_pane.pane import SourcePane
+from ..source_pane import SourcePane
 from .tree_sync import (
     PreviewSelection,
     TreeRefreshSync,
@@ -56,12 +55,6 @@ from .config import (
 )
 from .editor import launch_editor
 from ..git_status import collect_git_status_overlay
-from ..source_pane.syntax import colorize_source
-from ..source_pane import (
-    DIR_PREVIEW_INITIAL_MAX_ENTRIES,
-    build_rendered_for_path,
-)
-from ..source_pane.interaction.events import directory_preview_target_for_display_line as preview_directory_preview_target_for_display_line
 from ..render import help_panel_row_count
 from .loop import RuntimeLoopTiming, run_main_loop
 from ..tree_pane.pane import TreePane
@@ -91,7 +84,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     if nopager or not os.isatty(sys.stdin.fileno()):
         rendered = content
         if not no_color and os.isatty(sys.stdout.fileno()):
-            rendered = colorize_source(content, path, style)
+            rendered = SourcePane.colorize_source(content, path, style)
         sys.stdout.write(content if no_color else rendered)
         return
 
@@ -103,10 +96,10 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         compute_left_width=compute_left_width,
         clamp_left_width=clamp_left_width,
         build_tree_entries=build_tree_entries,
-        build_rendered_for_path=build_rendered_for_path,
+        build_rendered_for_path=SourcePane.build_rendered_for_path,
         git_features_default_enabled=GIT_FEATURES_DEFAULT_ENABLED,
         tree_size_labels_default_enabled=TREE_SIZE_LABELS_DEFAULT_ENABLED,
-        dir_preview_initial_max_entries=DIR_PREVIEW_INITIAL_MAX_ENTRIES,
+        dir_preview_initial_max_entries=SourcePane.DIR_PREVIEW_INITIAL_MAX_ENTRIES,
     )
     state = state_bootstrap.build_state(path=path, style=style, no_color=no_color)
 
@@ -195,9 +188,9 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         refresh_rendered_for_current_path,
     )
 
-    directory_preview_target_for_display_line = partial(preview_directory_preview_target_for_display_line, state)
+    directory_preview_target_for_display_line = partial(SourcePane.directory_preview_target_for_display_line, state)
     copy_selected_source_range = partial(
-        copy_source_selection_range,
+        SourcePane.copy_selected_source_range,
         state,
         copy_text_to_clipboard=_copy_text_to_clipboard,
     )

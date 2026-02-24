@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..input import NormalKeyHandler
-from ..source_pane.pane import SourcePane
+from ..source_pane import SourcePane
 from ..tree_pane.pane import TreePane
 from .layout import PagerLayout
 from .loop import RuntimeLoopTiming

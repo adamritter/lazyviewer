@@ -27,17 +27,17 @@ def strip_ansi(text: str) -> str:
 
 class PreviewBehaviorTestsPart2(unittest.TestCase):
     def setUp(self) -> None:
-        preview._DIR_PREVIEW_CACHE.clear()
+        preview.SourcePane._DIR_PREVIEW_CACHE.clear()
 
     def tearDown(self) -> None:
-        preview._DIR_PREVIEW_CACHE.clear()
+        preview.SourcePane._DIR_PREVIEW_CACHE.clear()
 
     def test_build_rendered_for_path_file_returns_plain_text_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             file_path = Path(tmp) / "demo.py"
             file_path.write_text("print('ok')\n", encoding="utf-8")
 
-            rendered = preview.build_rendered_for_path(
+            rendered = preview.SourcePane.build_rendered_for_path(
                 file_path,
                 show_hidden=False,
                 style="monokai",
@@ -54,7 +54,7 @@ class PreviewBehaviorTestsPart2(unittest.TestCase):
             # Include BEL and ESC to ensure terminal side effects are neutralized.
             file_path.write_bytes(b"ok\x07beep\x1b[31mred\n")
 
-            rendered = preview.build_rendered_for_path(
+            rendered = preview.SourcePane.build_rendered_for_path(
                 file_path,
                 show_hidden=False,
                 style="monokai",
@@ -70,7 +70,7 @@ class PreviewBehaviorTestsPart2(unittest.TestCase):
             file_path = Path(tmp) / "compiled.pyc"
             file_path.write_bytes(b"\x00\x01\x02abc")
 
-            rendered = preview.build_rendered_for_path(
+            rendered = preview.SourcePane.build_rendered_for_path(
                 file_path,
                 show_hidden=False,
                 style="monokai",
@@ -89,7 +89,7 @@ class PreviewBehaviorTestsPart2(unittest.TestCase):
             file_path = Path(tmp) / "image.png"
             file_path.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\x00IHDR\x00\x00\x00\x00")
 
-            rendered = preview.build_rendered_for_path(
+            rendered = preview.SourcePane.build_rendered_for_path(
                 file_path,
                 show_hidden=False,
                 style="monokai",
@@ -108,10 +108,10 @@ class PreviewBehaviorTestsPart2(unittest.TestCase):
             file_path = Path(tmp) / "big.py"
             file_path.write_text("x = 1\n" * 60_000, encoding="utf-8")
 
-            with mock.patch("lazyviewer.source_pane.os.isatty", return_value=True), mock.patch(
-                "lazyviewer.source_pane.colorize_source"
+            with mock.patch("lazyviewer.source_pane.path.os.isatty", return_value=True), mock.patch(
+                "lazyviewer.source_pane.SourcePane.colorize_source"
             ) as colorize_mock:
-                rendered = preview.build_rendered_for_path(
+                rendered = preview.SourcePane.build_rendered_for_path(
                     file_path,
                     show_hidden=False,
                     style="monokai",
@@ -129,7 +129,7 @@ class PreviewBehaviorTestsPart2(unittest.TestCase):
             (root / "a.txt").write_text("a", encoding="utf-8")
             (root / "b.txt").write_text("b", encoding="utf-8")
 
-            rendered = preview.build_rendered_for_path(
+            rendered = preview.SourcePane.build_rendered_for_path(
                 root,
                 show_hidden=False,
                 style="monokai",
@@ -149,7 +149,7 @@ class PreviewBehaviorTestsPart2(unittest.TestCase):
             file_path.write_text("print('x')\n", encoding="utf-8")
             overlay = {file_path.resolve(): GIT_STATUS_CHANGED}
 
-            rendered = preview.build_rendered_for_path(
+            rendered = preview.SourcePane.build_rendered_for_path(
                 root,
                 show_hidden=False,
                 style="monokai",
@@ -174,7 +174,7 @@ class PreviewBehaviorTestsPart2(unittest.TestCase):
             subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=root, check=True)
 
             file_path.write_text("a = 1\nb = 22\nc = 3\n", encoding="utf-8")
-            rendered = preview.build_rendered_for_path(
+            rendered = preview.SourcePane.build_rendered_for_path(
                 file_path,
                 show_hidden=False,
                 style="monokai",
@@ -205,7 +205,7 @@ class PreviewBehaviorTestsPart2(unittest.TestCase):
             subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=root, check=True)
 
             file_path.write_text("a = 1\nb = 22\n", encoding="utf-8")
-            rendered = preview.build_rendered_for_path(
+            rendered = preview.SourcePane.build_rendered_for_path(
                 file_path,
                 show_hidden=False,
                 style="monokai",
@@ -228,8 +228,8 @@ class PreviewBehaviorTestsPart2(unittest.TestCase):
             subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=root, check=True)
 
             file_path.write_text("x = 1\nname = 'new'\n", encoding="utf-8")
-            with mock.patch("lazyviewer.source_pane.os.isatty", return_value=True):
-                rendered = preview.build_rendered_for_path(
+            with mock.patch("lazyviewer.source_pane.path.os.isatty", return_value=True):
+                rendered = preview.SourcePane.build_rendered_for_path(
                     file_path,
                     show_hidden=False,
                     style="monokai",

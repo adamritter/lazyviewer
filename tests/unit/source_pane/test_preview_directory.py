@@ -27,10 +27,10 @@ def strip_ansi(text: str) -> str:
 
 class PreviewBehaviorTestsPart1(unittest.TestCase):
     def setUp(self) -> None:
-        preview._DIR_PREVIEW_CACHE.clear()
+        preview.SourcePane._DIR_PREVIEW_CACHE.clear()
 
     def tearDown(self) -> None:
-        preview._DIR_PREVIEW_CACHE.clear()
+        preview.SourcePane._DIR_PREVIEW_CACHE.clear()
 
     def test_build_directory_preview_truncates_and_hides_dotfiles(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -39,7 +39,7 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
             (root / "b.txt").write_text("b", encoding="utf-8")
             (root / ".hidden.txt").write_text("h", encoding="utf-8")
 
-            rendered, truncated = preview.build_directory_preview(
+            rendered, truncated = preview.SourcePane.build_directory_preview(
                 root,
                 show_hidden=False,
                 max_depth=2,
@@ -56,7 +56,7 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
             root = Path(tmp)
             (root / ".hidden.txt").write_text("h", encoding="utf-8")
 
-            rendered, truncated = preview.build_directory_preview(
+            rendered, truncated = preview.SourcePane.build_directory_preview(
                 root,
                 show_hidden=True,
                 max_depth=2,
@@ -80,8 +80,8 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
                 return original_scandir(path)
 
             with mock.patch("lazyviewer.tree_model.build.os.scandir", side_effect=counted_scandir):
-                first = preview.build_directory_preview(root, show_hidden=False, max_depth=2, max_entries=10)
-                second = preview.build_directory_preview(root, show_hidden=False, max_depth=2, max_entries=10)
+                first = preview.SourcePane.build_directory_preview(root, show_hidden=False, max_depth=2, max_entries=10)
+                second = preview.SourcePane.build_directory_preview(root, show_hidden=False, max_depth=2, max_entries=10)
 
             self.assertEqual(first, second)
             self.assertEqual(call_count, 1)
@@ -94,7 +94,7 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
             existing = nested / "existing.txt"
             existing.write_text("old\n", encoding="utf-8")
 
-            first_rendered, _ = preview.build_directory_preview(
+            first_rendered, _ = preview.SourcePane.build_directory_preview(
                 root,
                 show_hidden=False,
                 max_depth=4,
@@ -106,7 +106,7 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
 
             (nested / "new.txt").write_text("new\n", encoding="utf-8")
 
-            second_rendered, _ = preview.build_directory_preview(
+            second_rendered, _ = preview.SourcePane.build_directory_preview(
                 root,
                 show_hidden=False,
                 max_depth=4,
@@ -121,7 +121,7 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
             target = root / "module.py"
             target.write_text("# alpha summary\nvalue = 1\n", encoding="utf-8")
 
-            first_rendered, _ = preview.build_directory_preview(
+            first_rendered, _ = preview.SourcePane.build_directory_preview(
                 root,
                 show_hidden=False,
                 max_depth=2,
@@ -134,7 +134,7 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
             target.write_text("# bravo summary\nvalue = 1\n", encoding="utf-8")
             os.utime(target, ns=(int(previous.st_atime_ns), int(previous.st_mtime_ns) + 1_000_000))
 
-            second_rendered, _ = preview.build_directory_preview(
+            second_rendered, _ = preview.SourcePane.build_directory_preview(
                 root,
                 show_hidden=False,
                 max_depth=2,
@@ -157,7 +157,7 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
                 file_path.resolve(): GIT_STATUS_CHANGED | GIT_STATUS_UNTRACKED,
             }
 
-            rendered, truncated = preview.build_directory_preview(
+            rendered, truncated = preview.SourcePane.build_directory_preview(
                 root,
                 show_hidden=False,
                 max_depth=3,
@@ -179,7 +179,7 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
             large_file.write_bytes(b"x" * (10 * 1024))
             small_file.write_text("tiny\n", encoding="utf-8")
 
-            rendered, truncated = preview.build_directory_preview(
+            rendered, truncated = preview.SourcePane.build_directory_preview(
                 root,
                 show_hidden=False,
                 max_depth=2,
@@ -199,7 +199,7 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
             large_file = root / "large.bin"
             large_file.write_bytes(b"x" * (10 * 1024))
 
-            rendered, truncated = preview.build_directory_preview(
+            rendered, truncated = preview.SourcePane.build_directory_preview(
                 root,
                 show_hidden=False,
                 max_depth=2,
@@ -222,7 +222,7 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
             comment_file.write_text("# Utility helpers for tests.\nvalue = 2\n", encoding="utf-8")
             plain_file.write_text("value = 3\n", encoding="utf-8")
 
-            rendered, truncated = preview.build_directory_preview(
+            rendered, truncated = preview.SourcePane.build_directory_preview(
                 root,
                 show_hidden=False,
                 max_depth=2,
@@ -247,7 +247,7 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
             target = level_4 / "deep.py"
             target.write_text("# deep module\nvalue = 1\n", encoding="utf-8")
 
-            rendered, truncated = preview.build_directory_preview(
+            rendered, truncated = preview.SourcePane.build_directory_preview(
                 root,
                 show_hidden=False,
             )

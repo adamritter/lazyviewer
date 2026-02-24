@@ -15,7 +15,7 @@ from pathlib import Path
 
 from lazyviewer.search.fuzzy import clear_project_files_cache, collect_project_files, to_project_relative
 from lazyviewer.gitignore import clear_gitignore_cache
-from lazyviewer.source_pane import build_directory_preview
+from lazyviewer.source_pane import SourcePane
 from lazyviewer.tree_model import build_tree_entries
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
@@ -85,7 +85,7 @@ class GitignoreIntegrationTests(unittest.TestCase):
             root = Path(tmp)
             self._init_repo(root)
 
-            rendered, _truncated = build_directory_preview(
+            rendered, _truncated = SourcePane.build_directory_preview(
                 root,
                 show_hidden=True,
                 max_depth=3,
