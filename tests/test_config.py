@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer import config
+from lazyviewer.runtime import config
 from lazyviewer.runtime.navigation import JumpLocation
 
 
@@ -19,7 +19,7 @@ class ConfigBehaviorTests(unittest.TestCase):
     def test_content_search_left_pane_percent_uses_distinct_config_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "lazyviewer.json"
-            with mock.patch("lazyviewer.config.CONFIG_PATH", config_path):
+            with mock.patch("lazyviewer.runtime.config.CONFIG_PATH", config_path):
                 config.save_left_pane_percent(100, 32)
                 config.save_content_search_left_pane_percent(100, 61)
 
@@ -38,14 +38,14 @@ class ConfigBehaviorTests(unittest.TestCase):
                 "a": JumpLocation(path=mark_a_path, start=12, text_x=4),
                 "'": JumpLocation(path=mark_b_path, start=0, text_x=9),
             }
-            with mock.patch("lazyviewer.config.CONFIG_PATH", config_path):
+            with mock.patch("lazyviewer.runtime.config.CONFIG_PATH", config_path):
                 config.save_named_marks(expected)
                 self.assertEqual(config.load_named_marks(), expected)
 
     def test_load_named_marks_sanitizes_invalid_entries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "lazyviewer.json"
-            with mock.patch("lazyviewer.config.CONFIG_PATH", config_path):
+            with mock.patch("lazyviewer.runtime.config.CONFIG_PATH", config_path):
                 config.save_config(
                     {
                         "named_marks": {

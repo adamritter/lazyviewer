@@ -62,7 +62,7 @@ class AppRuntimeSessionTests(unittest.TestCase):
                     return
                 snapshots["named_marks"] = dict(state.named_marks)
 
-            with mock.patch("lazyviewer.config.CONFIG_PATH", config_path), mock.patch(
+            with mock.patch("lazyviewer.runtime.config.CONFIG_PATH", config_path), mock.patch(
                 "lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop
             ), mock.patch("lazyviewer.runtime.app.TerminalController", _FakeTerminalController), mock.patch(
                 "lazyviewer.runtime.app.collect_project_file_labels", return_value=[]

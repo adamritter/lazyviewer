@@ -40,7 +40,7 @@ from .watch_refresh import (
     WatchRefreshContext,
     _refresh_git_status_overlay,
 )
-from ..config import (
+from .config import (
     load_content_search_left_pane_percent,
     load_left_pane_percent,
     load_named_marks,
