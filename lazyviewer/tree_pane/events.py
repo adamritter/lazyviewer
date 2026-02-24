@@ -1,4 +1,10 @@
-"""Tree-pane mouse event helpers."""
+"""Tree-pane click interpretation for selection, toggling, and activation.
+
+The handlers in this module translate left-pane pointer coordinates into tree
+entry intents while staying thin on side effects. They centralize query-row
+focus rules, directory-arrow toggles, and double-click activation semantics so
+runtime wiring can inject preview/rebuild/copy behavior consistently.
+"""
 
 from __future__ import annotations
 

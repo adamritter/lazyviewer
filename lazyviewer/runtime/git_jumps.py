@@ -1,4 +1,10 @@
-"""Git-modified file navigation helpers for app runtime."""
+"""Jump navigation across git-modified regions and files.
+
+This module implements the ``n``/``N`` git-jump behavior used in normal mode.
+It first navigates within current diff blocks when possible, then falls back to
+project-wide modified files ordered by tree semantics, including wrap handling
+and user-visible wrap status messages.
+"""
 
 from __future__ import annotations
 

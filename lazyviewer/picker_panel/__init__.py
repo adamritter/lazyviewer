@@ -1,4 +1,8 @@
-"""Picker panel controller API."""
+"""Public picker-panel controller exports.
+
+The picker panel unifies symbol outline jumping and command palette actions
+behind one controller plus display/source line mapping helpers.
+"""
 
 from .controller import (
     NavigationPickerDeps,

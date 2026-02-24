@@ -1,4 +1,8 @@
-"""Search package public exports."""
+"""Search package exports for fuzzy file matching and content search.
+
+The public surface intentionally exposes both cached file-index helpers and the
+ripgrep-backed content-search entry point used by content filter mode.
+"""
 
 from __future__ import annotations
 

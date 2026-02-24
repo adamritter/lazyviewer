@@ -1,4 +1,9 @@
-"""Shared pure helpers for app runtime behavior."""
+"""Pure screen-analysis helpers shared across runtime navigation features.
+
+These functions intentionally avoid ``AppState`` mutation. They inspect
+rendered lines and paths to compute anchors and ordering keys used by git-jump
+navigation and initial diff-preview placement.
+"""
 
 from __future__ import annotations
 

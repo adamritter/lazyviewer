@@ -1,4 +1,9 @@
-"""Low-level text and ANSI utilities for preview rendering."""
+"""ANSI-aware text utilities used by source preview and sticky headers.
+
+These helpers provide width calculations and formatting primitives that operate
+on rendered terminal text. They keep underline/clip behavior consistent across
+colorized content and expose scroll-percentage helpers shared by render paths.
+"""
 
 from __future__ import annotations
 

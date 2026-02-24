@@ -1,4 +1,8 @@
-"""Input decoding and handler APIs."""
+"""Input-layer public API for key decoding and interaction handlers.
+
+Exports are intentionally split between low-level terminal decoding (`read_key`)
+and higher-level mode handlers used by the runtime loop.
+"""
 
 from .reader import ESC_SEQUENCE_TIMEOUT_MS, _PENDING_BYTES, read_key
 from .keys import (

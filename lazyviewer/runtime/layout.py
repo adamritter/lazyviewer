@@ -1,4 +1,11 @@
-"""Layout operations for app runtime."""
+"""Layout policy and geometry helpers for the interactive runtime.
+
+This module keeps pane-size and reflow decisions centralized so the event loop
+and key handlers can ask for layout effects without duplicating math. It owns
+the mode-specific left-pane persistence behavior (normal vs content-search),
+derives visible content rows after optional help UI, and exposes preview-image
+placement data used by kitty graphics rendering.
+"""
 
 from __future__ import annotations
 

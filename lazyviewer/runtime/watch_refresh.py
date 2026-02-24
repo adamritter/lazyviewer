@@ -1,4 +1,9 @@
-"""Watch and git-overlay refresh helpers for app runtime."""
+"""Polling-based tree and git refresh orchestration for runtime state.
+
+The runtime loop calls these helpers on each tick. They debounce expensive
+filesystem/git checks to configured intervals, compare signatures, and trigger
+targeted refresh work only when a relevant change is detected.
+"""
 
 from __future__ import annotations
 

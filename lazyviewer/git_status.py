@@ -1,6 +1,9 @@
-"""Git status overlay helpers.
+"""Git status overlay collection and badge formatting helpers.
 
-Collects changed/untracked flags for tree badges and directory ancestors.
+This module translates porcelain git status output into compact per-path flags
+used by the tree UI. File flags are propagated to ancestor directories under
+the active tree root so collapsed folders still surface modified/untracked
+state in badge form.
 """
 
 from __future__ import annotations

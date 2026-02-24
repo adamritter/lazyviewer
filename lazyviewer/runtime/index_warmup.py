@@ -1,4 +1,10 @@
-"""Background index warmup scheduler for tree filtering."""
+"""Background warmup queue for tree-filter file-label indexes.
+
+Filtering can query a potentially large project file index. This scheduler runs
+best-effort precomputation off the main thread, collapses bursts of requests
+into the most recent root/visibility tuple, and keeps foreground interaction
+responsive even when indexing is slow.
+"""
 
 from __future__ import annotations
 

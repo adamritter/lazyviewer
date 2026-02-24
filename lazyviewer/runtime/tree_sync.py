@@ -1,4 +1,10 @@
-"""Tree selection and refresh synchronization helpers for app runtime."""
+"""Synchronize tree selection, preview target, and refresh side effects.
+
+Runtime wiring uses these dataclasses to keep selection/preview coordination in
+one place. They define how tree rebuilds preserve the selected target, when
+preview text should be rerendered, and which follow-up tasks (index warmup,
+git overlay refresh) must run after structural tree changes.
+"""
 
 from __future__ import annotations
 
