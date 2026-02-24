@@ -61,7 +61,6 @@ from .config import (
 from .editor import launch_editor
 from ..git_status import collect_git_status_overlay
 from ..source_pane.syntax import colorize_source
-from ..input import NormalKeyActions
 from ..source_pane import (
     DIR_PREVIEW_INITIAL_MAX_ENTRIES,
     build_rendered_for_path,
@@ -322,34 +321,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         mark_tree_watch_dirty,
     )
 
-    normal_key_actions = NormalKeyActions(
-        current_jump_location=current_jump_location,
-        record_jump_if_changed=record_jump_if_changed,
-        open_symbol_picker=tree_pane_runtime.navigation.open_symbol_picker,
-        reroot_to_parent=tree_pane_runtime.navigation.reroot_to_parent,
-        reroot_to_selected_target=tree_pane_runtime.navigation.reroot_to_selected_target,
-        toggle_hidden_files=tree_pane_runtime.navigation.toggle_hidden_files,
-        toggle_tree_pane=tree_pane_runtime.navigation.toggle_tree_pane,
-        toggle_wrap_mode=tree_pane_runtime.navigation.toggle_wrap_mode,
-        toggle_tree_size_labels=toggle_tree_size_labels,
-        toggle_help_panel=tree_pane_runtime.navigation.toggle_help_panel,
-        toggle_git_features=toggle_git_features,
-        launch_lazygit=launch_lazygit,
-        handle_tree_mouse_wheel=source_pane_runtime.handle_tree_mouse_wheel,
-        handle_tree_mouse_click=tree_pane_runtime.handle_tree_mouse_click,
-        move_tree_selection=tree_pane_runtime.filter.move_tree_selection,
-        rebuild_tree_entries=tree_pane_runtime.filter.rebuild_tree_entries,
-        preview_selected_entry=preview_selected_entry,
-        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
-        refresh_git_status_overlay=refresh_git_status_overlay,
-        maybe_grow_directory_preview=maybe_grow_directory_preview,
-        visible_content_rows=visible_content_rows,
-        rebuild_screen_lines=rebuild_screen_lines,
-        mark_tree_watch_dirty=mark_tree_watch_dirty,
-        launch_editor_for_path=launch_editor_for_path,
-        jump_to_next_git_modified=jump_to_next_git_modified,
-    )
-
     loop_timing = RuntimeLoopTiming(
         double_click_seconds=DOUBLE_CLICK_SECONDS,
         filter_cursor_blink_seconds=FILTER_CURSOR_BLINK_SECONDS,
@@ -366,7 +337,15 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         maybe_refresh_tree_watch=maybe_refresh_tree_watch,
         maybe_refresh_git_watch=maybe_refresh_git_watch,
         refresh_git_status_overlay=refresh_git_status_overlay,
-        normal_key_actions=normal_key_actions,
+        toggle_tree_size_labels=toggle_tree_size_labels,
+        toggle_git_features=toggle_git_features,
+        launch_lazygit=launch_lazygit,
+        mark_tree_watch_dirty=mark_tree_watch_dirty,
+        preview_selected_entry=preview_selected_entry,
+        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
+        maybe_grow_directory_preview=maybe_grow_directory_preview,
+        launch_editor_for_path=launch_editor_for_path,
+        jump_to_next_git_modified=jump_to_next_git_modified,
         save_left_pane_width=save_left_pane_width_for_mode,
         run_main_loop_fn=run_main_loop,
     )
