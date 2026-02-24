@@ -9,8 +9,6 @@ import sys
 import time
 from collections.abc import Callable
 
-from ..source_pane import SourcePane
-from .screen import _centered_scroll_start, _first_git_change_screen_line
 from .state import AppState
 from .terminal import TerminalController
 
@@ -79,91 +77,6 @@ def clear_source_selection(state: AppState) -> bool:
     return changed
 
 
-def refresh_rendered_for_current_path(
-    state: AppState,
-    style: str,
-    no_color: bool,
-    rebuild_screen_lines: Callable[..., None],
-    visible_content_rows: Callable[[], int],
-    reset_scroll: bool = True,
-    reset_dir_budget: bool = False,
-    force_rebuild: bool = False,
-) -> None:
-    """Rebuild rendered preview text for ``state.current_path`` and sync derived fields."""
-    if force_rebuild:
-        SourcePane.clear_directory_preview_cache()
-        SourcePane.clear_diff_preview_cache()
-    resolved_target = state.current_path.resolve()
-    is_dir_target = resolved_target.is_dir()
-    if is_dir_target:
-        if reset_dir_budget or state.dir_preview_path != resolved_target:
-            state.dir_preview_max_entries = SourcePane.DIR_PREVIEW_INITIAL_MAX_ENTRIES
-        dir_limit = state.dir_preview_max_entries
-    else:
-        dir_limit = SourcePane.DIR_PREVIEW_INITIAL_MAX_ENTRIES
-
-    prefer_git_diff = state.git_features_enabled and not (
-        state.tree_filter_active
-        and state.tree_filter_mode == "content"
-        and bool(state.tree_filter_query)
-    )
-    rendered_for_path = SourcePane.build_rendered_for_path(
-        state.current_path,
-        state.show_hidden,
-        style,
-        no_color,
-        dir_max_entries=dir_limit,
-        dir_skip_gitignored=skip_gitignored_for_hidden_mode(state.show_hidden),
-        prefer_git_diff=prefer_git_diff,
-        dir_git_status_overlay=(state.git_status_overlay if state.git_features_enabled else None),
-        dir_show_size_labels=state.show_tree_sizes,
-    )
-    state.rendered = rendered_for_path.text
-    rebuild_screen_lines(preserve_scroll=not reset_scroll)
-    if reset_scroll and rendered_for_path.is_git_diff_preview:
-        first_change = _first_git_change_screen_line(state.lines)
-        if first_change is not None:
-            state.start = _centered_scroll_start(
-                first_change,
-                state.max_start,
-                visible_content_rows(),
-            )
-    state.dir_preview_truncated = rendered_for_path.truncated
-    state.dir_preview_path = resolved_target if rendered_for_path.is_directory else None
-    state.preview_image_path = rendered_for_path.image_path
-    state.preview_image_format = rendered_for_path.image_format
-    state.preview_is_git_diff = rendered_for_path.is_git_diff_preview
-    if reset_scroll:
-        state.text_x = 0
-
-
-def maybe_grow_directory_preview(
-    state: AppState,
-    visible_content_rows: Callable[[], int],
-    refresh_rendered_for_current_path_fn: Callable[..., None],
-) -> bool:
-    """Expand directory preview budget when scrolling near truncated preview end."""
-    if state.dir_preview_path is None or not state.dir_preview_truncated:
-        return False
-    if state.current_path.resolve() != state.dir_preview_path:
-        return False
-    if state.dir_preview_max_entries >= SourcePane.DIR_PREVIEW_HARD_MAX_ENTRIES:
-        return False
-
-    # Only grow when the user is effectively at the end of the current preview.
-    near_end_threshold = max(1, visible_content_rows() // 3)
-    if state.start < max(0, state.max_start - near_end_threshold):
-        return False
-
-    previous_line_count = len(state.lines)
-    state.dir_preview_max_entries = min(
-        SourcePane.DIR_PREVIEW_HARD_MAX_ENTRIES,
-        state.dir_preview_max_entries + SourcePane.DIR_PREVIEW_GROWTH_STEP,
-    )
-    refresh_rendered_for_current_path_fn(reset_scroll=False, reset_dir_budget=False)
-    return len(state.lines) > previous_line_count
-
-
 def toggle_git_features(
     state: AppState,
     refresh_git_status_overlay: Callable[..., None],
@@ -181,17 +94,6 @@ def toggle_git_features(
         reset_scroll=state.git_features_enabled,
         reset_dir_budget=False,
     )
-    state.dirty = True
-
-
-def toggle_tree_size_labels(
-    state: AppState,
-    refresh_rendered_for_current_path_fn: Callable[..., None],
-) -> None:
-    """Toggle directory size labels in preview and refresh when relevant."""
-    state.show_tree_sizes = not state.show_tree_sizes
-    if state.current_path.resolve().is_dir():
-        refresh_rendered_for_current_path_fn(reset_scroll=False, reset_dir_budget=False)
     state.dirty = True
 
 

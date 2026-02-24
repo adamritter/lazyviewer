@@ -22,12 +22,9 @@ from .app_helpers import (
     clear_status_message as _clear_status_message,
     copy_text_to_clipboard as _copy_text_to_clipboard,
     launch_lazygit as _launch_lazygit,
-    maybe_grow_directory_preview as _maybe_grow_directory_preview,
-    refresh_rendered_for_current_path as _refresh_rendered_for_current_path,
     set_status_message as _set_status_message,
     skip_gitignored_for_hidden_mode as _skip_gitignored_for_hidden_mode,
     toggle_git_features as _toggle_git_features,
-    toggle_tree_size_labels as _toggle_tree_size_labels,
 )
 from .command_palette import COMMAND_PALETTE_ITEMS
 from .git_jumps import (
@@ -135,7 +132,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     watch_refresh = WatchRefreshContext()
     mark_tree_watch_dirty = watch_refresh.mark_tree_dirty
     refresh_rendered_for_current_path = partial(
-        _refresh_rendered_for_current_path,
+        SourcePane.refresh_rendered_for_current_path,
         state,
         style,
         no_color,
@@ -175,14 +172,14 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         refresh_rendered_for_current_path,
     )
     toggle_tree_size_labels = partial(
-        _toggle_tree_size_labels,
+        SourcePane.toggle_tree_size_labels,
         state,
         refresh_rendered_for_current_path,
     )
     preview_selected_entry: Callable[..., None]
 
     maybe_grow_directory_preview = partial(
-        _maybe_grow_directory_preview,
+        SourcePane.maybe_grow_directory_preview,
         state,
         visible_content_rows,
         refresh_rendered_for_current_path,

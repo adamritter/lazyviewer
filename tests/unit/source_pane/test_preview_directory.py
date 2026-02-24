@@ -80,8 +80,18 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
                 return original_scandir(path)
 
             with mock.patch("lazyviewer.tree_model.build.os.scandir", side_effect=counted_scandir):
-                first = preview.SourcePane.build_directory_preview(root, show_hidden=False, max_depth=2, max_entries=10)
-                second = preview.SourcePane.build_directory_preview(root, show_hidden=False, max_depth=2, max_entries=10)
+                first = preview.SourcePane.build_directory_preview(
+                    root,
+                    show_hidden=False,
+                    max_depth=2,
+                    max_entries=10,
+                )
+                second = preview.SourcePane.build_directory_preview(
+                    root,
+                    show_hidden=False,
+                    max_depth=2,
+                    max_entries=10,
+                )
 
             self.assertEqual(first, second)
             self.assertEqual(call_count, 1)

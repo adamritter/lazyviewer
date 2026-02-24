@@ -7,19 +7,10 @@ import os
 import shutil
 from pathlib import Path
 
+from ..runtime.screen import _centered_scroll_start, _first_git_change_screen_line
 from ..runtime.state import AppState
-from ..tree_model.rendering import TREE_SIZE_LABEL_MIN_BYTES
-from .diff import clear_diff_preview_cache as _clear_diff_preview_cache
-from .directory import (
-    DIR_PREVIEW_CACHE_MAX,
-    DIR_PREVIEW_DEFAULT_DEPTH,
-    DIR_PREVIEW_GROWTH_STEP,
-    DIR_PREVIEW_HARD_MAX_ENTRIES,
-    DIR_PREVIEW_INITIAL_MAX_ENTRIES,
-    _DIR_PREVIEW_CACHE,
-    build_directory_preview as _build_directory_preview,
-    clear_directory_preview_cache as _clear_directory_preview_cache,
-)
+from .diff import clear_diff_preview_cache
+from .directory import DirectoryPreview
 from .interaction.events import (
     directory_preview_target_for_display_line as _directory_preview_target_for_display_line,
 )
@@ -28,34 +19,32 @@ from .interaction.geometry import (
     copy_selected_source_range as _copy_selected_source_range,
 )
 from .interaction.mouse import SourcePaneClickResult, SourcePaneMouseHandlers
-from .path import BINARY_PROBE_BYTES, COLORIZE_MAX_FILE_BYTES, PNG_SIGNATURE, RenderedPath
+from .path import RenderedPath, RenderedPathPreview
 from .renderer import SourcePaneRenderer
-from .syntax import colorize_source as _colorize_source
 
 
 class SourcePane:
-    """App-owned source pane object and package façade."""
+    """Runtime source-pane controller and compatibility facade."""
 
-    DIR_PREVIEW_DEFAULT_DEPTH = DIR_PREVIEW_DEFAULT_DEPTH
-    DIR_PREVIEW_INITIAL_MAX_ENTRIES = DIR_PREVIEW_INITIAL_MAX_ENTRIES
-    DIR_PREVIEW_GROWTH_STEP = DIR_PREVIEW_GROWTH_STEP
-    DIR_PREVIEW_HARD_MAX_ENTRIES = DIR_PREVIEW_HARD_MAX_ENTRIES
-    DIR_PREVIEW_CACHE_MAX = DIR_PREVIEW_CACHE_MAX
-    TREE_SIZE_LABEL_MIN_BYTES = TREE_SIZE_LABEL_MIN_BYTES
-    BINARY_PROBE_BYTES = BINARY_PROBE_BYTES
-    COLORIZE_MAX_FILE_BYTES = COLORIZE_MAX_FILE_BYTES
-    PNG_SIGNATURE = PNG_SIGNATURE
+    DIR_PREVIEW_DEFAULT_DEPTH = DirectoryPreview.DIR_PREVIEW_DEFAULT_DEPTH
+    DIR_PREVIEW_INITIAL_MAX_ENTRIES = DirectoryPreview.DIR_PREVIEW_INITIAL_MAX_ENTRIES
+    DIR_PREVIEW_GROWTH_STEP = DirectoryPreview.DIR_PREVIEW_GROWTH_STEP
+    DIR_PREVIEW_HARD_MAX_ENTRIES = DirectoryPreview.DIR_PREVIEW_HARD_MAX_ENTRIES
+    DIR_PREVIEW_CACHE_MAX = DirectoryPreview.DIR_PREVIEW_CACHE_MAX
+    TREE_SIZE_LABEL_MIN_BYTES = DirectoryPreview.TREE_SIZE_LABEL_MIN_BYTES
+    BINARY_PROBE_BYTES = RenderedPathPreview.BINARY_PROBE_BYTES
+    COLORIZE_MAX_FILE_BYTES = RenderedPathPreview.COLORIZE_MAX_FILE_BYTES
+    PNG_SIGNATURE = RenderedPathPreview.PNG_SIGNATURE
     RenderedPath = RenderedPath
     SourcePaneClickResult = SourcePaneClickResult
     SourcePaneMouseHandlers = SourcePaneMouseHandlers
     SourcePaneGeometry = SourcePaneGeometry
     SourcePaneRenderer = SourcePaneRenderer
-    _DIR_PREVIEW_CACHE = _DIR_PREVIEW_CACHE
+    _DIR_PREVIEW_CACHE = DirectoryPreview._DIR_PREVIEW_CACHE
 
     @staticmethod
     def colorize_source(source: str, target: Path, style: str) -> str:
-        """Colorize source text for terminal preview."""
-        return _colorize_source(source, target, style)
+        return RenderedPathPreview.colorize_source(source, target, style)
 
     @staticmethod
     def build_rendered_for_path(
@@ -70,8 +59,7 @@ class SourcePane:
         dir_git_status_overlay: dict[Path, int] | None = None,
         dir_show_size_labels: bool = True,
     ) -> RenderedPath:
-        """Build source-pane preview payload for one filesystem path."""
-        return RenderedPath.from_path(
+        return RenderedPathPreview.build_rendered_for_path(
             target,
             show_hidden,
             style,
@@ -82,7 +70,6 @@ class SourcePane:
             prefer_git_diff=prefer_git_diff,
             dir_git_status_overlay=dir_git_status_overlay,
             dir_show_size_labels=dir_show_size_labels,
-            colorize_source_fn=SourcePane.colorize_source,
         )
 
     @staticmethod
@@ -95,8 +82,7 @@ class SourcePane:
         git_status_overlay: dict[Path, int] | None = None,
         show_size_labels: bool = True,
     ) -> tuple[str, bool]:
-        """Render a directory preview tree and return ``(text, truncated)``."""
-        return _build_directory_preview(
+        return DirectoryPreview.build_directory_preview(
             root_dir,
             show_hidden,
             max_depth=max_depth,
@@ -108,13 +94,11 @@ class SourcePane:
 
     @staticmethod
     def clear_directory_preview_cache() -> None:
-        """Clear cached directory previews and doc-summary cache."""
-        _clear_directory_preview_cache()
+        DirectoryPreview.clear_directory_preview_cache()
 
     @staticmethod
     def clear_diff_preview_cache() -> None:
-        """Clear cached git-diff preview payloads."""
-        _clear_diff_preview_cache()
+        clear_diff_preview_cache()
 
     @staticmethod
     def copy_selected_source_range(
@@ -123,7 +107,6 @@ class SourcePane:
         end_pos: tuple[int, int],
         copy_text_to_clipboard: Callable[[str], bool],
     ) -> bool:
-        """Copy one selected source range to clipboard."""
         return _copy_selected_source_range(
             state,
             start_pos,
@@ -136,8 +119,102 @@ class SourcePane:
         state: AppState,
         display_line: int,
     ) -> Path | None:
-        """Map one rendered preview display row to an underlying filesystem path."""
         return _directory_preview_target_for_display_line(state, display_line)
+
+    @staticmethod
+    def refresh_rendered_for_current_path(
+        state: AppState,
+        style: str,
+        no_color: bool,
+        rebuild_screen_lines: Callable[..., None],
+        visible_content_rows: Callable[[], int],
+        reset_scroll: bool = True,
+        reset_dir_budget: bool = False,
+        force_rebuild: bool = False,
+    ) -> None:
+        """Rebuild source-pane rendering for ``state.current_path``."""
+        if force_rebuild:
+            SourcePane.clear_directory_preview_cache()
+            SourcePane.clear_diff_preview_cache()
+        resolved_target = state.current_path.resolve()
+        is_dir_target = resolved_target.is_dir()
+        if is_dir_target:
+            if reset_dir_budget or state.dir_preview_path != resolved_target:
+                state.dir_preview_max_entries = SourcePane.DIR_PREVIEW_INITIAL_MAX_ENTRIES
+            dir_limit = state.dir_preview_max_entries
+        else:
+            dir_limit = SourcePane.DIR_PREVIEW_INITIAL_MAX_ENTRIES
+
+        prefer_git_diff = state.git_features_enabled and not (
+            state.tree_filter_active
+            and state.tree_filter_mode == "content"
+            and bool(state.tree_filter_query)
+        )
+        rendered_for_path = SourcePane.build_rendered_for_path(
+            state.current_path,
+            state.show_hidden,
+            style,
+            no_color,
+            dir_max_entries=dir_limit,
+            dir_skip_gitignored=not state.show_hidden,
+            prefer_git_diff=prefer_git_diff,
+            dir_git_status_overlay=(state.git_status_overlay if state.git_features_enabled else None),
+            dir_show_size_labels=state.show_tree_sizes,
+        )
+        state.rendered = rendered_for_path.text
+        rebuild_screen_lines(preserve_scroll=not reset_scroll)
+        if reset_scroll and rendered_for_path.is_git_diff_preview:
+            first_change = _first_git_change_screen_line(state.lines)
+            if first_change is not None:
+                state.start = _centered_scroll_start(
+                    first_change,
+                    state.max_start,
+                    visible_content_rows(),
+                )
+        state.dir_preview_truncated = rendered_for_path.truncated
+        state.dir_preview_path = resolved_target if rendered_for_path.is_directory else None
+        state.preview_image_path = rendered_for_path.image_path
+        state.preview_image_format = rendered_for_path.image_format
+        state.preview_is_git_diff = rendered_for_path.is_git_diff_preview
+        if reset_scroll:
+            state.text_x = 0
+
+    @staticmethod
+    def maybe_grow_directory_preview(
+        state: AppState,
+        visible_content_rows: Callable[[], int],
+        refresh_rendered_for_current_path_fn: Callable[..., None],
+    ) -> bool:
+        """Increase directory-preview entry budget when scrolling near the end."""
+        if state.dir_preview_path is None or not state.dir_preview_truncated:
+            return False
+        if state.current_path.resolve() != state.dir_preview_path:
+            return False
+        if state.dir_preview_max_entries >= SourcePane.DIR_PREVIEW_HARD_MAX_ENTRIES:
+            return False
+
+        near_end_threshold = max(1, visible_content_rows() // 3)
+        if state.start < max(0, state.max_start - near_end_threshold):
+            return False
+
+        previous_line_count = len(state.lines)
+        state.dir_preview_max_entries = min(
+            SourcePane.DIR_PREVIEW_HARD_MAX_ENTRIES,
+            state.dir_preview_max_entries + SourcePane.DIR_PREVIEW_GROWTH_STEP,
+        )
+        refresh_rendered_for_current_path_fn(reset_scroll=False, reset_dir_budget=False)
+        return len(state.lines) > previous_line_count
+
+    @staticmethod
+    def toggle_tree_size_labels(
+        state: AppState,
+        refresh_rendered_for_current_path_fn: Callable[..., None],
+    ) -> None:
+        """Toggle file-size labels in directory preview rendering."""
+        state.show_tree_sizes = not state.show_tree_sizes
+        if state.current_path.resolve().is_dir():
+            refresh_rendered_for_current_path_fn(reset_scroll=False, reset_dir_budget=False)
+        state.dirty = True
 
     def __init__(
         self,

@@ -291,3 +291,39 @@ def build_directory_preview(
         ),
     )
     return preview, truncated
+
+
+class DirectoryPreview:
+    """Directory-preview API provider consumed by the SourcePane facade."""
+
+    DIR_PREVIEW_DEFAULT_DEPTH = DIR_PREVIEW_DEFAULT_DEPTH
+    DIR_PREVIEW_INITIAL_MAX_ENTRIES = DIR_PREVIEW_INITIAL_MAX_ENTRIES
+    DIR_PREVIEW_GROWTH_STEP = DIR_PREVIEW_GROWTH_STEP
+    DIR_PREVIEW_HARD_MAX_ENTRIES = DIR_PREVIEW_HARD_MAX_ENTRIES
+    DIR_PREVIEW_CACHE_MAX = DIR_PREVIEW_CACHE_MAX
+    TREE_SIZE_LABEL_MIN_BYTES = TREE_SIZE_LABEL_MIN_BYTES
+    _DIR_PREVIEW_CACHE = _DIR_PREVIEW_CACHE
+
+    @staticmethod
+    def build_directory_preview(
+        root_dir: Path,
+        show_hidden: bool,
+        max_depth: int = DIR_PREVIEW_DEFAULT_DEPTH,
+        max_entries: int = DIR_PREVIEW_INITIAL_MAX_ENTRIES,
+        skip_gitignored: bool = False,
+        git_status_overlay: dict[Path, int] | None = None,
+        show_size_labels: bool = True,
+    ) -> tuple[str, bool]:
+        return build_directory_preview(
+            root_dir,
+            show_hidden,
+            max_depth=max_depth,
+            max_entries=max_entries,
+            skip_gitignored=skip_gitignored,
+            git_status_overlay=git_status_overlay,
+            show_size_labels=show_size_labels,
+        )
+
+    @staticmethod
+    def clear_directory_preview_cache() -> None:
+        clear_directory_preview_cache()
