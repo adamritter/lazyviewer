@@ -13,6 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ...render.ansi import ANSI_ESCAPE_RE, char_display_width
+from ...render.help import help_panel_row_count
 from ...runtime.state import AppState
 from ...tree_model import find_content_hit_index
 from ..diffmap import (
@@ -247,6 +248,33 @@ def _clicked_preview_hit_anchor(
     return preferred_path, source_line, column
 
 
+def _tree_view_rows(state: AppState) -> int:
+    """Return visible row count in the tree pane for current UI state."""
+    help_rows = help_panel_row_count(
+        state.usable,
+        state.show_help,
+        browser_visible=state.browser_visible,
+        tree_filter_active=state.tree_filter_active,
+        tree_filter_mode=state.tree_filter_mode,
+        tree_filter_editing=state.tree_filter_editing,
+    )
+    content_rows = max(1, state.usable - help_rows)
+    if state.tree_filter_active and not state.picker_active:
+        return max(1, content_rows - 1)
+    return content_rows
+
+
+def _center_tree_selection(state: AppState) -> None:
+    """Center selected tree entry in viewport when possible."""
+    if not state.tree_entries:
+        state.tree_start = 0
+        return
+    rows = _tree_view_rows(state)
+    max_tree_start = max(0, len(state.tree_entries) - rows)
+    centered = max(0, state.selected_idx - max(1, rows // 2))
+    state.tree_start = max(0, min(centered, max_tree_start))
+
+
 def _resolve_module_spec_to_path(
     state: AppState,
     module_spec: str,
@@ -375,6 +403,7 @@ def _open_content_search_for_token(
             selected_hit_idx = find_content_hit_index(state.tree_entries, preferred_hit_path)
         if selected_hit_idx is not None:
             state.selected_idx = selected_hit_idx
+            _center_tree_selection(state)
     state.tree_filter_editing = False
     state.dirty = True
     return True

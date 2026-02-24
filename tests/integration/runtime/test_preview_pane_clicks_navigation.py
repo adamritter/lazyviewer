@@ -169,6 +169,123 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
             self.assertEqual(snapshots["selected_line"], 2)
             self.assertEqual(snapshots["selected_column"], 7)
 
+    def test_single_click_identifier_centers_selected_content_hit_in_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            file_path = root / "demo.py"
+            lines = [f"line_{idx:03d} = alpha_beta_name\n" for idx in range(1, 121)]
+            file_path.write_text("".join(lines), encoding="utf-8")
+            snapshots: dict[str, object] = {}
+            target_line = 80
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_search_content(_root, query, _show_hidden, **_kwargs):
+                if query != "alpha_beta_name":
+                    return {}, False, None
+                return (
+                    {
+                        file_path.resolve(): [
+                            ContentMatch(
+                                path=file_path.resolve(),
+                                line=idx,
+                                column=12,
+                                preview=f"line_{idx:03d} = alpha_beta_name",
+                            )
+                            for idx in range(1, 121)
+                        ]
+                    },
+                    False,
+                    None,
+                )
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
+                state.start = 74
+
+                right_start_col = state.left_width + 2
+                target_idx = target_line - 1
+                plain = app_runtime.ANSI_ESCAPE_RE.sub("", state.lines[target_idx]).rstrip("\r\n")
+                token_start = plain.find("alpha_beta_name")
+                self.assertGreaterEqual(token_start, 0)
+                target_row = target_idx - state.start + 1
+                self.assertGreaterEqual(target_row, 1)
+                self.assertLessEqual(target_row, max(1, state.usable))
+                target_col = right_start_col + token_start + len("alpha")
+
+                handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{target_col}:{target_row}")
+                handle_tree_mouse_click(f"MOUSE_LEFT_UP:{target_col}:{target_row}")
+
+                entry = state.tree_entries[state.selected_idx]
+                snapshots["selected_kind"] = entry.kind
+                snapshots["selected_path"] = entry.path.resolve()
+                snapshots["selected_line"] = entry.line
+                snapshots["selected_column"] = entry.column
+                snapshots["selected_idx"] = state.selected_idx
+                snapshots["tree_start"] = state.tree_start
+                snapshots["tree_entries_len"] = len(state.tree_entries)
+                snapshots["usable"] = state.usable
+                snapshots["show_help"] = state.show_help
+                snapshots["browser_visible"] = state.browser_visible
+                snapshots["tree_filter_active"] = state.tree_filter_active
+                snapshots["tree_filter_mode"] = state.tree_filter_mode
+                snapshots["tree_filter_editing"] = state.tree_filter_editing
+                snapshots["picker_active"] = state.picker_active
+
+            with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
+            ), mock.patch(
+                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=fake_search_content
+            ), mock.patch(
+                "lazyviewer.runtime.app.collect_project_file_labels", return_value=[]
+            ), mock.patch(
+                "lazyviewer.runtime.app.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
+            ), mock.patch(
+                "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.runtime.app.load_show_hidden", return_value=False
+            ), mock.patch(
+                "lazyviewer.runtime.app.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", file_path, "monokai", True, False)
+
+            self.assertEqual(snapshots["selected_kind"], "search_hit")
+            self.assertEqual(snapshots["selected_path"], file_path.resolve())
+            self.assertEqual(snapshots["selected_line"], target_line)
+            self.assertEqual(snapshots["selected_column"], 12)
+
+            usable = int(snapshots["usable"])
+            show_help = bool(snapshots["show_help"])
+            browser_visible = bool(snapshots["browser_visible"])
+            tree_filter_active = bool(snapshots["tree_filter_active"])
+            tree_filter_mode = str(snapshots["tree_filter_mode"])
+            tree_filter_editing = bool(snapshots["tree_filter_editing"])
+            picker_active = bool(snapshots["picker_active"])
+            help_rows = help_panel_row_count(
+                usable,
+                show_help,
+                browser_visible=browser_visible,
+                tree_filter_active=tree_filter_active,
+                tree_filter_mode=tree_filter_mode,
+                tree_filter_editing=tree_filter_editing,
+            )
+            content_rows = max(1, usable - help_rows)
+            tree_rows = max(1, content_rows - 1) if tree_filter_active and not picker_active else content_rows
+            selected_idx = int(snapshots["selected_idx"])
+            max_tree_start = max(0, int(snapshots["tree_entries_len"]) - tree_rows)
+            expected_tree_start = max(0, selected_idx - max(1, tree_rows // 2))
+            expected_tree_start = min(expected_tree_start, max_tree_start)
+            self.assertEqual(int(snapshots["tree_start"]), expected_tree_start)
+
     def test_single_click_relative_import_module_in_preview_jumps_to_module_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
