@@ -11,12 +11,8 @@ import unittest
 from pathlib import Path
 
 from lazyviewer.input import (
-    NormalKeyActions,
-    PickerKeyCallbacks,
-    TreeFilterKeyCallbacks,
     handle_normal_key,
     handle_picker_key,
-    handle_tree_filter_key,
 )
 from lazyviewer.runtime.navigation import JumpLocation
 from lazyviewer.runtime.state import AppState
@@ -62,7 +58,10 @@ class KeyHandlersBehaviorTestsPart1(unittest.TestCase):
     ) -> bool:
         if launch_editor_for_path is None:
             launch_editor_for_path = lambda _path: None
-        actions = NormalKeyActions(
+        return handle_normal_key(
+            key=key,
+            term_columns=120,
+            state=state,
             current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
             record_jump_if_changed=lambda _origin: None,
             open_symbol_picker=open_symbol_picker,
@@ -89,12 +88,6 @@ class KeyHandlersBehaviorTestsPart1(unittest.TestCase):
             mark_tree_watch_dirty=lambda: None,
             launch_editor_for_path=launch_editor_for_path,
             jump_to_next_git_modified=jump_to_next_git_modified,
-        )
-        return handle_normal_key(
-            key=key,
-            term_columns=120,
-            state=state,
-            actions=actions,
         )
 
     def test_ctrl_g_launches_lazygit(self) -> None:
@@ -183,13 +176,11 @@ class KeyHandlersBehaviorTestsPart1(unittest.TestCase):
             "\x03",
             state,
             0.25,
-            PickerKeyCallbacks(
-                close_picker=lambda: close_calls.__setitem__("count", close_calls["count"] + 1),
-                refresh_command_picker_matches=lambda **_kwargs: None,
-                activate_picker_selection=lambda: False,
-                visible_content_rows=lambda: 20,
-                refresh_active_picker_matches=lambda **_kwargs: None,
-            ),
+            close_picker=lambda: close_calls.__setitem__("count", close_calls["count"] + 1),
+            refresh_command_picker_matches=lambda **_kwargs: None,
+            activate_picker_selection=lambda: False,
+            visible_content_rows=lambda: 20,
+            refresh_active_picker_matches=lambda **_kwargs: None,
         )
 
         self.assertTrue(handled)

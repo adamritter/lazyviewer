@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 from ..runtime.navigation import JumpLocation
@@ -17,131 +16,39 @@ from .key_common import default_max_horizontal_text_offset, effective_max_start
 from .key_registry import KeyComboBinding, KeyComboRegistry
 
 
-@dataclass(frozen=True)
-class NormalKeyActions:
-    """Injected runtime operations used by normal-mode key processing."""
-
-    current_jump_location: Callable[[], JumpLocation]
-    record_jump_if_changed: Callable[[JumpLocation], None]
-    open_symbol_picker: Callable[[], None]
-    reroot_to_parent: Callable[[], None]
-    reroot_to_selected_target: Callable[[], None]
-    toggle_hidden_files: Callable[[], None]
-    toggle_tree_pane: Callable[[], None]
-    toggle_wrap_mode: Callable[[], None]
-    toggle_tree_size_labels: Callable[[], None]
-    toggle_help_panel: Callable[[], None]
-    toggle_git_features: Callable[[], None]
-    launch_lazygit: Callable[[], None]
-    handle_tree_mouse_wheel: Callable[[str], bool]
-    handle_tree_mouse_click: Callable[[str], bool]
-    move_tree_selection: Callable[[int], bool]
-    rebuild_tree_entries: Callable[..., None]
-    preview_selected_entry: Callable[..., None]
-    refresh_rendered_for_current_path: Callable[..., None]
-    refresh_git_status_overlay: Callable[..., None]
-    maybe_grow_directory_preview: Callable[[], bool]
-    visible_content_rows: Callable[[], int]
-    rebuild_screen_lines: Callable[..., None]
-    mark_tree_watch_dirty: Callable[[], None]
-    launch_editor_for_path: Callable[[Path], str | None]
-    jump_to_next_git_modified: Callable[[int], bool]
-    max_horizontal_text_offset: Callable[[], int] = default_max_horizontal_text_offset
-
-
 def handle_normal_key(
     key: str,
     term_columns: int,
     state: AppState,
-    actions: NormalKeyActions | None = None,
     *,
-    current_jump_location: Callable[[], JumpLocation] | None = None,
-    record_jump_if_changed: Callable[[JumpLocation], None] | None = None,
-    open_symbol_picker: Callable[[], None] | None = None,
-    reroot_to_parent: Callable[[], None] | None = None,
-    reroot_to_selected_target: Callable[[], None] | None = None,
-    toggle_hidden_files: Callable[[], None] | None = None,
-    toggle_tree_pane: Callable[[], None] | None = None,
-    toggle_wrap_mode: Callable[[], None] | None = None,
-    toggle_tree_size_labels: Callable[[], None] | None = None,
-    toggle_help_panel: Callable[[], None] | None = None,
-    toggle_git_features: Callable[[], None] | None = None,
-    launch_lazygit: Callable[[], None] | None = None,
-    handle_tree_mouse_wheel: Callable[[str], bool] | None = None,
-    handle_tree_mouse_click: Callable[[str], bool] | None = None,
-    move_tree_selection: Callable[[int], bool] | None = None,
-    rebuild_tree_entries: Callable[..., None] | None = None,
-    preview_selected_entry: Callable[..., None] | None = None,
-    refresh_rendered_for_current_path: Callable[..., None] | None = None,
-    refresh_git_status_overlay: Callable[..., None] | None = None,
-    maybe_grow_directory_preview: Callable[[], bool] | None = None,
-    visible_content_rows: Callable[[], int] | None = None,
-    rebuild_screen_lines: Callable[..., None] | None = None,
-    mark_tree_watch_dirty: Callable[[], None] | None = None,
-    launch_editor_for_path: Callable[[Path], str | None] | None = None,
-    jump_to_next_git_modified: Callable[[int], bool] | None = None,
-    max_horizontal_text_offset: Callable[[], int] | None = None,
+    current_jump_location: Callable[[], JumpLocation],
+    record_jump_if_changed: Callable[[JumpLocation], None],
+    open_symbol_picker: Callable[[], None],
+    reroot_to_parent: Callable[[], None],
+    reroot_to_selected_target: Callable[[], None],
+    toggle_hidden_files: Callable[[], None],
+    toggle_tree_pane: Callable[[], None],
+    toggle_wrap_mode: Callable[[], None],
+    toggle_tree_size_labels: Callable[[], None],
+    toggle_help_panel: Callable[[], None],
+    toggle_git_features: Callable[[], None],
+    launch_lazygit: Callable[[], None],
+    handle_tree_mouse_wheel: Callable[[str], bool],
+    handle_tree_mouse_click: Callable[[str], bool],
+    move_tree_selection: Callable[[int], bool],
+    rebuild_tree_entries: Callable[..., None],
+    preview_selected_entry: Callable[..., None],
+    refresh_rendered_for_current_path: Callable[..., None],
+    refresh_git_status_overlay: Callable[..., None],
+    maybe_grow_directory_preview: Callable[[], bool],
+    visible_content_rows: Callable[[], int],
+    rebuild_screen_lines: Callable[..., None],
+    mark_tree_watch_dirty: Callable[[], None],
+    launch_editor_for_path: Callable[[Path], str | None],
+    jump_to_next_git_modified: Callable[[int], bool],
+    max_horizontal_text_offset: Callable[[], int] = default_max_horizontal_text_offset,
 ) -> bool:
     """Handle one normal-mode key and return ``True`` when app should quit."""
-    if actions is not None:
-        current_jump_location = actions.current_jump_location
-        record_jump_if_changed = actions.record_jump_if_changed
-        open_symbol_picker = actions.open_symbol_picker
-        reroot_to_parent = actions.reroot_to_parent
-        reroot_to_selected_target = actions.reroot_to_selected_target
-        toggle_hidden_files = actions.toggle_hidden_files
-        toggle_tree_pane = actions.toggle_tree_pane
-        toggle_wrap_mode = actions.toggle_wrap_mode
-        toggle_tree_size_labels = actions.toggle_tree_size_labels
-        toggle_help_panel = actions.toggle_help_panel
-        toggle_git_features = actions.toggle_git_features
-        launch_lazygit = actions.launch_lazygit
-        handle_tree_mouse_wheel = actions.handle_tree_mouse_wheel
-        handle_tree_mouse_click = actions.handle_tree_mouse_click
-        move_tree_selection = actions.move_tree_selection
-        rebuild_tree_entries = actions.rebuild_tree_entries
-        preview_selected_entry = actions.preview_selected_entry
-        refresh_rendered_for_current_path = actions.refresh_rendered_for_current_path
-        refresh_git_status_overlay = actions.refresh_git_status_overlay
-        maybe_grow_directory_preview = actions.maybe_grow_directory_preview
-        max_horizontal_text_offset = actions.max_horizontal_text_offset
-        visible_content_rows = actions.visible_content_rows
-        rebuild_screen_lines = actions.rebuild_screen_lines
-        mark_tree_watch_dirty = actions.mark_tree_watch_dirty
-        launch_editor_for_path = actions.launch_editor_for_path
-        jump_to_next_git_modified = actions.jump_to_next_git_modified
-
-    if max_horizontal_text_offset is None:
-        max_horizontal_text_offset = default_max_horizontal_text_offset
-
-    if (
-        current_jump_location is None
-        or record_jump_if_changed is None
-        or open_symbol_picker is None
-        or reroot_to_parent is None
-        or reroot_to_selected_target is None
-        or toggle_hidden_files is None
-        or toggle_tree_pane is None
-        or toggle_wrap_mode is None
-        or toggle_tree_size_labels is None
-        or toggle_help_panel is None
-        or toggle_git_features is None
-        or launch_lazygit is None
-        or handle_tree_mouse_wheel is None
-        or handle_tree_mouse_click is None
-        or move_tree_selection is None
-        or rebuild_tree_entries is None
-        or preview_selected_entry is None
-        or refresh_rendered_for_current_path is None
-        or refresh_git_status_overlay is None
-        or maybe_grow_directory_preview is None
-        or visible_content_rows is None
-        or rebuild_screen_lines is None
-        or mark_tree_watch_dirty is None
-        or launch_editor_for_path is None
-        or jump_to_next_git_modified is None
-    ):
-        raise TypeError("handle_normal_key requires actions or all explicit normal-mode handlers.")
     key_lower = key.lower()
 
     def set_directory_expanded_state(resolved: Path, expanded: bool) -> None:

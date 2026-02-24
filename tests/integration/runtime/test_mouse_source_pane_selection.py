@@ -29,7 +29,33 @@ from lazyviewer.search.content import ContentMatch
 
 def _callback(kwargs: dict[str, object], name: str):
     callbacks = kwargs["callbacks"]
-    return getattr(callbacks, name)
+    if hasattr(callbacks, name):
+        return getattr(callbacks, name)
+
+    tree_pane = getattr(callbacks, "tree_pane", None)
+    source_pane = getattr(callbacks, "source_pane", None)
+    layout = getattr(callbacks, "layout", None)
+    if tree_pane is None or source_pane is None or layout is None:
+        raise AttributeError(f"{type(callbacks).__name__} has no callback {name!r}")
+
+    mapping = {
+        "activate_tree_filter_selection": tree_pane.filter.activate_tree_filter_selection,
+        "apply_tree_filter_query": tree_pane.filter.apply_tree_filter_query,
+        "close_tree_filter": tree_pane.filter.close_tree_filter,
+        "handle_normal_key": callbacks.handle_normal_key,
+        "handle_tree_mouse_click": tree_pane.handle_tree_mouse_click,
+        "handle_tree_mouse_wheel": source_pane.handle_tree_mouse_wheel,
+        "maybe_refresh_git_watch": callbacks.maybe_refresh_git_watch,
+        "open_tree_filter": tree_pane.filter.open_tree_filter,
+        "rebuild_screen_lines": layout.rebuild_screen_lines,
+        "refresh_git_status_overlay": callbacks.refresh_git_status_overlay,
+        "save_left_pane_width": callbacks.save_left_pane_width,
+        "set_named_mark": tree_pane.navigation.set_named_mark,
+        "tick_source_selection_drag": tree_pane.tick_source_selection_drag,
+    }
+    if name not in mapping:
+        raise AttributeError(f"{type(callbacks).__name__} has no callback {name!r}")
+    return mapping[name]
 
 class AppRuntimeMouseTestsPart2(unittest.TestCase):
     def test_source_mouse_drag_copies_selected_text_to_clipboard(self) -> None:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 
 from ..runtime.state import AppState
 from .key_common import parse_mouse_col_row
@@ -39,17 +38,6 @@ def _handle_picker_mouse_wheel(state: AppState, key: str) -> None:
     state.start = max(0, min(state.start, state.max_start))
     if state.start != prev_start:
         state.dirty = True
-
-
-@dataclass(frozen=True)
-class PickerKeyCallbacks:
-    """External operations required for picker key handling."""
-
-    close_picker: Callable[[], None]
-    refresh_command_picker_matches: Callable[..., None]
-    activate_picker_selection: Callable[[], bool]
-    visible_content_rows: Callable[[], int]
-    refresh_active_picker_matches: Callable[..., None]
 
 
 def _handle_picker_mouse_click(
@@ -99,34 +87,18 @@ def handle_picker_key(
     key: str,
     state: AppState,
     double_click_seconds: float,
-    callbacks: PickerKeyCallbacks | None = None,
     *,
-    close_picker: Callable[[], None] | None = None,
-    refresh_command_picker_matches: Callable[..., None] | None = None,
-    activate_picker_selection: Callable[[], bool] | None = None,
-    visible_content_rows: Callable[[], int] | None = None,
-    refresh_active_picker_matches: Callable[..., None] | None = None,
+    close_picker: Callable[[], None],
+    refresh_command_picker_matches: Callable[..., None],
+    activate_picker_selection: Callable[[], bool],
+    visible_content_rows: Callable[[], int],
+    refresh_active_picker_matches: Callable[..., None],
 ) -> tuple[bool, bool]:
     """Handle one key while picker is active.
 
     Returns ``(handled, should_quit)`` so the main loop can stop event
     propagation and optionally terminate the application.
     """
-    if callbacks is not None:
-        close_picker = callbacks.close_picker
-        refresh_command_picker_matches = callbacks.refresh_command_picker_matches
-        activate_picker_selection = callbacks.activate_picker_selection
-        visible_content_rows = callbacks.visible_content_rows
-        refresh_active_picker_matches = callbacks.refresh_active_picker_matches
-
-    if (
-        close_picker is None
-        or refresh_command_picker_matches is None
-        or activate_picker_selection is None
-        or visible_content_rows is None
-        or refresh_active_picker_matches is None
-    ):
-        raise TypeError("handle_picker_key requires callbacks or all explicit picker handlers.")
     key_lower = key.lower()
 
     if not state.picker_active:
