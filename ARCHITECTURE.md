@@ -17,7 +17,7 @@ The codebase is organized around a **single mutable runtime state object** (`App
 The architecture is intentionally callback-driven:
 
 - The main loop (`lazyviewer/runtime/loop.py`) is wiring-heavy and generic.
-- Domain logic lives in subsystem controllers (`filter_panel`, `picker_panel`, `source_pane`, `tree_pane`, `runtime/*` helpers).
+- Domain logic lives in subsystem controllers (`tree_pane/panels/*`, `source_pane/*`, `tree_model/*`, `runtime/*` helpers).
 - Rendering is side-effect free until final frame write.
 
 This keeps feature logic testable and separates "what changed" from "how it is drawn."
@@ -31,13 +31,30 @@ Primary packages and responsibilities:
 - `lazyviewer/cli.py`: CLI argument parsing and launch handoff.
 - `lazyviewer/runtime/*`: composition, event loop, layout, watch refresh, git jumps, terminal lifecycle, shared state.
 - `lazyviewer/render/*`: frame rendering and ANSI line shaping.
-- `lazyviewer/tree_pane/*`: tree model building, formatting, tree mouse interactions.
-- `lazyviewer/source_pane/*`: preview generation (file/dir/diff), sticky headers, highlighting, source mouse behavior.
-- `lazyviewer/filter_panel/controller.py`: file filter + content search controller.
-- `lazyviewer/picker_panel/controller.py`: symbol picker + command palette + navigation ops.
+- `lazyviewer/tree_model/*`: shared tree entry construction, filtering, layout helpers, and metadata/doc-summary caching.
+- `lazyviewer/tree_pane/*`: left-pane rendering and click semantics.
+- `lazyviewer/tree_pane/panels/filter/*`: file-filter + content-search controller.
+- `lazyviewer/tree_pane/panels/picker/*`: symbol picker + command palette + navigation controller.
+- `lazyviewer/source_pane/*`: right-pane preview generation (file/dir/diff/image), sticky headers, highlighting, rendering.
+- `lazyviewer/source_pane/interaction/*`: source-pane click/drag behavior and geometry utilities.
 - `lazyviewer/input/*`: raw terminal input decoding and mode-specific key/mouse handlers.
 - `lazyviewer/search/*`: fuzzy matching and ripgrep content search.
 - `lazyviewer/git_status.py`, `lazyviewer/watch.py`, `lazyviewer/gitignore.py`: git metadata and watch signatures.
+
+### 2.1 UI-Oriented Hierarchy Rules
+
+Current directory hierarchy follows UI responsibilities with one shared model layer:
+
+- Shared layer: `tree_model/*` (tree rows, metadata extraction, filter/navigation primitives).
+- Left-pane UI: `tree_pane/*` and `tree_pane/panels/*`.
+- Right-pane UI: `source_pane/*` and `source_pane/interaction/*`.
+- Orchestration layer: `runtime/*` composes all panels into one interactive loop.
+
+Practical rule used during refactors:
+
+- If logic is metadata about filesystem/tree nodes (mtime, git flags, doc summaries), it belongs in `tree_model`.
+- If logic is pane-specific rendering/interaction, it belongs in that pane package.
+- `runtime/app.py` is composition glue and should avoid re-implementing domain rules.
 
 ---
 
@@ -116,7 +133,7 @@ Key composition phases:
 
 1. **Environment + state init**
    - terminal sizing,
-   - tree entries via `tree_pane.model.build_tree_entries`,
+   - tree entries via `tree_model.build_tree_entries`,
    - preview payload via `source_pane.build_rendered_for_path`,
    - initial `AppState`.
 
@@ -132,8 +149,8 @@ Key composition phases:
    - `_refresh_git_status_overlay`.
 
 4. **Controllers**
-   - `TreeFilterOps` (`filter_panel/controller.py`),
-   - `NavigationPickerOps` (`picker_panel/controller.py`),
+   - `TreeFilterOps` (`tree_pane/panels/filter/controller.py`),
+   - `NavigationPickerOps` (`tree_pane/panels/picker/controller.py`),
    - `GitModifiedJumpDeps` (`runtime/git_jumps.py`).
 
 5. **Mouse routing**
@@ -288,24 +305,28 @@ These are reused by both panes and highlighting modules.
 
 ---
 
-## 9. Tree Pane Architecture
+## 9. Tree Architecture
 
-## 9.1 Data model (`tree_pane/model.py`)
+## 9.1 Shared tree model (`tree_model/*`)
 
-`TreeEntry` is the left-pane row model:
+`tree_model` is the shared data/metadata layer consumed by both panes.
 
-- normal path rows (`kind="path"`),
-- synthetic content-hit rows (`kind="search_hit"` with `line`/`column`/`display`).
+Core types and builders:
 
-Builders:
+- `TreeEntry`: canonical row model (`kind="path"` or synthetic `kind="search_hit"`).
+- `DirectoryChild`: directory-scan record with `file_size`, `mtime_ns`, `git_status_flags`, and optional `doc_summary`.
+- `build_tree_entries`: full tree projection from filesystem + expansion state.
+- `filter_tree_entries_for_files`: file-query projection.
+- `filter_tree_entries_for_content_matches`: content-hit projection.
+- `list_directory_children`: reusable directory scan with sorting and metadata extraction.
 
-- `build_tree_entries` for unfiltered tree,
-- `filter_tree_entries_for_files` for file-query mode,
-- `filter_tree_entries_for_content_matches` for content-hit mode.
+Metadata ownership:
 
-All builders maintain directory-first ordering and preserve expanded-directory context.
+- `tree_model/doc_summary.py` owns top-of-file summary extraction + bounded LRU cache.
+- Directory preview opts in to summaries when needed (`include_doc_summaries=True`) instead of reimplementing parsing.
+- This keeps metadata policy centralized and reduces duplicated cache logic.
 
-## 9.2 Tree rendering (`tree_pane/rendering.py`)
+## 9.2 Left-pane rendering (`tree_pane/rendering.py`)
 
 `TreePaneRenderer` renders:
 
@@ -316,7 +337,7 @@ All builders maintain directory-first ordering and preserve expanded-directory c
 
 `_format_tree_filter_status` shows loading spinner, match counts, and truncation.
 
-## 9.3 Tree mouse semantics (`tree_pane/events.py`)
+## 9.3 Tree click semantics (`tree_pane/events.py`)
 
 - clicking filter query row enters edit mode,
 - clicking directory arrow toggles expansion immediately,
@@ -325,6 +346,13 @@ All builders maintain directory-first ordering and preserve expanded-directory c
   - directory toggles,
   - file copies basename,
   - active filter mode triggers selection activation.
+
+## 9.4 Left-pane panel controllers (`tree_pane/panels/*`)
+
+- `tree_pane/panels/filter/*`: `TreeFilterOps` (`lifecycle`, `matching`, `navigation` mixins).
+- `tree_pane/panels/picker/*`: `NavigationPickerOps` (`picker_lifecycle`, `matching`, `navigation`, `view_actions` mixins).
+
+This split keeps domain state machines close to each UI panel while leaving runtime composition in `runtime/app.py`.
 
 ---
 
@@ -336,7 +364,7 @@ The source pane is a layered pipeline:
 2. map source/display lines (`source.py`, `diffmap.py`),
 3. apply overlays (`highlighting.py`, `sticky.py`),
 4. render rows (`renderer.py`),
-5. route source clicks/drags (`mouse.py`, `events.py`).
+5. route source clicks/drags (`interaction/mouse.py`, `interaction/events.py`).
 
 ## 10.1 Path-to-preview resolution (`source_pane/path.py`)
 
@@ -361,8 +389,8 @@ Features:
 - optional hidden/gitignored filtering,
 - optional size labels,
 - git badges per row,
-- top-of-file doc summary extraction for file rows,
-- LRU cache keyed by root+mtime+overlay signature+options.
+- cached doc summaries sourced from `tree_model.list_directory_children(...)`,
+- LRU cache keyed by root+mtime+overlay signature+options and validated by watched path metadata.
 
 ## 10.3 Diff preview (`source_pane/diff.py`)
 
@@ -392,15 +420,15 @@ Features:
 - `sticky.py`: sticky symbol scope logic and header row generation.
 - `text.py`: ANSI-aware widths, underline helpers, scroll percent.
 
-## 10.6 Source click/drag interactions
+## 10.6 Source click/drag interactions (`source_pane/interaction/*`)
 
-`source_pane/mouse.py`:
+`source_pane/interaction/mouse.py`:
 
 - drag-select with auto-scroll at pane edges (vertical + horizontal),
 - copy selected range to clipboard on release,
 - delegates click intent handling.
 
-`source_pane/events.py` click intent priority:
+`source_pane/interaction/events.py` click intent priority:
 
 1. directory preview row jump,
 2. import target resolution jump (`import` / `from ... import ...`),
@@ -408,9 +436,9 @@ Features:
 
 ---
 
-## 11. Filter Panel (File Filter + Content Search)
+## 11. Tree Filter Panel (File Filter + Content Search)
 
-`filter_panel/controller.py` (`TreeFilterOps`) owns session semantics:
+`tree_pane/panels/filter/controller.py` (`TreeFilterOps`) owns session semantics:
 
 - open/close mode transitions (`files` vs `content`),
 - query application,
@@ -431,7 +459,7 @@ Important behavior:
 
 ## 12. Picker Panel and Navigation Controller
 
-`picker_panel/controller.py` (`NavigationPickerOps`) unifies:
+`tree_pane/panels/picker/controller.py` (`NavigationPickerOps`) unifies:
 
 - symbol picker open/match/activate,
 - command palette open/match/dispatch,
@@ -537,8 +565,9 @@ Multiple bounded caches reduce repeated heavy work:
 - directory preview LRU (`source_pane/directory.py`),
 - diff preview LRU (`source_pane/diff.py`),
 - symbol context LRU (`source_pane/symbols.py`),
+- top-of-file doc summary LRU (`tree_model/doc_summary.py`),
 - project file list/label caches (`search/fuzzy.py`),
-- content search query cache (`filter_panel/controller.py`).
+- content search query cache (`tree_pane/panels/filter/matching.py`).
 
 Other performance controls:
 
@@ -565,7 +594,7 @@ preview selection updates from selected hit.
 ## 18.3 Source click token search flow
 
 mouse event decoded in `input.reader` -> routed by `input.mouse` ->
-`SourcePaneMouseHandlers` click -> `source_pane.events.handle_preview_click` ->
+`SourcePaneMouseHandlers` click -> `source_pane.interaction.events.handle_preview_click` ->
 token extracted -> opens content filter and applies query.
 
 ## 18.4 Git jump flow
@@ -596,8 +625,10 @@ A simplified dependency direction:
 
 - `cli` -> `runtime.app`
 - `runtime.loop` -> `input`, `render`, callback interfaces
-- `runtime.app` -> assembles `filter_panel`, `picker_panel`, `source_pane`, `tree_pane`, `search`, `git/watch`
+- `runtime.app` -> assembles `tree_model`, `tree_pane/panels`, `source_pane`, `input`, `search`, `git/watch`
 - `render` -> `tree_pane.rendering` + `source_pane.renderer`
-- `source_pane` and `tree_pane` use lower-level utilities (`render.ansi`, `git_status`, `gitignore`, `search` models)
+- `tree_pane` consumes `tree_model` for rows/navigation/filtering primitives
+- `source_pane` consumes `tree_model` for directory metadata/doc summaries
+- leaf modules use lower-level utilities (`render.ansi`, `git_status`, `gitignore`, `search` models)
 
 This keeps runtime orchestration centralized while allowing leaf modules to stay focused and testable.
