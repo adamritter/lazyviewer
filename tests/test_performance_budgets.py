@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from lazyviewer.source_pane.diff import _ADDED_BG_SGR, _REMOVED_BG_SGR, _apply_line_background
-from lazyviewer.navigation import JumpLocation
+from lazyviewer.runtime.navigation import JumpLocation
 from lazyviewer.render import render_dual_page
 from lazyviewer.filter_panel import TreeFilterDeps, TreeFilterOps
 from lazyviewer.search.fuzzy import (

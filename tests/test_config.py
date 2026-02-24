@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 from lazyviewer import config
-from lazyviewer.navigation import JumpLocation
+from lazyviewer.runtime.navigation import JumpLocation
 
 
 class ConfigBehaviorTests(unittest.TestCase):

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .navigation import JumpLocation, is_named_mark_key
+from .runtime.navigation import JumpLocation, is_named_mark_key
 
 CONFIG_PATH = Path.home() / ".config" / "lazyviewer.json"
 

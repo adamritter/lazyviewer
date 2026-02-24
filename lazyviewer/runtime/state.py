@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..navigation import JumpHistory, JumpLocation
+from .navigation import JumpHistory, JumpLocation
 from ..tree_pane.model import TreeEntry
 
 

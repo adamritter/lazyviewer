@@ -9,7 +9,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from lazyviewer.navigation import JumpHistory, JumpLocation, is_named_mark_key
+from lazyviewer.runtime.navigation import JumpHistory, JumpLocation, is_named_mark_key
 
 
 def _loc(name: str, start: int = 0, text_x: int = 0) -> JumpLocation:

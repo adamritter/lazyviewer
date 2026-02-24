@@ -22,7 +22,7 @@ from lazyviewer.runtime.screen import (
     _tree_order_key_for_relative_path,
 )
 from lazyviewer.git_status import GIT_STATUS_CHANGED
-from lazyviewer.navigation import JumpLocation
+from lazyviewer.runtime.navigation import JumpLocation
 from lazyviewer.render import help_panel_row_count, render_dual_page
 from lazyviewer.search.content import ContentMatch
 

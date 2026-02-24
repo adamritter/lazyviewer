@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import save_named_marks, save_show_hidden
-from ..navigation import JumpLocation, is_named_mark_key
+from ..runtime.navigation import JumpLocation, is_named_mark_key
 from ..search.fuzzy import fuzzy_match_labels
 from ..runtime.state import AppState
 from ..source_pane.symbols import collect_symbols

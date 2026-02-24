@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..navigation import JumpLocation
+from ..runtime.navigation import JumpLocation
 from ..search.content import ContentMatch, search_project_content_rg
 from ..search.fuzzy import (
     STRICT_SUBSTRING_ONLY_MIN_FILES,

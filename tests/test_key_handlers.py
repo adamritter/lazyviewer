@@ -18,7 +18,7 @@ from lazyviewer.input import (
     handle_picker_key,
     handle_tree_filter_key,
 )
-from lazyviewer.navigation import JumpLocation
+from lazyviewer.runtime.navigation import JumpLocation
 from lazyviewer.runtime.state import AppState
 from lazyviewer.tree_pane.model import TreeEntry
 

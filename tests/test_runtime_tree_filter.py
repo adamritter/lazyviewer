@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.navigation import JumpLocation
+from lazyviewer.runtime.navigation import JumpLocation
 from lazyviewer.filter_panel import TreeFilterDeps, TreeFilterOps
 from lazyviewer.runtime.state import AppState
 from lazyviewer.tree_pane.model import TreeEntry
