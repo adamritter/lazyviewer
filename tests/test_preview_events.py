@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lazyviewer.source_pane.events import directory_preview_target_for_display_line
+from lazyviewer.source_pane.interaction.events import directory_preview_target_for_display_line
 from lazyviewer.runtime.state import AppState
 from lazyviewer.tree_pane.model import TreeEntry
 

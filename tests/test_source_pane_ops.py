@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from lazyviewer.runtime.state import AppState
-from lazyviewer.source_pane.ops import SourcePaneOps
+from lazyviewer.source_pane.interaction.ops import SourcePaneOps
 from lazyviewer.tree_pane.model import TreeEntry
 
 
@@ -47,7 +47,7 @@ class SourcePaneOpsTests(unittest.TestCase):
         )
 
         with mock.patch(
-            "lazyviewer.source_pane.ops._rendered_line_display_width",
+            "lazyviewer.source_pane.interaction.ops._rendered_line_display_width",
             side_effect=lambda line: len(line),
         ) as width_mock:
             first = ops.max_horizontal_text_offset()
@@ -66,7 +66,7 @@ class SourcePaneOpsTests(unittest.TestCase):
         )
 
         with mock.patch(
-            "lazyviewer.source_pane.ops._rendered_line_display_width",
+            "lazyviewer.source_pane.interaction.ops._rendered_line_display_width",
             side_effect=lambda line: len(line),
         ) as width_mock:
             ops.max_horizontal_text_offset()

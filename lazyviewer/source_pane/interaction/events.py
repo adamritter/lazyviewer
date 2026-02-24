@@ -12,8 +12,8 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-from ..render.ansi import ANSI_ESCAPE_RE, char_display_width
-from ..runtime.state import AppState
+from ...render.ansi import ANSI_ESCAPE_RE, char_display_width
+from ...runtime.state import AppState
 
 _CLICK_SEARCH_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 _TRAILING_GIT_BADGES_RE = re.compile(r"^(.*?)(?:\s(?:\[(?:M|\?)\])+)$")

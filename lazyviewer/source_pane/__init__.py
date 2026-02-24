@@ -26,8 +26,13 @@ from .directory import (
     build_directory_preview,
     clear_directory_preview_cache,
 )
-from .mouse import SourcePaneClickResult, SourcePaneMouseCallbacks, SourcePaneMouseHandlers
-from .ops import SourcePaneOps, copy_selected_source_range
+from .interaction import (
+    SourcePaneClickResult,
+    SourcePaneMouseCallbacks,
+    SourcePaneMouseHandlers,
+    SourcePaneOps,
+    copy_selected_source_range,
+)
 from .renderer import SourcePaneRenderer
 from .path import (
     BINARY_PROBE_BYTES,

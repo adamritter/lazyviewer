@@ -60,7 +60,7 @@ from ..source_pane import (
     clear_directory_preview_cache,
 )
 from ..source_pane.diff import clear_diff_preview_cache
-from ..source_pane.events import directory_preview_target_for_display_line as preview_directory_preview_target_for_display_line
+from ..source_pane.interaction.events import directory_preview_target_for_display_line as preview_directory_preview_target_for_display_line
 from ..render import help_panel_row_count
 from .loop import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
 from ..tree_pane.panels.picker import NavigationPickerDeps, NavigationPickerOps

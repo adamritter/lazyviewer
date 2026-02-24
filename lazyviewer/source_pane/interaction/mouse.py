@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .events import handle_preview_click
-from ..runtime.state import AppState
+from ...runtime.state import AppState
 
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR = 2
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR = 1
