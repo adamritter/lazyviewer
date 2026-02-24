@@ -36,13 +36,14 @@ from .git_jumps import (
 from ..input import (
     TreeMouseCallbacks,
     TreeMouseHandlers,
-    _handle_tree_mouse_wheel,
 )
 from ..source_pane import SourcePaneOps, copy_selected_source_range as copy_source_selection_range
+from ..source_pane.pane import SourcePane
 from .tree_sync import (
     PreviewSelectionDeps,
     TreeRefreshSyncDeps,
 )
+from .application import App
 from .index_warmup import TreeFilterIndexWarmupScheduler
 from .layout import PagerLayoutOps
 from .navigation_proxy import NavigationProxy
@@ -61,7 +62,7 @@ from .config import (
 from .editor import launch_editor
 from ..git_status import collect_git_status_overlay
 from ..source_pane.syntax import colorize_source
-from ..input import NormalKeyOps, handle_normal_key as handle_normal_key_event
+from ..input import NormalKeyOps
 from ..source_pane import (
     DIR_PREVIEW_INITIAL_MAX_ENTRIES,
     build_rendered_for_path,
@@ -71,9 +72,9 @@ from ..render import help_panel_row_count
 from .loop import RuntimeLoopTiming, run_main_loop
 from ..tree_pane.panels.picker import NavigationPickerOps
 from ..tree_pane.panels.filter import TreeFilterOps
+from ..tree_pane.pane import TreePane
 from ..search.fuzzy import collect_project_file_labels
 from .terminal import TerminalController
-from .state import AppState
 from ..tree_model import (
     build_tree_entries,
     clamp_left_width,
@@ -91,296 +92,6 @@ GIT_FEATURES_DEFAULT_ENABLED = True
 TREE_SIZE_LABELS_DEFAULT_ENABLED = True
 CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT = 50.0
 CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT = 8.0
-
-
-class SourcePaneRuntime:
-    """Runtime-owned source-pane object for geometry and wheel handling."""
-
-    def __init__(
-        self,
-        *,
-        state: AppState,
-        ops: SourcePaneOps,
-        move_tree_selection: Callable[[int], bool],
-        maybe_grow_directory_preview: Callable[[], bool],
-    ) -> None:
-        self._ops = ops
-        self._handle_tree_mouse_wheel = partial(
-            _handle_tree_mouse_wheel,
-            state,
-            move_tree_selection,
-            maybe_grow_directory_preview,
-            self.max_horizontal_text_offset,
-        )
-
-    def visible_content_rows(self) -> int:
-        return self._ops.visible_content_rows()
-
-    def max_horizontal_text_offset(self) -> int:
-        return self._ops.max_horizontal_text_offset()
-
-    def source_pane_col_bounds(self) -> tuple[int, int]:
-        return self._ops.source_pane_col_bounds()
-
-    def source_selection_position(self, col: int, row: int) -> tuple[int, int] | None:
-        return self._ops.source_selection_position(col, row)
-
-    def handle_tree_mouse_wheel(self, mouse_key: str) -> bool:
-        return self._handle_tree_mouse_wheel(mouse_key)
-
-
-class TreePaneRuntime:
-    """Runtime-owned tree-pane object exposing filter/picker/mouse operations."""
-
-    def __init__(
-        self,
-        *,
-        filter_ops: TreeFilterOps,
-        navigation_ops: NavigationPickerOps,
-        mouse_handlers: TreeMouseHandlers,
-    ) -> None:
-        self.filter = filter_ops
-        self.navigation = navigation_ops
-        self.mouse = mouse_handlers
-
-    # filter callbacks
-    def get_tree_filter_loading_until(self) -> float:
-        return self.filter.get_loading_until()
-
-    def tree_view_rows(self) -> int:
-        return self.filter.tree_view_rows()
-
-    def tree_filter_prompt_prefix(self) -> str:
-        return self.filter.tree_filter_prompt_prefix()
-
-    def tree_filter_placeholder(self) -> str:
-        return self.filter.tree_filter_placeholder()
-
-    def open_tree_filter(self, mode: str) -> None:
-        self.filter.open_tree_filter(mode)
-
-    def close_tree_filter(self, *args, **kwargs) -> None:
-        self.filter.close_tree_filter(*args, **kwargs)
-
-    def activate_tree_filter_selection(self) -> None:
-        self.filter.activate_tree_filter_selection()
-
-    def move_tree_selection(self, direction: int) -> bool:
-        return self.filter.move_tree_selection(direction)
-
-    def apply_tree_filter_query(self, *args, **kwargs) -> None:
-        self.filter.apply_tree_filter_query(*args, **kwargs)
-
-    def jump_to_next_content_hit(self, direction: int) -> bool:
-        return self.filter.jump_to_next_content_hit(direction)
-
-    def coerce_tree_filter_result_index(self, idx: int) -> int | None:
-        return self.filter.coerce_tree_filter_result_index(idx)
-
-    def rebuild_tree_entries(self, *args, **kwargs) -> None:
-        self.filter.rebuild_tree_entries(*args, **kwargs)
-
-    # picker/navigation callbacks
-    def open_symbol_picker(self) -> None:
-        self.navigation.open_symbol_picker()
-
-    def open_command_picker(self) -> None:
-        self.navigation.open_command_picker()
-
-    def close_picker(self, *args, **kwargs) -> None:
-        self.navigation.close_picker(*args, **kwargs)
-
-    def refresh_command_picker_matches(self, *args, **kwargs) -> None:
-        self.navigation.refresh_command_picker_matches(*args, **kwargs)
-
-    def activate_picker_selection(self) -> bool:
-        return self.navigation.activate_picker_selection()
-
-    def refresh_active_picker_matches(self, *args, **kwargs) -> None:
-        self.navigation.refresh_active_picker_matches(*args, **kwargs)
-
-    def reroot_to_parent(self) -> None:
-        self.navigation.reroot_to_parent()
-
-    def reroot_to_selected_target(self) -> None:
-        self.navigation.reroot_to_selected_target()
-
-    def toggle_hidden_files(self) -> None:
-        self.navigation.toggle_hidden_files()
-
-    def toggle_tree_pane(self) -> None:
-        self.navigation.toggle_tree_pane()
-
-    def toggle_wrap_mode(self) -> None:
-        self.navigation.toggle_wrap_mode()
-
-    def toggle_help_panel(self) -> None:
-        self.navigation.toggle_help_panel()
-
-    def set_named_mark(self, key: str) -> bool:
-        return self.navigation.set_named_mark(key)
-
-    def jump_to_named_mark(self, key: str) -> bool:
-        return self.navigation.jump_to_named_mark(key)
-
-    def current_jump_location(self):
-        return self.navigation.current_jump_location()
-
-    def record_jump_if_changed(self, origin) -> None:
-        self.navigation.record_jump_if_changed(origin)
-
-    def jump_back_in_history(self) -> bool:
-        return self.navigation.jump_back_in_history()
-
-    def jump_forward_in_history(self) -> bool:
-        return self.navigation.jump_forward_in_history()
-
-    def jump_to_path(self, target: Path) -> None:
-        self.navigation.jump_to_path(target)
-
-    def jump_to_line(self, line_number: int) -> None:
-        self.navigation.jump_to_line(line_number)
-
-    # mouse callbacks
-    def handle_tree_mouse_click(self, mouse_key: str) -> bool:
-        return self.mouse.handle_tree_mouse_click(mouse_key)
-
-    def tick_source_selection_drag(self) -> None:
-        self.mouse.tick_source_selection_drag()
-
-
-class App:
-    """Composed runtime app owning pane controllers and loop wiring."""
-
-    def __init__(
-        self,
-        *,
-        state: AppState,
-        terminal: TerminalController,
-        stdin_fd: int,
-        timing: RuntimeLoopTiming,
-        layout: PagerLayoutOps,
-        source_pane: SourcePaneRuntime,
-        tree_pane: TreePaneRuntime,
-        maybe_refresh_tree_watch: Callable[[], None],
-        maybe_refresh_git_watch: Callable[[], None],
-        refresh_git_status_overlay: Callable[..., None],
-        normal_key_ops: NormalKeyOps,
-        save_left_pane_width: Callable[[int, int], None],
-    ) -> None:
-        self.state = state
-        self.terminal = terminal
-        self.stdin_fd = stdin_fd
-        self.timing = timing
-        self.layout = layout
-        self.source_pane = source_pane
-        self.tree_pane = tree_pane
-        self.maybe_refresh_tree_watch = maybe_refresh_tree_watch
-        self.maybe_refresh_git_watch = maybe_refresh_git_watch
-        self.refresh_git_status_overlay = refresh_git_status_overlay
-        self.normal_key_ops = normal_key_ops
-        self.save_left_pane_width = save_left_pane_width
-
-    # loop callback surface
-    def get_tree_filter_loading_until(self) -> float:
-        return self.tree_pane.get_tree_filter_loading_until()
-
-    def tree_view_rows(self) -> int:
-        return self.tree_pane.tree_view_rows()
-
-    def tree_filter_prompt_prefix(self) -> str:
-        return self.tree_pane.tree_filter_prompt_prefix()
-
-    def tree_filter_placeholder(self) -> str:
-        return self.tree_pane.tree_filter_placeholder()
-
-    def visible_content_rows(self) -> int:
-        return self.source_pane.visible_content_rows()
-
-    def rebuild_screen_lines(self, *args, **kwargs) -> None:
-        self.layout.rebuild_screen_lines(*args, **kwargs)
-
-    def current_preview_image_path(self) -> Path | None:
-        return self.layout.current_preview_image_path()
-
-    def current_preview_image_geometry(self, columns: int) -> tuple[int, int, int, int]:
-        return self.layout.current_preview_image_geometry(columns)
-
-    def open_tree_filter(self, mode: str) -> None:
-        self.tree_pane.open_tree_filter(mode)
-
-    def open_command_picker(self) -> None:
-        self.tree_pane.open_command_picker()
-
-    def close_picker(self, *args, **kwargs) -> None:
-        self.tree_pane.close_picker(*args, **kwargs)
-
-    def refresh_command_picker_matches(self, *args, **kwargs) -> None:
-        self.tree_pane.refresh_command_picker_matches(*args, **kwargs)
-
-    def activate_picker_selection(self) -> bool:
-        return self.tree_pane.activate_picker_selection()
-
-    def refresh_active_picker_matches(self, *args, **kwargs) -> None:
-        self.tree_pane.refresh_active_picker_matches(*args, **kwargs)
-
-    def handle_tree_mouse_wheel(self, mouse_key: str) -> bool:
-        return self.source_pane.handle_tree_mouse_wheel(mouse_key)
-
-    def handle_tree_mouse_click(self, mouse_key: str) -> bool:
-        return self.tree_pane.handle_tree_mouse_click(mouse_key)
-
-    def toggle_help_panel(self) -> None:
-        self.tree_pane.toggle_help_panel()
-
-    def close_tree_filter(self, *args, **kwargs) -> None:
-        self.tree_pane.close_tree_filter(*args, **kwargs)
-
-    def activate_tree_filter_selection(self) -> None:
-        self.tree_pane.activate_tree_filter_selection()
-
-    def move_tree_selection(self, direction: int) -> bool:
-        return self.tree_pane.move_tree_selection(direction)
-
-    def apply_tree_filter_query(self, *args, **kwargs) -> None:
-        self.tree_pane.apply_tree_filter_query(*args, **kwargs)
-
-    def jump_to_next_content_hit(self, direction: int) -> bool:
-        return self.tree_pane.jump_to_next_content_hit(direction)
-
-    def set_named_mark(self, key: str) -> bool:
-        return self.tree_pane.set_named_mark(key)
-
-    def jump_to_named_mark(self, key: str) -> bool:
-        return self.tree_pane.jump_to_named_mark(key)
-
-    def jump_back_in_history(self) -> bool:
-        return self.tree_pane.jump_back_in_history()
-
-    def jump_forward_in_history(self) -> bool:
-        return self.tree_pane.jump_forward_in_history()
-
-    def tick_source_selection_drag(self) -> None:
-        self.tree_pane.tick_source_selection_drag()
-
-    def handle_normal_key(self, key: str, term_columns: int) -> bool:
-        """Handle one normal-mode key using app-owned state and key ops."""
-        return handle_normal_key_event(
-            key=key,
-            term_columns=term_columns,
-            state=self.state,
-            ops=self.normal_key_ops,
-        )
-
-    def run(self) -> None:
-        """Run the interactive event loop."""
-        run_main_loop(
-            state=self.state,
-            terminal=self.terminal,
-            stdin_fd=self.stdin_fd,
-            timing=self.timing,
-            callbacks=self,
-        )
 
 
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
@@ -508,7 +219,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state,
         copy_text_to_clipboard=_copy_text_to_clipboard,
     )
-    source_pane_runtime: SourcePaneRuntime
+    source_pane_runtime: SourcePane
 
     sync_selected_target_after_tree_refresh: Callable[..., None]
     navigation_proxy = NavigationProxy()
@@ -532,18 +243,9 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         jump_to_line=navigation_proxy.jump_to_line,
         on_tree_filter_state_change=sync_left_width_for_tree_filter_mode,
     )
-
-    coerce_tree_filter_result_index = tree_filter_ops.coerce_tree_filter_result_index
-    move_tree_selection = tree_filter_ops.move_tree_selection
-    rebuild_tree_entries = tree_filter_ops.rebuild_tree_entries
-    apply_tree_filter_query = tree_filter_ops.apply_tree_filter_query
-    open_tree_filter = tree_filter_ops.open_tree_filter
-    close_tree_filter = tree_filter_ops.close_tree_filter
-    activate_tree_filter_selection = tree_filter_ops.activate_tree_filter_selection
-    jump_to_next_content_hit = tree_filter_ops.jump_to_next_content_hit
     tree_refresh_sync_deps = TreeRefreshSyncDeps(
         state=state,
-        rebuild_tree_entries=rebuild_tree_entries,
+        rebuild_tree_entries=tree_filter_ops.rebuild_tree_entries,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
         schedule_tree_filter_index_warmup=schedule_tree_filter_index_warmup,
         refresh_git_status_overlay=refresh_git_status_overlay,
@@ -557,10 +259,10 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         monotonic=time.monotonic,
         tree_watch_poll_seconds=TREE_WATCH_POLL_SECONDS,
     )
-    source_pane_runtime = SourcePaneRuntime(
+    source_pane_runtime = SourcePane(
         state=state,
         ops=source_pane_ops,
-        move_tree_selection=move_tree_selection,
+        move_tree_selection=tree_filter_ops.move_tree_selection,
         maybe_grow_directory_preview=maybe_grow_directory_preview,
     )
 
@@ -568,7 +270,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         state=state,
         command_palette_items=COMMAND_PALETTE_ITEMS,
         rebuild_screen_lines=rebuild_screen_lines,
-        rebuild_tree_entries=rebuild_tree_entries,
+        rebuild_tree_entries=tree_filter_ops.rebuild_tree_entries,
         preview_selected_entry=preview_selected_entry,
         schedule_tree_filter_index_warmup=schedule_tree_filter_index_warmup,
         mark_tree_watch_dirty=mark_tree_watch_dirty,
@@ -577,8 +279,12 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         visible_content_rows=visible_content_rows,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
     )
+    tree_pane_runtime = TreePane(
+        filter_ops=tree_filter_ops,
+        navigation_ops=navigation_ops,
+    )
     navigation_proxy.bind(navigation_ops)
-    navigation_ops.set_open_tree_filter(open_tree_filter)
+    navigation_ops.set_open_tree_filter(tree_pane_runtime.open_tree_filter)
     tree_mouse_callbacks = TreeMouseCallbacks(
         visible_content_rows=visible_content_rows,
         source_pane_col_bounds=source_pane_runtime.source_pane_col_bounds,
@@ -588,14 +294,14 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         maybe_grow_directory_preview=maybe_grow_directory_preview,
         clear_source_selection=clear_source_selection,
         copy_selected_source_range=copy_selected_source_range,
-        rebuild_tree_entries=rebuild_tree_entries,
+        rebuild_tree_entries=tree_pane_runtime.rebuild_tree_entries,
         mark_tree_watch_dirty=mark_tree_watch_dirty,
-        coerce_tree_filter_result_index=coerce_tree_filter_result_index,
+        coerce_tree_filter_result_index=tree_pane_runtime.coerce_tree_filter_result_index,
         preview_selected_entry=preview_selected_entry,
-        activate_tree_filter_selection=activate_tree_filter_selection,
-        open_tree_filter=open_tree_filter,
-        apply_tree_filter_query=apply_tree_filter_query,
-        jump_to_path=navigation_proxy.jump_to_path,
+        activate_tree_filter_selection=tree_pane_runtime.activate_tree_filter_selection,
+        open_tree_filter=tree_pane_runtime.open_tree_filter,
+        apply_tree_filter_query=tree_pane_runtime.apply_tree_filter_query,
+        jump_to_path=tree_pane_runtime.jump_to_path,
         copy_text_to_clipboard=_copy_text_to_clipboard,
         monotonic=time.monotonic,
     )
@@ -604,11 +310,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         tree_mouse_callbacks,
         double_click_seconds=DOUBLE_CLICK_SECONDS,
     )
-    tree_pane_runtime = TreePaneRuntime(
-        filter_ops=tree_filter_ops,
-        navigation_ops=navigation_ops,
-        mouse_handlers=mouse_handlers,
-    )
+    tree_pane_runtime.attach_mouse(mouse_handlers)
 
     current_jump_location = tree_pane_runtime.current_jump_location
     record_jump_if_changed = tree_pane_runtime.record_jump_if_changed
@@ -696,5 +398,6 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         refresh_git_status_overlay=refresh_git_status_overlay,
         normal_key_ops=normal_key_ops,
         save_left_pane_width=save_left_pane_width_for_mode,
+        run_main_loop_fn=run_main_loop,
     )
     app.run()
