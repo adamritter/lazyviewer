@@ -57,8 +57,8 @@ class PagerLayout:
         if columns is None:
             columns = self._get_terminal_size((80, 24)).columns
         if self.state.browser_visible:
-            return max(1, columns - self.state.left_width - 2)
-        return max(1, columns - 1)
+            return max(1, columns - self.state.left_width - 1)
+        return max(1, columns)
 
     def visible_content_rows(self) -> int:
         """Return number of content rows after reserving help panel rows."""
@@ -133,7 +133,7 @@ class PagerLayout:
             return
 
         self.state.left_width = desired_left
-        self.state.right_width = max(1, columns - self.state.left_width - 2)
+        self.state.right_width = max(1, columns - self.state.left_width - 1)
         if self.state.right_width != self.state.last_right_width:
             self.state.last_right_width = self.state.right_width
             self.rebuild_screen_lines(columns=columns)
@@ -178,8 +178,8 @@ class PagerLayout:
         image_rows = self.visible_content_rows()
         if self.state.browser_visible:
             image_col = self.state.left_width + 2
-            image_width = max(1, columns - self.state.left_width - 2 - 1)
+            image_width = max(1, columns - self.state.left_width - 1)
         else:
             image_col = 1
-            image_width = max(1, columns - 1)
+            image_width = max(1, columns)
         return image_col, 1, image_width, image_rows

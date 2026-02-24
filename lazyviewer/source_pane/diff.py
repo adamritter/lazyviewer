@@ -152,12 +152,22 @@ def _boost_foreground_contrast_for_diff(params: str) -> str:
     """Adjust low-contrast foreground SGR params for diff background readability."""
     parts = [part for part in params.split(";") if part]
     if not parts:
-        return params
+        # ``\x1b[m`` is an implicit reset; keep reset semantics and restore readable fg.
+        return f"0;38;5;{_DIFF_CONTRAST_8BIT}"
 
     boosted: list[str] = []
     index = 0
+    saw_reset = False
+    has_foreground_after_reset = False
     while index < len(parts):
         token = parts[index]
+
+        if token in {"0", "00"}:
+            boosted.append("0")
+            saw_reset = True
+            has_foreground_after_reset = False
+            index += 1
+            continue
 
         if token in {"38", "48"} and index + 1 < len(parts):
             mode = parts[index + 1]
@@ -170,8 +180,10 @@ def _boost_foreground_contrast_for_diff(params: str) -> str:
                         color_index = -1
                     if 232 <= color_index <= 248:
                         boosted.extend(["38", "5", _DIFF_CONTRAST_8BIT])
+                        has_foreground_after_reset = True
                         index += 3
                         continue
+                    has_foreground_after_reset = True
                 boosted.extend([token, "5", color_token])
                 index += 3
                 continue
@@ -195,8 +207,10 @@ def _boost_foreground_contrast_for_diff(params: str) -> str:
                         and max(red, green, blue) < 190
                     ):
                         boosted.extend(["38", "2", *_DIFF_CONTRAST_TRUECOLOR])
+                        has_foreground_after_reset = True
                         index += 5
                         continue
+                    has_foreground_after_reset = True
                 boosted.extend([token, "2", red_token, green_token, blue_token])
                 index += 5
                 continue
@@ -208,11 +222,26 @@ def _boost_foreground_contrast_for_diff(params: str) -> str:
 
         if token in {"30", "90"}:
             boosted.extend(["38", "5", _DIFF_CONTRAST_8BIT])
+            has_foreground_after_reset = True
             index += 1
             continue
 
+        if token == "39":
+            boosted.extend(["38", "5", _DIFF_CONTRAST_8BIT])
+            has_foreground_after_reset = True
+            index += 1
+            continue
+
+        if token.isdigit():
+            token_num = int(token)
+            if 30 <= token_num <= 37 or 90 <= token_num <= 97:
+                has_foreground_after_reset = True
+
         boosted.append(token)
         index += 1
+
+    if saw_reset and not has_foreground_after_reset:
+        boosted.extend(["38", "5", _DIFF_CONTRAST_8BIT])
 
     return ";".join(boosted)
 
@@ -227,7 +256,8 @@ def _apply_line_background(code_line: str, bg_sgr: str) -> str:
         return f"\033[{bg_sgr}m"
 
     line_with_persistent_bg = _SGR_RE.sub(_inject_bg, code_line)
-    return f"\033[{bg_sgr}m{line_with_persistent_bg}\033[K\033[0m"
+    # Set a readable baseline fg so plain/uncolored source text remains visible.
+    return f"\033[38;5;{_DIFF_CONTRAST_8BIT};{bg_sgr}m{line_with_persistent_bg}\033[K\033[0m"
 
 
 def _colorize_lines(lines: list[str], target: Path, style: str, colorize: bool) -> list[str]:

@@ -6,6 +6,7 @@ Prevents regressions in command-line entrypoint ergonomics.
 
 from __future__ import annotations
 
+import io
 import os
 import sys
 import tempfile
@@ -50,6 +51,66 @@ class CliDefaultPathTests(unittest.TestCase):
             self.assertEqual(source, "hello\n")
             self.assertEqual(path.resolve(), target.resolve())
 
+    def test_render_mode_prints_source_view_and_skips_runtime_pager(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            target = root / "render.txt"
+            target.write_text("abcdefghij\n", encoding="utf-8")
+
+            stdout = io.StringIO()
+            with (
+                mock.patch.object(
+                    sys,
+                    "argv",
+                    ["lv", "--render", str(target), "--max-cols", "8", "--no-color"],
+                ),
+                mock.patch("lazyviewer.cli.run_pager") as run_pager,
+                mock.patch("sys.stdout", stdout),
+            ):
+                cli.main()
+
+            run_pager.assert_not_called()
+            self.assertEqual(stdout.getvalue(), "abcdefgh\n")
+
+    def test_render_mode_uses_default_width_when_max_cols_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            target = root / "render.txt"
+            target.write_text("abcdefghi\n", encoding="utf-8")
+
+            stdout = io.StringIO()
+            with (
+                mock.patch.object(
+                    sys,
+                    "argv",
+                    ["lv", "--render", str(target), "--no-color"],
+                ),
+                mock.patch("lazyviewer.cli._default_render_width", return_value=5),
+                mock.patch("lazyviewer.cli.run_pager") as run_pager,
+                mock.patch("sys.stdout", stdout),
+            ):
+                cli.main()
+
+            run_pager.assert_not_called()
+            self.assertEqual(stdout.getvalue(), "abcde\n")
+
+    def test_render_mode_rejects_combining_positional_path_and_render_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            target = root / "render.txt"
+            target.write_text("hello\n", encoding="utf-8")
+            other = root / "other.txt"
+            other.write_text("world\n", encoding="utf-8")
+
+            with mock.patch.object(
+                sys,
+                "argv",
+                ["lv", str(other), "--render", str(target)],
+            ):
+                with self.assertRaises(SystemExit) as exc_info:
+                    cli.main()
+
+            self.assertEqual(str(exc_info.exception), "Cannot combine positional path with --render.")
 
 if __name__ == "__main__":
     unittest.main()

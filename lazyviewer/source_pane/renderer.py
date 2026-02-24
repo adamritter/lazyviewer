@@ -40,6 +40,7 @@ class SourcePaneRenderer:
         self.text_search_query = text_search_query
         self.text_search_current_line = text_search_current_line
         self.text_search_current_column = text_search_current_column
+        self.preview_is_git_diff = preview_is_git_diff
 
         self._has_current_text_hit = text_search_current_line > 0 and text_search_current_column > 0
         self._selection_range = preview_rendering.normalized_selection_range(
@@ -91,4 +92,5 @@ class SourcePaneRenderer:
             self.text_search_current_column,
             self._has_current_text_hit,
             self._selection_range,
+            preview_is_git_diff=self.preview_is_git_diff,
         )

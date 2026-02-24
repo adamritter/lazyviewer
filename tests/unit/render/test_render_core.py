@@ -38,9 +38,71 @@ class RenderStatusCoreTests(unittest.TestCase):
 
     def test_build_status_line_places_help_on_right(self) -> None:
         line = build_status_line("file.py (1-10/200  4.5%)", width=60)
-        self.assertEqual(len(line), 59)
+        self.assertEqual(len(line), 60)
         self.assertIn(" │ ? Help", line)
         self.assertTrue(line.endswith("│ ? Help"))
+
+    def test_render_text_only_uses_full_terminal_width(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            render_dual_page(
+                text_lines=["x" * 40],
+                text_start=0,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=2,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=40,
+                left_width=10,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=False,
+                show_hidden=False,
+            )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        first_line = rendered.split("\r\n")[0]
+        plain = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", first_line)
+        self.assertEqual(len(plain), 40)
+
+    def test_render_split_view_uses_full_terminal_width(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            render_dual_page(
+                text_lines=["x" * 80],
+                text_start=0,
+                tree_entries=[],
+                tree_start=0,
+                tree_selected=0,
+                max_lines=2,
+                current_path=Path("/tmp/demo.py"),
+                tree_root=Path("/tmp"),
+                expanded=set(),
+                width=40,
+                left_width=10,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=True,
+                show_hidden=False,
+            )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        first_line = rendered.split("\r\n")[0]
+        plain = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", first_line)
+        self.assertEqual(len(plain), 40)
 
     def test_render_status_ends_with_help_suffix(self) -> None:
         writes: list[bytes] = []
@@ -135,7 +197,10 @@ class RenderStatusCoreTests(unittest.TestCase):
 
         rendered = b"".join(writes).decode("utf-8", errors="replace")
         first_line = rendered.split("\r\n")[0]
-        self.assertIn("\033[48;2;36;74;52m\033[K", first_line)
+        self.assertRegex(
+            first_line,
+            re.compile(r"\x1b\[[0-9;]*48;2;36;74;52m\x1b\[K"),
+        )
 
     def test_git_diff_background_persists_when_horizontal_scroll_past_line_end(self) -> None:
         writes: list[bytes] = []
@@ -167,7 +232,10 @@ class RenderStatusCoreTests(unittest.TestCase):
 
         rendered = b"".join(writes).decode("utf-8", errors="replace")
         first_line = rendered.split("\r\n")[0]
-        self.assertIn("\033[48;2;36;74;52m\033[K", first_line)
+        self.assertRegex(
+            first_line,
+            re.compile(r"\x1b\[[0-9;]*48;2;36;74;52m\x1b\[K"),
+        )
 
     def test_bottom_help_panel_renders_without_replacing_main_view(self) -> None:
         writes: list[bytes] = []

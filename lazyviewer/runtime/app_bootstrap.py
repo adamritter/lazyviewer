@@ -66,7 +66,7 @@ class AppStateBootstrap:
         else:
             initial_left = int((saved_percent / 100.0) * term.columns)
         left_width = self.clamp_left_width(term.columns, initial_left)
-        right_width = max(1, term.columns - left_width - 2)
+        right_width = max(1, term.columns - left_width - 1)
         initial_render = self.build_rendered_for_path(
             current_path,
             show_hidden,

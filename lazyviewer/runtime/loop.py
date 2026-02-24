@@ -127,7 +127,7 @@ def run_main_loop(
         if state.left_width == prev_left:
             return
         save_left_pane_width(term_columns, state.left_width)
-        state.right_width = max(1, term_columns - state.left_width - 2)
+        state.right_width = max(1, term_columns - state.left_width - 1)
         if state.right_width != state.last_right_width:
             state.last_right_width = state.right_width
             rebuild_screen_lines(columns=term_columns)
@@ -150,7 +150,7 @@ def run_main_loop(
                 state.dirty = True
             if state.left_width != previous_left_width:
                 state.dirty = True
-            state.right_width = max(1, term.columns - state.left_width - 2)
+            state.right_width = max(1, term.columns - state.left_width - 1)
             if state.right_width != state.last_right_width:
                 state.last_right_width = state.right_width
                 rebuild_screen_lines(columns=term.columns)

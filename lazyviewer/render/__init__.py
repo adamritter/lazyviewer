@@ -134,7 +134,7 @@ def _help_line(lines: tuple[str, ...], row: int) -> str:
 
 def build_status_line(left_text: str, width: int, right_text: str = "│ ? Help") -> str:
     """Build one-line status bar with right-aligned help hint."""
-    usable = max(1, width - 1)
+    usable = max(1, width)
     if usable <= len(right_text):
         return right_text[-usable:]
     left_limit = max(0, usable - len(right_text) - 1)
@@ -224,7 +224,7 @@ def render_dual_page(
     content_rows = max(1, max_lines - help_rows)
 
     if not browser_visible:
-        line_width = max(1, width - 1)
+        line_width = max(1, width)
         source_renderer = SourcePaneRenderer(
             text_lines,
             text_start,
@@ -273,7 +273,7 @@ def render_dual_page(
 
     left_width = clamp_left_width(width, left_width)
     divider_width = 1
-    right_width = max(1, width - left_width - divider_width - 1)
+    right_width = max(1, width - left_width - divider_width)
     source_renderer = SourcePaneRenderer(
         text_lines,
         text_start,

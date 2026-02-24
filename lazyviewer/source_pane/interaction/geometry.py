@@ -44,7 +44,7 @@ class SourcePaneGeometry:
         if self.state.browser_visible:
             return max(1, self.state.right_width)
         term = self._get_terminal_size((80, 24))
-        return max(1, term.columns - 1)
+        return max(1, term.columns)
 
     def max_horizontal_text_offset(self) -> int:
         """Return max valid horizontal scroll offset for current rendered lines."""
