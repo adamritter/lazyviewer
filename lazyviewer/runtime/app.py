@@ -16,6 +16,7 @@ from functools import partial
 from pathlib import Path
 
 from ..render.ansi import ANSI_ESCAPE_RE, build_screen_lines
+from .app_bootstrap import AppStateBootstrapDeps, build_initial_app_state
 from .app_helpers import (
     clear_source_selection as _clear_source_selection,
     clear_status_message as _clear_status_message,
@@ -28,6 +29,7 @@ from .app_helpers import (
     toggle_git_features as _toggle_git_features,
     toggle_tree_size_labels as _toggle_tree_size_labels,
 )
+from .command_palette import COMMAND_PALETTE_ITEMS
 from .git_jumps import (
     GitModifiedJumpDeps,
 )
@@ -43,11 +45,7 @@ from .tree_sync import (
 )
 from .index_warmup import TreeFilterIndexWarmupScheduler
 from .layout import PagerLayoutOps
-from .screen import (
-    _centered_scroll_start,
-    _first_git_change_screen_line,
-    _tree_order_key_for_relative_path,
-)
+from .navigation_proxy import NavigationProxy
 from .watch_refresh import (
     WatchRefreshContext,
     _refresh_git_status_overlay,
@@ -74,7 +72,6 @@ from .loop import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
 from ..tree_pane.panels.picker import NavigationPickerDeps, NavigationPickerOps
 from ..tree_pane.panels.filter import TreeFilterDeps, TreeFilterOps
 from ..search.fuzzy import collect_project_file_labels
-from .state import AppState
 from .terminal import TerminalController
 from ..tree_pane.model import (
     build_tree_entries,
@@ -93,51 +90,6 @@ GIT_FEATURES_DEFAULT_ENABLED = True
 TREE_SIZE_LABELS_DEFAULT_ENABLED = True
 CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT = 50.0
 CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT = 8.0
-COMMAND_PALETTE_ITEMS: tuple[tuple[str, str], ...] = (
-    ("filter_files", "Filter files (Ctrl+P)"),
-    ("search_content", "Search content (/)"),
-    ("open_symbols", "Open symbol outline (s)"),
-    ("history_back", "Jump back (Alt+Left)"),
-    ("history_forward", "Jump forward (Alt+Right)"),
-    ("toggle_tree", "Toggle tree pane (t)"),
-    ("toggle_wrap", "Toggle wrap (w)"),
-    ("toggle_hidden", "Toggle hidden files (.)"),
-    ("toggle_help", "Toggle help (?)"),
-    ("reroot_selected", "Set root to selected (r)"),
-    ("reroot_parent", "Set root to parent (R)"),
-    ("quit", "Quit (q)"),
-)
-
-class NavigationProxy:
-    """Late-bound proxy exposing navigation operations before ops construction."""
-
-    def __init__(self) -> None:
-        """Initialize proxy with no bound navigation operations."""
-        self._ops: NavigationPickerOps | None = None
-
-    def bind(self, ops: NavigationPickerOps) -> None:
-        """Attach concrete navigation operations implementation."""
-        self._ops = ops
-
-    def current_jump_location(self):
-        """Delegate current jump-location lookup to bound navigation ops."""
-        assert self._ops is not None
-        return self._ops.current_jump_location()
-
-    def record_jump_if_changed(self, origin: object) -> None:
-        """Delegate conditional jump-history recording to bound navigation ops."""
-        assert self._ops is not None
-        self._ops.record_jump_if_changed(origin)
-
-    def jump_to_path(self, target: Path) -> None:
-        """Delegate path jump request to bound navigation ops."""
-        assert self._ops is not None
-        self._ops.jump_to_path(target)
-
-    def jump_to_line(self, line_number: int) -> None:
-        """Delegate line jump request to bound navigation ops."""
-        assert self._ops is not None
-        self._ops.jump_to_line(line_number)
 
 def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
     """Initialize pager runtime state, wire subsystems, and run event loop."""
@@ -148,85 +100,24 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         sys.stdout.write(content if no_color else rendered)
         return
 
-    initial_path = path.resolve()
-    current_path = initial_path
-    tree_root = initial_path if initial_path.is_dir() else initial_path.parent
-    expanded: set[Path] = {tree_root.resolve()}
-    show_hidden = load_show_hidden()
-    named_marks = load_named_marks()
-
-    tree_entries = build_tree_entries(
-        tree_root,
-        expanded,
-        show_hidden,
-        skip_gitignored=_skip_gitignored_for_hidden_mode(show_hidden),
+    state_bootstrap_deps = AppStateBootstrapDeps(
+        skip_gitignored_for_hidden_mode=_skip_gitignored_for_hidden_mode,
+        load_show_hidden=load_show_hidden,
+        load_named_marks=load_named_marks,
+        load_left_pane_percent=load_left_pane_percent,
+        compute_left_width=compute_left_width,
+        clamp_left_width=clamp_left_width,
+        build_tree_entries=build_tree_entries,
+        build_rendered_for_path=build_rendered_for_path,
+        git_features_default_enabled=GIT_FEATURES_DEFAULT_ENABLED,
+        tree_size_labels_default_enabled=TREE_SIZE_LABELS_DEFAULT_ENABLED,
+        dir_preview_initial_max_entries=DIR_PREVIEW_INITIAL_MAX_ENTRIES,
     )
-    selected_path = current_path if current_path.exists() else tree_root
-    selected_idx = next(
-        (
-            idx
-            for idx, entry in enumerate(tree_entries)
-            if entry.path.resolve() == selected_path.resolve()
-        ),
-        0,
-    )
-
-    term = shutil.get_terminal_size((80, 24))
-    usable = max(1, term.lines - 1)
-    saved_percent = load_left_pane_percent()
-    if saved_percent is None:
-        initial_left = compute_left_width(term.columns)
-    else:
-        initial_left = int((saved_percent / 100.0) * term.columns)
-    left_width = clamp_left_width(term.columns, initial_left)
-    right_width = max(1, term.columns - left_width - 2)
-    initial_render = build_rendered_for_path(
-        current_path,
-        show_hidden,
-        style,
-        no_color,
-        dir_max_entries=DIR_PREVIEW_INITIAL_MAX_ENTRIES,
-        dir_skip_gitignored=_skip_gitignored_for_hidden_mode(show_hidden),
-        prefer_git_diff=GIT_FEATURES_DEFAULT_ENABLED,
-        dir_show_size_labels=TREE_SIZE_LABELS_DEFAULT_ENABLED,
-    )
-    rendered = initial_render.text
-    lines = build_screen_lines(rendered, right_width, wrap=False)
-    max_start = max(0, len(lines) - usable)
-    initial_start = 0
-    if initial_render.is_git_diff_preview:
-        first_change = _first_git_change_screen_line(lines)
-        if first_change is not None:
-            initial_start = _centered_scroll_start(first_change, max_start, usable)
-
-    state = AppState(
-        current_path=current_path,
-        tree_root=tree_root,
-        expanded=expanded,
-        tree_render_expanded=set(expanded),
-        show_hidden=show_hidden,
-        show_tree_sizes=TREE_SIZE_LABELS_DEFAULT_ENABLED,
-        tree_entries=tree_entries,
-        selected_idx=selected_idx,
-        rendered=rendered,
-        lines=lines,
-        start=initial_start,
-        tree_start=0,
-        text_x=0,
-        wrap_text=False,
-        left_width=left_width,
-        right_width=right_width,
-        usable=usable,
-        max_start=max_start,
-        last_right_width=right_width,
-        dir_preview_max_entries=DIR_PREVIEW_INITIAL_MAX_ENTRIES,
-        dir_preview_truncated=initial_render.truncated,
-        dir_preview_path=current_path if initial_render.is_directory else None,
-        preview_image_path=initial_render.image_path,
-        preview_image_format=initial_render.image_format,
-        preview_is_git_diff=initial_render.is_git_diff_preview,
-        git_features_enabled=GIT_FEATURES_DEFAULT_ENABLED,
-        named_marks=named_marks,
+    state = build_initial_app_state(
+        path=path,
+        style=style,
+        no_color=no_color,
+        deps=state_bootstrap_deps,
     )
 
     stdin_fd = sys.stdin.fileno()
