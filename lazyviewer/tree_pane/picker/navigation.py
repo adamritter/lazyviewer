@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..runtime.config import save_named_marks
-from ..runtime.navigation import JumpLocation, is_named_mark_key
+from ...runtime.config import save_named_marks
+from ...runtime.navigation import JumpLocation, is_named_mark_key
 
 
 class NavigationHistoryMixin:

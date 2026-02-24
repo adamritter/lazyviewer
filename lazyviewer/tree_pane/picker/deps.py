@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from ..runtime.state import AppState
+from ...runtime.state import AppState
 
 
 @dataclass(frozen=True)

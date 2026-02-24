@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..search.fuzzy import fuzzy_match_labels
+from ...search.fuzzy import fuzzy_match_labels
 
 PICKER_RESULT_LIMIT = 200
 
