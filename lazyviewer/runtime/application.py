@@ -50,16 +50,16 @@ class App:
 
     # loop callback surface
     def get_tree_filter_loading_until(self) -> float:
-        return self.tree_pane.get_tree_filter_loading_until()
+        return self.tree_pane.filter.get_loading_until()
 
     def tree_view_rows(self) -> int:
-        return self.tree_pane.tree_view_rows()
+        return self.tree_pane.filter.tree_view_rows()
 
     def tree_filter_prompt_prefix(self) -> str:
-        return self.tree_pane.tree_filter_prompt_prefix()
+        return self.tree_pane.filter.tree_filter_prompt_prefix()
 
     def tree_filter_placeholder(self) -> str:
-        return self.tree_pane.tree_filter_placeholder()
+        return self.tree_pane.filter.tree_filter_placeholder()
 
     def visible_content_rows(self) -> int:
         return self.source_pane.visible_content_rows()
@@ -74,22 +74,22 @@ class App:
         return self.layout.current_preview_image_geometry(columns)
 
     def open_tree_filter(self, mode: str) -> None:
-        self.tree_pane.open_tree_filter(mode)
+        self.tree_pane.filter.open_tree_filter(mode)
 
     def open_command_picker(self) -> None:
-        self.tree_pane.open_command_picker()
+        self.tree_pane.navigation.open_command_picker()
 
     def close_picker(self, *args, **kwargs) -> None:
-        self.tree_pane.close_picker(*args, **kwargs)
+        self.tree_pane.navigation.close_picker(*args, **kwargs)
 
     def refresh_command_picker_matches(self, *args, **kwargs) -> None:
-        self.tree_pane.refresh_command_picker_matches(*args, **kwargs)
+        self.tree_pane.navigation.refresh_command_picker_matches(*args, **kwargs)
 
     def activate_picker_selection(self) -> bool:
-        return self.tree_pane.activate_picker_selection()
+        return self.tree_pane.navigation.activate_picker_selection()
 
     def refresh_active_picker_matches(self, *args, **kwargs) -> None:
-        self.tree_pane.refresh_active_picker_matches(*args, **kwargs)
+        self.tree_pane.navigation.refresh_active_picker_matches(*args, **kwargs)
 
     def handle_tree_mouse_wheel(self, mouse_key: str) -> bool:
         return self.source_pane.handle_tree_mouse_wheel(mouse_key)
@@ -98,34 +98,34 @@ class App:
         return self.tree_pane.handle_tree_mouse_click(mouse_key)
 
     def toggle_help_panel(self) -> None:
-        self.tree_pane.toggle_help_panel()
+        self.tree_pane.navigation.toggle_help_panel()
 
     def close_tree_filter(self, *args, **kwargs) -> None:
-        self.tree_pane.close_tree_filter(*args, **kwargs)
+        self.tree_pane.filter.close_tree_filter(*args, **kwargs)
 
     def activate_tree_filter_selection(self) -> None:
-        self.tree_pane.activate_tree_filter_selection()
+        self.tree_pane.filter.activate_tree_filter_selection()
 
     def move_tree_selection(self, direction: int) -> bool:
-        return self.tree_pane.move_tree_selection(direction)
+        return self.tree_pane.filter.move_tree_selection(direction)
 
     def apply_tree_filter_query(self, *args, **kwargs) -> None:
-        self.tree_pane.apply_tree_filter_query(*args, **kwargs)
+        self.tree_pane.filter.apply_tree_filter_query(*args, **kwargs)
 
     def jump_to_next_content_hit(self, direction: int) -> bool:
-        return self.tree_pane.jump_to_next_content_hit(direction)
+        return self.tree_pane.filter.jump_to_next_content_hit(direction)
 
     def set_named_mark(self, key: str) -> bool:
-        return self.tree_pane.set_named_mark(key)
+        return self.tree_pane.navigation.set_named_mark(key)
 
     def jump_to_named_mark(self, key: str) -> bool:
-        return self.tree_pane.jump_to_named_mark(key)
+        return self.tree_pane.navigation.jump_to_named_mark(key)
 
     def jump_back_in_history(self) -> bool:
-        return self.tree_pane.jump_back_in_history()
+        return self.tree_pane.navigation.jump_back_in_history()
 
     def jump_forward_in_history(self) -> bool:
-        return self.tree_pane.jump_forward_in_history()
+        return self.tree_pane.navigation.jump_forward_in_history()
 
     def tick_source_selection_drag(self) -> None:
         self.tree_pane.tick_source_selection_drag()

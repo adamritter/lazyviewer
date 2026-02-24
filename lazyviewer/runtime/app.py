@@ -218,7 +218,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
 
     def jump_to_line_for_preview(line_number: int) -> None:
         assert tree_pane_runtime is not None
-        tree_pane_runtime.jump_to_line(line_number)
+        tree_pane_runtime.navigation.jump_to_line(line_number)
 
     preview_selection_deps = PreviewSelectionDeps(
         state=state,
@@ -245,13 +245,13 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     source_pane_runtime = SourcePane(
         state=state,
         visible_content_rows=visible_content_rows,
-        move_tree_selection=tree_pane_runtime.move_tree_selection,
+        move_tree_selection=tree_pane_runtime.filter.move_tree_selection,
         maybe_grow_directory_preview=maybe_grow_directory_preview,
         get_terminal_size=shutil.get_terminal_size,
     )
     tree_refresh_sync_deps = TreeRefreshSyncDeps(
         state=state,
-        rebuild_tree_entries=tree_pane_runtime.rebuild_tree_entries,
+        rebuild_tree_entries=tree_pane_runtime.filter.rebuild_tree_entries,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
         schedule_tree_filter_index_warmup=schedule_tree_filter_index_warmup,
         refresh_git_status_overlay=refresh_git_status_overlay,
@@ -274,14 +274,14 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         maybe_grow_directory_preview=maybe_grow_directory_preview,
         clear_source_selection=clear_source_selection,
         copy_selected_source_range=copy_selected_source_range,
-        rebuild_tree_entries=tree_pane_runtime.rebuild_tree_entries,
+        rebuild_tree_entries=tree_pane_runtime.filter.rebuild_tree_entries,
         mark_tree_watch_dirty=mark_tree_watch_dirty,
-        coerce_tree_filter_result_index=tree_pane_runtime.coerce_tree_filter_result_index,
+        coerce_tree_filter_result_index=tree_pane_runtime.filter.coerce_tree_filter_result_index,
         preview_selected_entry=preview_selected_entry,
-        activate_tree_filter_selection=tree_pane_runtime.activate_tree_filter_selection,
-        open_tree_filter=tree_pane_runtime.open_tree_filter,
-        apply_tree_filter_query=tree_pane_runtime.apply_tree_filter_query,
-        jump_to_path=tree_pane_runtime.jump_to_path,
+        activate_tree_filter_selection=tree_pane_runtime.filter.activate_tree_filter_selection,
+        open_tree_filter=tree_pane_runtime.filter.open_tree_filter,
+        apply_tree_filter_query=tree_pane_runtime.filter.apply_tree_filter_query,
+        jump_to_path=tree_pane_runtime.navigation.jump_to_path,
         copy_text_to_clipboard=_copy_text_to_clipboard,
         monotonic=time.monotonic,
     )
@@ -292,14 +292,14 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     )
     tree_pane_runtime.attach_mouse(mouse_handlers)
 
-    current_jump_location = tree_pane_runtime.current_jump_location
-    record_jump_if_changed = tree_pane_runtime.record_jump_if_changed
+    current_jump_location = tree_pane_runtime.navigation.current_jump_location
+    record_jump_if_changed = tree_pane_runtime.navigation.record_jump_if_changed
     git_modified_jump_deps = GitModifiedJumpDeps(
         state=state,
         visible_content_rows=visible_content_rows,
         refresh_git_status_overlay=refresh_git_status_overlay,
         current_jump_location=current_jump_location,
-        jump_to_path=tree_pane_runtime.jump_to_path,
+        jump_to_path=tree_pane_runtime.navigation.jump_to_path,
         record_jump_if_changed=record_jump_if_changed,
         clear_status_message=partial(_clear_status_message, state),
         set_status_message=partial(_set_status_message, state),
@@ -335,20 +335,20 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
     normal_key_ops = NormalKeyOps(
         current_jump_location=current_jump_location,
         record_jump_if_changed=record_jump_if_changed,
-        open_symbol_picker=tree_pane_runtime.open_symbol_picker,
-        reroot_to_parent=tree_pane_runtime.reroot_to_parent,
-        reroot_to_selected_target=tree_pane_runtime.reroot_to_selected_target,
-        toggle_hidden_files=tree_pane_runtime.toggle_hidden_files,
-        toggle_tree_pane=tree_pane_runtime.toggle_tree_pane,
-        toggle_wrap_mode=tree_pane_runtime.toggle_wrap_mode,
+        open_symbol_picker=tree_pane_runtime.navigation.open_symbol_picker,
+        reroot_to_parent=tree_pane_runtime.navigation.reroot_to_parent,
+        reroot_to_selected_target=tree_pane_runtime.navigation.reroot_to_selected_target,
+        toggle_hidden_files=tree_pane_runtime.navigation.toggle_hidden_files,
+        toggle_tree_pane=tree_pane_runtime.navigation.toggle_tree_pane,
+        toggle_wrap_mode=tree_pane_runtime.navigation.toggle_wrap_mode,
         toggle_tree_size_labels=toggle_tree_size_labels,
-        toggle_help_panel=tree_pane_runtime.toggle_help_panel,
+        toggle_help_panel=tree_pane_runtime.navigation.toggle_help_panel,
         toggle_git_features=toggle_git_features,
         launch_lazygit=launch_lazygit,
         handle_tree_mouse_wheel=source_pane_runtime.handle_tree_mouse_wheel,
         handle_tree_mouse_click=tree_pane_runtime.handle_tree_mouse_click,
-        move_tree_selection=tree_pane_runtime.move_tree_selection,
-        rebuild_tree_entries=tree_pane_runtime.rebuild_tree_entries,
+        move_tree_selection=tree_pane_runtime.filter.move_tree_selection,
+        rebuild_tree_entries=tree_pane_runtime.filter.rebuild_tree_entries,
         preview_selected_entry=preview_selected_entry,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
         refresh_git_status_overlay=refresh_git_status_overlay,
