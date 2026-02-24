@@ -357,7 +357,11 @@ class NavigationController:
         scoped.add(target_root)
         self.state.workspace_expanded[target_root] = scoped
         self.state.expanded = set().union(*self.state.workspace_expanded.values())
-        self.rebuild_tree_entries(preferred_path=selected_target, center_selection=True)
+        self.rebuild_tree_entries(
+            preferred_path=target_root,
+            preferred_workspace_root=target_root,
+            center_selection=True,
+        )
         self.preview_selected_entry(force=True)
         self.schedule_tree_filter_index_warmup()
         self.mark_tree_watch_dirty()

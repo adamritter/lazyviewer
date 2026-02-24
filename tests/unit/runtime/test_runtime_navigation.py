@@ -178,13 +178,18 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
             TreeEntry(path=nested, depth=1, is_dir=True),
         ]
         state.selected_idx = 1
-        rebuild_calls: list[Path] = []
+        rebuild_calls: list[tuple[Path, Path | None]] = []
 
         ops = NavigationController(
             state=state,
             command_palette_items=(),
             rebuild_screen_lines=lambda **_kwargs: None,
-            rebuild_tree_entries=lambda **kwargs: rebuild_calls.append(kwargs["preferred_path"].resolve()),
+            rebuild_tree_entries=lambda **kwargs: rebuild_calls.append(
+                (
+                    kwargs["preferred_path"].resolve(),
+                    kwargs.get("preferred_workspace_root").resolve() if kwargs.get("preferred_workspace_root") else None,
+                )
+            ),
             preview_selected_entry=lambda **_kwargs: None,
             schedule_tree_filter_index_warmup=lambda: None,
             mark_tree_watch_dirty=lambda: None,
@@ -199,7 +204,7 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
 
         self.assertEqual(state.tree_root, root)
         self.assertEqual(state.tree_roots, [root, nested])
-        self.assertEqual(rebuild_calls[-1], nested)
+        self.assertEqual(rebuild_calls[-1], (nested, nested))
 
     def test_remove_active_workspace_root_keeps_last_root_and_sets_status(self) -> None:
         visible_rows = 8

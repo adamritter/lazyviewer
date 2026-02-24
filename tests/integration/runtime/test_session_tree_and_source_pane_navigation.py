@@ -345,6 +345,14 @@ class AppRuntimeSessionTestsPart1(unittest.TestCase):
                     for entry in state.tree_entries
                     if entry.is_dir and entry.depth == 0
                 ]
+                selected_after_add = state.tree_entries[state.selected_idx]
+                snapshots["after_add_selected"] = selected_after_add.path.resolve()
+                snapshots["after_add_selected_depth"] = selected_after_add.depth
+                snapshots["after_add_selected_scope"] = (
+                    selected_after_add.workspace_root.resolve()
+                    if selected_after_add.workspace_root is not None
+                    else None
+                )
 
                 handle_normal_key("d", 120)
                 snapshots["after_delete_root"] = state.tree_root.resolve()
@@ -374,6 +382,9 @@ class AppRuntimeSessionTestsPart1(unittest.TestCase):
                 snapshots["after_add_depth0_dirs"],
                 [root.resolve(), nested.resolve()],
             )
+            self.assertEqual(snapshots["after_add_selected"], nested.resolve())
+            self.assertEqual(snapshots["after_add_selected_depth"], 0)
+            self.assertEqual(snapshots["after_add_selected_scope"], nested.resolve())
             self.assertEqual(snapshots["after_delete_root"], root.resolve())
             self.assertEqual(snapshots["after_delete_roots"], [root.resolve()])
             self.assertEqual(snapshots["after_delete_last_root"], root.resolve())
