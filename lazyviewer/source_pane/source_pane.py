@@ -189,6 +189,13 @@ class SourcePane:
         return min(SourcePane.DIR_PREVIEW_INITIAL_MAX_ENTRIES, bounded_rows)
 
     @staticmethod
+    def directory_preview_growth_step(visible_rows: int) -> int:
+        """Return adaptive growth step bounded by viewport size and global ceiling."""
+        bounded_rows = max(1, visible_rows)
+        target_step = max(16, bounded_rows * 2)
+        return min(SourcePane.DIR_PREVIEW_GROWTH_STEP, target_step)
+
+    @staticmethod
     def maybe_grow_directory_preview(
         state: AppState,
         visible_content_rows: Callable[[], int],
@@ -202,15 +209,24 @@ class SourcePane:
         if state.dir_preview_max_entries >= SourcePane.DIR_PREVIEW_HARD_MAX_ENTRIES:
             return False
 
-        near_end_threshold = max(1, visible_content_rows() // 3)
+        visible_rows = max(1, visible_content_rows())
+        near_end_threshold = max(1, visible_rows // 3)
         if state.start < max(0, state.max_start - near_end_threshold):
             return False
 
         previous_line_count = len(state.lines)
-        state.dir_preview_max_entries = min(
-            SourcePane.DIR_PREVIEW_HARD_MAX_ENTRIES,
-            state.dir_preview_max_entries + SourcePane.DIR_PREVIEW_GROWTH_STEP,
+        growth_step = SourcePane.directory_preview_growth_step(visible_rows)
+        min_target_entries = max(
+            state.dir_preview_max_entries + growth_step,
+            state.start + (visible_rows * 3),
         )
+        next_max_entries = min(
+            SourcePane.DIR_PREVIEW_HARD_MAX_ENTRIES,
+            min_target_entries,
+        )
+        if next_max_entries <= state.dir_preview_max_entries:
+            return False
+        state.dir_preview_max_entries = next_max_entries
         refresh_rendered_for_current_path_fn(reset_scroll=False, reset_dir_budget=False)
         return len(state.lines) > previous_line_count
 

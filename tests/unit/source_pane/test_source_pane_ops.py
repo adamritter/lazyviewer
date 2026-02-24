@@ -81,6 +81,42 @@ class SourcePaneGeometryTests(unittest.TestCase):
         self.assertEqual(SourcePane.initial_directory_preview_max_entries(30), 26)
         self.assertEqual(SourcePane.initial_directory_preview_max_entries(4), 1)
 
+    def test_directory_preview_growth_step_is_viewport_bounded(self) -> None:
+        self.assertEqual(SourcePane.directory_preview_growth_step(1), 16)
+        self.assertEqual(SourcePane.directory_preview_growth_step(25), 50)
+        self.assertEqual(
+            SourcePane.directory_preview_growth_step(10_000),
+            SourcePane.DIR_PREVIEW_GROWTH_STEP,
+        )
+
+    def test_maybe_grow_directory_preview_uses_adaptive_growth_target(self) -> None:
+        state = _make_state([f"line_{idx}" for idx in range(20)])
+        state.current_path = state.tree_root
+        state.dir_preview_path = state.tree_root
+        state.dir_preview_truncated = True
+        state.dir_preview_max_entries = 25
+        state.start = 10
+        state.max_start = 10
+        refresh_calls: list[dict[str, object]] = []
+
+        def refresh_rendered(**kwargs) -> None:
+            refresh_calls.append(kwargs)
+            state.lines = state.lines + [f"extra_{idx}" for idx in range(5)]
+            state.max_start = 15
+
+        grew = SourcePane.maybe_grow_directory_preview(
+            state,
+            visible_content_rows=lambda: 20,
+            refresh_rendered_for_current_path_fn=refresh_rendered,
+        )
+
+        self.assertTrue(grew)
+        self.assertEqual(state.dir_preview_max_entries, 70)
+        self.assertEqual(
+            refresh_calls,
+            [{"reset_scroll": False, "reset_dir_budget": False}],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

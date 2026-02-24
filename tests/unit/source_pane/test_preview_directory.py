@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest import mock
 
 from lazyviewer import source_pane as preview
+from lazyviewer.gitignore import clear_gitignore_cache
 from lazyviewer.git_status import GIT_STATUS_CHANGED, GIT_STATUS_UNTRACKED
 import lazyviewer.tree_model.build as tree_model_build
 
@@ -28,9 +29,11 @@ def strip_ansi(text: str) -> str:
 class PreviewBehaviorTestsPart1(unittest.TestCase):
     def setUp(self) -> None:
         preview.SourcePane._DIR_PREVIEW_CACHE.clear()
+        clear_gitignore_cache()
 
     def tearDown(self) -> None:
         preview.SourcePane._DIR_PREVIEW_CACHE.clear()
+        clear_gitignore_cache()
 
     def test_build_directory_preview_truncates_and_hides_dotfiles(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -291,3 +294,35 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
             self.assertIn("file_00.py  -- summary", plain)
             self.assertIn("file_01.py  -- summary", plain)
             self.assertNotIn("file_02.py  -- summary", plain)
+
+    def test_build_directory_preview_reuses_gitignore_matcher_cache_between_growth_renders(self) -> None:
+        class _AllowAllMatcher:
+            def is_ignored(self, _path: Path) -> bool:
+                return False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            for idx in range(8):
+                (root / f"item_{idx}.txt").write_text("x\n", encoding="utf-8")
+
+            with mock.patch(
+                "lazyviewer.gitignore._load_matcher",
+                return_value=_AllowAllMatcher(),
+            ) as load_matcher:
+                first, _ = preview.SourcePane.build_directory_preview(
+                    root,
+                    show_hidden=False,
+                    max_depth=2,
+                    max_entries=2,
+                    skip_gitignored=True,
+                )
+                second, _ = preview.SourcePane.build_directory_preview(
+                    root,
+                    show_hidden=False,
+                    max_depth=2,
+                    max_entries=4,
+                    skip_gitignored=True,
+                )
+
+            self.assertNotEqual(first, second)
+            self.assertEqual(load_matcher.call_count, 1)
