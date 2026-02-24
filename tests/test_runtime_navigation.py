@@ -163,7 +163,7 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
             )
         )
 
-        with mock.patch("lazyviewer.picker_panel.controller.save_named_marks") as save_named_marks:
+        with mock.patch("lazyviewer.picker_panel.navigation.save_named_marks") as save_named_marks:
             self.assertTrue(ops.set_named_mark("a"))
 
         self.assertIn("a", state.named_marks)
