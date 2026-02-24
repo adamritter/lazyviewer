@@ -145,8 +145,14 @@ def run_main_loop(
                 state.status_message = ""
                 state.status_message_until = 0.0
                 state.dirty = True
+            previous_usable = state.usable
+            previous_left_width = state.left_width
             state.usable = max(1, term.lines - 1)
             state.left_width = clamp_left_width(term.columns, state.left_width)
+            if state.usable != previous_usable:
+                state.dirty = True
+            if state.left_width != previous_left_width:
+                state.dirty = True
             state.right_width = max(1, term.columns - state.left_width - 2)
             if state.right_width != state.last_right_width:
                 state.last_right_width = state.right_width

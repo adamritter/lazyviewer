@@ -308,6 +308,45 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
 
         self.assertEqual(calls, {"tree": 0, "git": 0, "overlay": 0})
 
+    def test_height_only_resize_triggers_redraw_without_width_change(self) -> None:
+        state = _make_state()
+        terminal = _FakeTerminal()
+        keys = iter(["x", "q"])
+        render_calls = {"count": 0}
+        sizes = iter(
+            [
+                mock.Mock(columns=120, lines=40),
+                mock.Mock(columns=120, lines=52),
+            ]
+        )
+
+        def fake_size(_fallback):
+            return next(sizes, mock.Mock(columns=120, lines=52))
+
+        def fake_render(_context) -> None:
+            render_calls["count"] += 1
+
+        with mock.patch(
+            "lazyviewer.runtime.loop.shutil.get_terminal_size",
+            side_effect=fake_size,
+        ), mock.patch(
+            "lazyviewer.runtime.loop.read_key",
+            side_effect=lambda *_args, **_kwargs: next(keys),
+        ), mock.patch(
+            "lazyviewer.runtime.loop.render_dual_page_context",
+            side_effect=fake_render,
+        ):
+            run_main_loop(
+                state=state,
+                terminal=terminal,  # type: ignore[arg-type]
+                stdin_fd=0,
+                timing=_loop_timing(),
+                callbacks=_loop_callbacks(handle_normal_key=lambda key, _columns: key == "q"),
+            )
+
+        self.assertEqual(render_calls["count"], 2)
+        self.assertEqual(state.usable, 51)
+
 
 if __name__ == "__main__":
     unittest.main()
