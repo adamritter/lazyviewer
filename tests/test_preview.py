@@ -178,6 +178,28 @@ class PreviewBehaviorTests(unittest.TestCase):
             self.assertIn("plain.py", plain)
             self.assertNotIn("plain.py  --", plain)
 
+    def test_build_directory_preview_default_depth_shows_deep_paths_when_entry_count_is_small(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            level_1 = root / "level_1"
+            level_2 = level_1 / "level_2"
+            level_3 = level_2 / "level_3"
+            level_4 = level_3 / "level_4"
+            level_4.mkdir(parents=True)
+            target = level_4 / "deep.py"
+            target.write_text("# deep module\nvalue = 1\n", encoding="utf-8")
+
+            rendered, truncated = preview.build_directory_preview(
+                root,
+                show_hidden=False,
+            )
+            plain = strip_ansi(rendered)
+
+            self.assertFalse(truncated)
+            self.assertIn("level_4/", plain)
+            self.assertIn("deep.py", plain)
+            self.assertIn("deep.py  -- deep module", plain)
+
     def test_build_rendered_for_path_file_returns_plain_text_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             file_path = Path(tmp) / "demo.py"
