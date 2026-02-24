@@ -158,16 +158,25 @@ class PerformanceBudgetTests(unittest.TestCase):
                 time.sleep(0.07)
                 return {}, False, None
 
+            def wait_for_search_completion(timeout_seconds: float = 1.5) -> None:
+                deadline = time.perf_counter() + timeout_seconds
+                while time.perf_counter() < deadline:
+                    ops.poll_content_search_updates(timeout_seconds=0.01)
+                    if not state.tree_filter_loading:
+                        return
+                self.fail("timed out waiting for background content search")
+
             with mock.patch("lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=slow_search):
                 cold_start = time.perf_counter()
                 ops.apply_tree_filter_query("alpha")
                 cold_elapsed = time.perf_counter() - cold_start
+                wait_for_search_completion()
 
                 warm_start = time.perf_counter()
                 ops.apply_tree_filter_query("alpha")
                 warm_elapsed = time.perf_counter() - warm_start
 
-            self.assertGreaterEqual(cold_elapsed, 0.06)
+            self.assertLess(cold_elapsed, 0.03, f"background search blocked UI: {cold_elapsed:.3f}s")
             self.assertLess(warm_elapsed, 0.03, f"cached search budget exceeded: {warm_elapsed:.3f}s")
 
 

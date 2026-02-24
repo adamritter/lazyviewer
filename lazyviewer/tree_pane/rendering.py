@@ -82,6 +82,7 @@ class TreePaneRenderer:
         git_status_overlay: dict[Path, int] | None,
         tree_search_query: str,
         tree_filter_active: bool,
+        tree_filter_row_visible: bool,
         tree_filter_query: str,
         tree_filter_editing: bool,
         tree_filter_cursor_visible: bool,
@@ -130,7 +131,7 @@ class TreePaneRenderer:
         self.picker_message = picker_message
 
         self.picker_overlay_active = picker_active and picker_mode in {"symbols", "commands"}
-        self.tree_filter_row_visible = tree_filter_active and not self.picker_overlay_active
+        self.tree_filter_row_visible = tree_filter_active and tree_filter_row_visible and not self.picker_overlay_active
         self.tree_row_offset = 1 if self.tree_filter_row_visible else 0
 
         self.picker_items = picker_items if self.picker_overlay_active and picker_items else []

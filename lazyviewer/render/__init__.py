@@ -46,6 +46,7 @@ class RenderContext:
     show_tree_sizes: bool = True
     status_message: str = ""
     tree_filter_active: bool = False
+    tree_filter_row_visible: bool = True
     tree_filter_mode: str = "files"
     tree_filter_query: str = ""
     tree_filter_editing: bool = False
@@ -96,6 +97,7 @@ def render_dual_page_context(context: RenderContext) -> None:
         show_tree_sizes=context.show_tree_sizes,
         status_message=context.status_message,
         tree_filter_active=context.tree_filter_active,
+        tree_filter_row_visible=context.tree_filter_row_visible,
         tree_filter_mode=context.tree_filter_mode,
         tree_filter_query=context.tree_filter_query,
         tree_filter_editing=context.tree_filter_editing,
@@ -178,6 +180,7 @@ def render_dual_page(
     show_tree_sizes: bool = True,
     status_message: str = "",
     tree_filter_active: bool = False,
+    tree_filter_row_visible: bool = True,
     tree_filter_mode: str = "files",
     tree_filter_query: str = "",
     tree_filter_editing: bool = False,
@@ -305,6 +308,7 @@ def render_dual_page(
         git_status_overlay=git_status_overlay,
         tree_search_query=tree_search_query,
         tree_filter_active=tree_filter_active,
+        tree_filter_row_visible=tree_filter_row_visible,
         tree_filter_query=tree_filter_query,
         tree_filter_editing=tree_filter_editing,
         tree_filter_cursor_visible=tree_filter_cursor_visible,

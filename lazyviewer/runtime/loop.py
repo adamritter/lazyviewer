@@ -17,6 +17,9 @@ from .state import AppState
 from .terminal import TerminalController
 from ..tree_model import clamp_left_width
 
+IDLE_DIRECTORY_PREFETCH_DELAY_SECONDS = 0.35
+IDLE_DIRECTORY_PREFETCH_INTERVAL_SECONDS = 0.2
+
 
 @dataclass(frozen=True)
 class RuntimeLoopTiming:
@@ -44,6 +47,8 @@ class RuntimeLoopCallbacks:
     handle_picker_key: Callable[[str, float], tuple[bool, bool]] | None = None
     handle_tree_filter_key: Callable[[str], bool] | None = None
     tick_source_selection_drag: Callable[[], None] | None = None
+    tick_tree_filter_search: Callable[[float], bool] | None = None
+    maybe_prefetch_directory_preview: Callable[[], bool] | None = None
 
 
 def run_main_loop(
@@ -94,6 +99,12 @@ def run_main_loop(
         if tick_source_selection_drag_override is not None
         else source_pane.tick_source_selection_drag
     )
+    tick_tree_filter_search_override = getattr(callbacks, "tick_tree_filter_search", None)
+    tick_tree_filter_search = (
+        tick_tree_filter_search_override
+        if tick_tree_filter_search_override is not None
+        else getattr(tree_pane.filter, "poll_content_search_updates", None)
+    )
     handle_picker_key_override = getattr(callbacks, "handle_picker_key", None)
     if handle_picker_key_override is not None:
         picker_key_dispatch = handle_picker_key_override
@@ -116,9 +127,12 @@ def run_main_loop(
     refresh_git_status_overlay = callbacks.refresh_git_status_overlay
     handle_normal_key = callbacks.handle_normal_key
     save_left_pane_width = callbacks.save_left_pane_width
+    maybe_prefetch_directory_preview = getattr(callbacks, "maybe_prefetch_directory_preview", None)
     kitty_image_state: tuple[str, int, int, int, int] | None = None
     tree_filter_cursor_visible = True
     tree_filter_spinner_frame = 0
+    last_input_at = time.monotonic()
+    last_idle_directory_prefetch_at = 0.0
 
     def adjust_left_pane_width(term_columns: int, delta: int) -> None:
         """Resize tree pane width, persist it, and reflow text if needed."""
@@ -135,6 +149,8 @@ def run_main_loop(
 
     with terminal.raw_mode():
         while True:
+            if tick_tree_filter_search is not None:
+                tick_tree_filter_search(0.0)
             term = shutil.get_terminal_size((80, 24))
             now = time.monotonic()
             terminal.set_mouse_reporting(True)
@@ -236,6 +252,7 @@ def run_main_loop(
                     show_tree_sizes=state.show_tree_sizes,
                     status_message=state.status_message,
                     tree_filter_active=state.tree_filter_active,
+                    tree_filter_row_visible=state.tree_filter_prompt_row_visible,
                     tree_filter_mode=state.tree_filter_mode,
                     tree_filter_query=state.tree_filter_query,
                     tree_filter_editing=state.tree_filter_editing,
@@ -331,7 +348,19 @@ def run_main_loop(
                 refresh_git_status_overlay()
                 if tick_source_selection_drag is not None:
                     tick_source_selection_drag()
+                if maybe_prefetch_directory_preview is not None:
+                    idle_now = time.monotonic()
+                    idle_duration = idle_now - last_input_at
+                    prefetch_elapsed = idle_now - last_idle_directory_prefetch_at
+                    if (
+                        idle_duration >= IDLE_DIRECTORY_PREFETCH_DELAY_SECONDS
+                        and prefetch_elapsed >= IDLE_DIRECTORY_PREFETCH_INTERVAL_SECONDS
+                    ):
+                        last_idle_directory_prefetch_at = idle_now
+                        if maybe_prefetch_directory_preview():
+                            state.dirty = True
                 continue
+            last_input_at = time.monotonic()
             if state.skip_next_lf and key == "ENTER_LF":
                 state.skip_next_lf = False
                 continue

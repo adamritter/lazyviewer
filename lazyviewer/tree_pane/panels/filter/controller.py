@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 from collections import OrderedDict
 from pathlib import Path
+from queue import Empty, Queue
 
 from ....runtime.navigation import JumpLocation
 from ....runtime.state import AppState
@@ -30,6 +32,10 @@ from .limits import (
     tree_filter_match_limit_for_query,
 )
 from .panel import FilterPanel
+
+CONTENT_SEARCH_STREAM_REFRESH_DEBOUNCE_SECONDS = 0.01
+CONTENT_SEARCH_CLICK_PROMPT_REVEAL_DELAY_SECONDS = 0.1
+CONTENT_SEARCH_CLICK_INITIAL_WAIT_SECONDS = 0.02
 
 
 class TreeFilterController:
@@ -61,11 +67,27 @@ class TreeFilterController:
         self.on_tree_filter_state_change = on_tree_filter_state_change
         self.loading_until = 0.0
         self.init_content_search_cache()
+        self._content_search_generation = 0
+        self._active_content_search_generation: int | None = None
+        self._content_search_cancel_event: threading.Event | None = None
+        self._content_search_worker: threading.Thread | None = None
+        self._content_search_events: Queue[tuple[object, ...]] = Queue()
+        self._streaming_matches_by_file: dict[Path, list[filter_matching.ContentMatch]] = {}
+        self._streaming_truncated = False
+        self._streaming_preferred_path: Path | None = None
+        self._streaming_force_first_file = False
+        self._streaming_preview_selection = False
+        self._streaming_partial_dirty = False
+        self._streaming_last_match_at = 0.0
+        self._content_search_prompt_reveal_at = 0.0
+        self._streaming_initial_rebuild_pending = False
         self.panel = FilterPanel(self)
 
     # lifecycle
     def get_loading_until(self) -> float:
         """Return timestamp until which loading indicator should remain visible."""
+        if self._active_content_search_generation is not None:
+            return float("inf")
         return self.loading_until
 
     def tree_filter_prompt_prefix(self) -> str:
@@ -76,17 +98,246 @@ class TreeFilterController:
         """Return placeholder text for active filter mode."""
         return "type to search content" if self.state.tree_filter_mode == "content" else "type to filter files"
 
+    def set_tree_filter_prompt_row_visible(self, visible: bool) -> None:
+        """Show or hide the filter prompt row without changing filter state."""
+        if visible:
+            self._content_search_prompt_reveal_at = 0.0
+        if self.state.tree_filter_prompt_row_visible == visible:
+            return
+        self.state.tree_filter_prompt_row_visible = visible
+        self.state.dirty = True
+
     def tree_view_rows(self) -> int:
         """Return visible tree rows, reserving one row for active filter prompt."""
         rows = self.visible_content_rows()
-        if self.state.tree_filter_active and not self.state.picker_active:
+        if (
+            self.state.tree_filter_active
+            and self.state.tree_filter_prompt_row_visible
+            and not self.state.picker_active
+        ):
             return max(1, rows - 1)
         return rows
 
     def reset_tree_filter_session_state(self) -> None:
         """Reset per-session transient filter state."""
+        self.cancel_content_search()
+        self._content_search_prompt_reveal_at = 0.0
         self.state.tree_filter_loading = False
         self.state.tree_filter_collapsed_dirs = set()
+
+    def cancel_content_search(self) -> None:
+        """Cancel active streaming content search worker if one is running."""
+        if self._content_search_cancel_event is not None:
+            self._content_search_cancel_event.set()
+        self._active_content_search_generation = None
+        self._content_search_cancel_event = None
+        self._content_search_worker = None
+        self._streaming_matches_by_file = {}
+        self._streaming_truncated = False
+        self._streaming_preferred_path = None
+        self._streaming_force_first_file = False
+        self._streaming_preview_selection = False
+        self._streaming_partial_dirty = False
+        self._streaming_last_match_at = 0.0
+        self._content_search_prompt_reveal_at = 0.0
+        self._streaming_initial_rebuild_pending = False
+        self.loading_until = 0.0
+        if self.state.tree_filter_loading:
+            self.state.tree_filter_loading = False
+            self.state.dirty = True
+
+    def _store_content_search_cache(
+        self,
+        key: tuple[str, str, bool, bool, int, int],
+        result: tuple[dict[Path, list[filter_matching.ContentMatch]], bool, str | None],
+    ) -> None:
+        """Insert content-search result into LRU cache and enforce max size."""
+        self.content_search_cache[key] = result
+        self.content_search_cache.move_to_end(key)
+        while len(self.content_search_cache) > CONTENT_SEARCH_CACHE_MAX_QUERIES:
+            self.content_search_cache.popitem(last=False)
+
+    def _start_streaming_content_search(
+        self,
+        *,
+        query: str,
+        max_matches: int,
+        cache_key: tuple[str, str, bool, bool, int, int],
+        preferred_path: Path | None,
+        force_first_file: bool,
+        preview_selection: bool,
+    ) -> None:
+        """Spawn background rg worker and stream partial matches through queue events."""
+        self.cancel_content_search()
+        self._content_search_generation += 1
+        generation = self._content_search_generation
+        cancel_event = threading.Event()
+        self._active_content_search_generation = generation
+        self._content_search_cancel_event = cancel_event
+        self._streaming_matches_by_file = {}
+        self._streaming_truncated = False
+        self._streaming_preferred_path = preferred_path
+        self._streaming_force_first_file = force_first_file
+        self._streaming_preview_selection = preview_selection
+        self._streaming_partial_dirty = False
+        self._streaming_last_match_at = 0.0
+        self._streaming_initial_rebuild_pending = False
+        self.loading_until = float("inf")
+        self.state.tree_filter_loading = True
+
+        root = self.state.tree_root
+        show_hidden = self.state.show_hidden
+        skip_gitignored = skip_gitignored_for_hidden_mode(show_hidden)
+
+        def on_match(
+            match_path: Path,
+            match: filter_matching.ContentMatch,
+            _total_matches: int,
+            _total_files: int,
+        ) -> None:
+            if cancel_event.is_set():
+                return
+            self._content_search_events.put(("match", generation, match_path, match))
+
+        def run_worker() -> None:
+            result = filter_matching.search_project_content_rg(
+                root,
+                query,
+                show_hidden,
+                skip_gitignored=skip_gitignored,
+                max_matches=max(1, max_matches),
+                max_files=CONTENT_SEARCH_FILE_LIMIT,
+                on_match=on_match,
+                should_cancel=cancel_event.is_set,
+            )
+            self._content_search_events.put(("done", generation, cache_key, result))
+
+        worker = threading.Thread(
+            target=run_worker,
+            name=f"lazyviewer-content-search-{generation}",
+            daemon=True,
+        )
+        self._content_search_worker = worker
+        worker.start()
+
+    def poll_content_search_updates(self, timeout_seconds: float = 0.0) -> bool:
+        """Drain queued streaming-search events and refresh tree results incrementally."""
+        processed = False
+        final_result: tuple[
+            tuple[str, str, bool, bool, int, int],
+            tuple[dict[Path, list[filter_matching.ContentMatch]], bool, str | None],
+        ] | None = None
+
+        def consume_event(event: tuple[object, ...]) -> None:
+            nonlocal processed
+            nonlocal final_result
+            processed = True
+            kind = event[0]
+            generation = event[1]
+            if generation != self._active_content_search_generation:
+                return
+            if kind == "match":
+                _kind, _generation, match_path, match = event
+                bucket = self._streaming_matches_by_file.setdefault(match_path, [])
+                bucket.append(match)
+                self._streaming_partial_dirty = True
+                self._streaming_last_match_at = time.monotonic()
+                return
+            if kind == "done":
+                _kind, _generation, cache_key, result = event
+                final_result = (cache_key, result)
+                return
+
+        if timeout_seconds > 0:
+            try:
+                first_event = self._content_search_events.get(timeout=timeout_seconds)
+            except Empty:
+                first_event = None
+            if first_event is not None:
+                consume_event(first_event)
+
+        while True:
+            try:
+                event = self._content_search_events.get_nowait()
+            except Empty:
+                break
+            consume_event(event)
+
+        if (
+            final_result is None
+            and self._active_content_search_generation is not None
+            and self._content_search_prompt_reveal_at > 0.0
+            and not self.state.tree_filter_prompt_row_visible
+            and self.state.tree_filter_active
+            and self.state.tree_filter_mode == "content"
+            and time.monotonic() >= self._content_search_prompt_reveal_at
+        ):
+            self.state.tree_filter_prompt_row_visible = True
+            self._content_search_prompt_reveal_at = 0.0
+            if self._streaming_initial_rebuild_pending:
+                if self._streaming_matches_by_file:
+                    self.rebuild_tree_entries(
+                        preferred_path=self._streaming_preferred_path,
+                        force_first_file=self._streaming_force_first_file,
+                        content_matches_override=self._streaming_matches_by_file,
+                        content_truncated_override=self._streaming_truncated,
+                    )
+                    self._streaming_partial_dirty = False
+                else:
+                    self.rebuild_tree_entries(
+                        preferred_path=self._streaming_preferred_path,
+                        force_first_file=self._streaming_force_first_file,
+                        content_matches_override={},
+                        content_truncated_override=False,
+                    )
+                self._streaming_initial_rebuild_pending = False
+            self.state.dirty = True
+            processed = True
+
+        if (
+            final_result is None
+            and self._streaming_partial_dirty
+            and self.state.tree_filter_active
+            and self.state.tree_filter_mode == "content"
+        ):
+            now = time.monotonic()
+            if now - self._streaming_last_match_at >= CONTENT_SEARCH_STREAM_REFRESH_DEBOUNCE_SECONDS:
+                self.rebuild_tree_entries(
+                    preferred_path=self._streaming_preferred_path,
+                    force_first_file=self._streaming_force_first_file,
+                    content_matches_override=self._streaming_matches_by_file,
+                    content_truncated_override=self._streaming_truncated,
+                )
+                self._streaming_partial_dirty = False
+                self._streaming_initial_rebuild_pending = False
+                self.state.dirty = True
+
+        if final_result is not None and self.state.tree_filter_mode == "content":
+            self._content_search_prompt_reveal_at = 0.0
+            cache_key, result = final_result
+            matches_by_file, truncated, _error = result
+            self._store_content_search_cache(cache_key, result)
+            self._streaming_matches_by_file = matches_by_file
+            self._streaming_truncated = truncated
+            self._streaming_partial_dirty = False
+            self._streaming_last_match_at = 0.0
+            self._streaming_initial_rebuild_pending = False
+            self.rebuild_tree_entries(
+                preferred_path=self._streaming_preferred_path,
+                force_first_file=self._streaming_force_first_file,
+                content_matches_override=matches_by_file,
+                content_truncated_override=truncated,
+            )
+            if self._streaming_preview_selection:
+                self.preview_selected_entry(force=True)
+            self._active_content_search_generation = None
+            self._content_search_cancel_event = None
+            self._content_search_worker = None
+            self.loading_until = 0.0
+            self.state.tree_filter_loading = False
+            self.state.dirty = True
+
+        return processed
 
     def open_tree_filter(self, mode: str = "files") -> None:
         """Open filter panel in requested mode and initialize session fields."""
@@ -271,10 +522,7 @@ class TreeFilterController:
             max_matches=max(1, max_matches),
             max_files=CONTENT_SEARCH_FILE_LIMIT,
         )
-        self.content_search_cache[key] = result
-        self.content_search_cache.move_to_end(key)
-        while len(self.content_search_cache) > CONTENT_SEARCH_CACHE_MAX_QUERIES:
-            self.content_search_cache.popitem(last=False)
+        self._store_content_search_cache(key, result)
         return result
 
     def rebuild_tree_entries(
@@ -282,6 +530,8 @@ class TreeFilterController:
         preferred_path: Path | None = None,
         center_selection: bool = False,
         force_first_file: bool = False,
+        content_matches_override: dict[Path, list[filter_matching.ContentMatch]] | None = None,
+        content_truncated_override: bool | None = None,
     ) -> None:
         """Rebuild tree entries for current filter state and preserve intent."""
         previous_selected_hit_path: Path | None = None
@@ -302,11 +552,15 @@ class TreeFilterController:
 
         if self.state.tree_filter_active and self.state.tree_filter_query:
             if self.state.tree_filter_mode == "content":
-                match_limit = self.content_search_match_limit(self.state.tree_filter_query)
-                matches_by_file, truncated, _error = self.search_project_content_cached(
-                    self.state.tree_filter_query,
-                    match_limit,
-                )
+                if content_matches_override is not None:
+                    matches_by_file = content_matches_override
+                    truncated = bool(content_truncated_override)
+                else:
+                    match_limit = self.content_search_match_limit(self.state.tree_filter_query)
+                    matches_by_file, truncated, _error = self.search_project_content_cached(
+                        self.state.tree_filter_query,
+                        match_limit,
+                    )
                 self.state.tree_filter_match_count = sum(len(items) for items in matches_by_file.values())
                 self.state.tree_filter_truncated = truncated
                 self.state.tree_entries, self.state.tree_render_expanded = filter_tree_entries_for_content_matches(
@@ -409,29 +663,108 @@ class TreeFilterController:
         query: str,
         preview_selection: bool = False,
         select_first_file: bool = False,
+        debounce_prompt_row: bool = False,
     ) -> None:
         """Apply query text, rebuild results, and update loading indicator timing."""
         self.state.tree_filter_query = query
-        if not query:
-            self.loading_until = 0.0
-        else:
-            needs_loading_indicator = True
-            if self.state.tree_filter_mode == "content":
-                match_limit = self.content_search_match_limit(query)
-                cache_key = self.content_search_cache_key(query, match_limit)
-                needs_loading_indicator = cache_key not in self.content_search_cache
-            if needs_loading_indicator:
-                self.loading_until = time.monotonic() + 0.35
-            else:
-                self.loading_until = 0.0
         force_first_file = select_first_file and bool(query)
         preferred_path = None if force_first_file else self.state.current_path.resolve()
-        self.rebuild_tree_entries(
+        suppress_prompt_row = bool(
+            debounce_prompt_row
+            and bool(query)
+            and self.state.tree_filter_mode == "content"
+        )
+
+        if self.state.tree_filter_mode != "content":
+            self.cancel_content_search()
+            self.set_tree_filter_prompt_row_visible(True)
+            self.loading_until = 0.0 if not query else time.monotonic() + 0.35
+            self.rebuild_tree_entries(
+                preferred_path=preferred_path,
+                force_first_file=force_first_file,
+            )
+            if preview_selection:
+                self.preview_selected_entry(force=True)
+            self.state.dirty = True
+            if self.on_tree_filter_state_change is not None:
+                self.on_tree_filter_state_change()
+            return
+
+        if not query:
+            self.cancel_content_search()
+            self.set_tree_filter_prompt_row_visible(True)
+            self.loading_until = 0.0
+            self.rebuild_tree_entries(
+                preferred_path=preferred_path,
+                force_first_file=force_first_file,
+                content_matches_override={},
+                content_truncated_override=False,
+            )
+            self.state.tree_filter_loading = False
+            if preview_selection:
+                self.preview_selected_entry(force=True)
+            self.state.dirty = True
+            if self.on_tree_filter_state_change is not None:
+                self.on_tree_filter_state_change()
+            return
+
+        match_limit = self.content_search_match_limit(query)
+        cache_key = self.content_search_cache_key(query, match_limit)
+        cached = self.content_search_cache.get(cache_key)
+        if cached is not None:
+            self.cancel_content_search()
+            if suppress_prompt_row:
+                self._content_search_prompt_reveal_at = 0.0
+                self._streaming_initial_rebuild_pending = False
+                self.set_tree_filter_prompt_row_visible(False)
+            else:
+                self.set_tree_filter_prompt_row_visible(True)
+            self.loading_until = 0.0
+            matches_by_file, truncated, _error = cached
+            self.content_search_cache.move_to_end(cache_key)
+            self.rebuild_tree_entries(
+                preferred_path=preferred_path,
+                force_first_file=force_first_file,
+                content_matches_override=matches_by_file,
+                content_truncated_override=truncated,
+            )
+            if preview_selection:
+                self.preview_selected_entry(force=True)
+            self.state.tree_filter_loading = False
+            self.state.dirty = True
+            if self.on_tree_filter_state_change is not None:
+                self.on_tree_filter_state_change()
+            return
+
+        if suppress_prompt_row:
+            self.set_tree_filter_prompt_row_visible(False)
+        else:
+            self.set_tree_filter_prompt_row_visible(True)
+            self._content_search_prompt_reveal_at = 0.0
+
+        self._start_streaming_content_search(
+            query=query,
+            max_matches=match_limit,
+            cache_key=cache_key,
             preferred_path=preferred_path,
             force_first_file=force_first_file,
+            preview_selection=preview_selection,
         )
-        if preview_selection:
-            self.preview_selected_entry(force=True)
+        if suppress_prompt_row:
+            self._streaming_initial_rebuild_pending = True
+            self._content_search_prompt_reveal_at = time.monotonic() + CONTENT_SEARCH_CLICK_PROMPT_REVEAL_DELAY_SECONDS
+        else:
+            self._streaming_initial_rebuild_pending = False
+            self.rebuild_tree_entries(
+                preferred_path=preferred_path,
+                force_first_file=force_first_file,
+                content_matches_override={},
+                content_truncated_override=False,
+            )
+        # For click-triggered searches, wait a tiny bit longer so fast rg completions
+        # can render directly without an intermediate frame.
+        poll_timeout = CONTENT_SEARCH_CLICK_INITIAL_WAIT_SECONDS if suppress_prompt_row else 0.005
+        self.poll_content_search_updates(timeout_seconds=poll_timeout)
         self.state.dirty = True
         if self.on_tree_filter_state_change is not None:
             self.on_tree_filter_state_change()

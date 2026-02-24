@@ -79,7 +79,11 @@ class TreePaneMouseHandlers:
         if not (state.browser_visible and 1 <= row <= self._visible_content_rows() and col <= state.left_width):
             return True
 
-        query_row_visible = state.tree_filter_active
+        query_row_visible = (
+            state.tree_filter_active
+            and state.tree_filter_prompt_row_visible
+            and not state.picker_active
+        )
         if query_row_visible and row == 1:
             state.tree_filter_editing = True
             state.dirty = True

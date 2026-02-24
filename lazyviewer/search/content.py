@@ -11,6 +11,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Callable
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,8 @@ def search_project_content_rg(
     skip_gitignored: bool = False,
     max_matches: int = 2_000,
     max_files: int = 500,
+    on_match: Callable[[Path, ContentMatch, int, int], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> tuple[dict[Path, list[ContentMatch]], bool, str | None]:
     """Search ``root`` content with ripgrep and return grouped hits.
 
@@ -85,10 +88,14 @@ def search_project_content_rg(
     matches_by_file: dict[Path, list[ContentMatch]] = {}
     total_matches = 0
     truncated = False
+    cancelled = False
     stderr_text = ""
     try:
         assert proc.stdout is not None
         for raw in proc.stdout:
+            if should_cancel is not None and should_cancel():
+                cancelled = True
+                break
             line = raw.strip()
             if not line:
                 continue
@@ -132,14 +139,20 @@ def search_project_content_rg(
                     truncated = True
                     break
                 matches_by_file[match_path] = []
-            matches_by_file[match_path].append(match)
+            file_bucket = matches_by_file[match_path]
+            file_bucket.append(match)
+            if on_match is not None:
+                try:
+                    on_match(match_path, match, total_matches + 1, len(matches_by_file))
+                except Exception:
+                    pass
 
             total_matches += 1
             if total_matches >= max_matches:
                 truncated = True
                 break
     finally:
-        if truncated and proc.poll() is None:
+        if (truncated or cancelled) and proc.poll() is None:
             proc.kill()
         _stdout_unused, stderr_text = proc.communicate()
 

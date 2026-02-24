@@ -130,6 +130,7 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
                 snapshots["tree_filter_mode"] = state.tree_filter_mode
                 snapshots["tree_filter_query"] = state.tree_filter_query
                 snapshots["tree_filter_editing"] = state.tree_filter_editing
+                snapshots["tree_filter_prompt_row_visible"] = state.tree_filter_prompt_row_visible
                 snapshots["source_selection_anchor"] = state.source_selection_anchor
                 snapshots["source_selection_focus"] = state.source_selection_focus
                 entry = state.tree_entries[state.selected_idx]
@@ -162,6 +163,7 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
             self.assertEqual(snapshots["tree_filter_mode"], "content")
             self.assertEqual(snapshots["tree_filter_query"], "alpha_beta_name")
             self.assertFalse(bool(snapshots["tree_filter_editing"]))
+            self.assertFalse(bool(snapshots["tree_filter_prompt_row_visible"]))
             self.assertIsNone(snapshots["source_selection_anchor"])
             self.assertIsNone(snapshots["source_selection_focus"])
             self.assertEqual(snapshots["selected_kind"], "search_hit")
@@ -237,6 +239,7 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
                 snapshots["tree_filter_active"] = state.tree_filter_active
                 snapshots["tree_filter_mode"] = state.tree_filter_mode
                 snapshots["tree_filter_editing"] = state.tree_filter_editing
+                snapshots["tree_filter_prompt_row_visible"] = state.tree_filter_prompt_row_visible
                 snapshots["picker_active"] = state.picker_active
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
@@ -269,6 +272,7 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
             tree_filter_active = bool(snapshots["tree_filter_active"])
             tree_filter_mode = str(snapshots["tree_filter_mode"])
             tree_filter_editing = bool(snapshots["tree_filter_editing"])
+            tree_filter_prompt_row_visible = bool(snapshots["tree_filter_prompt_row_visible"])
             picker_active = bool(snapshots["picker_active"])
             help_rows = help_panel_row_count(
                 usable,
@@ -279,7 +283,11 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
                 tree_filter_editing=tree_filter_editing,
             )
             content_rows = max(1, usable - help_rows)
-            tree_rows = max(1, content_rows - 1) if tree_filter_active and not picker_active else content_rows
+            tree_rows = (
+                max(1, content_rows - 1)
+                if tree_filter_active and tree_filter_prompt_row_visible and not picker_active
+                else content_rows
+            )
             selected_idx = int(snapshots["selected_idx"])
             max_tree_start = max(0, int(snapshots["tree_entries_len"]) - tree_rows)
             expected_tree_start = max(0, selected_idx - max(1, tree_rows // 2))

@@ -176,6 +176,12 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         visible_content_rows,
         refresh_rendered_for_current_path,
     )
+    maybe_prefetch_directory_preview = partial(
+        SourcePane.maybe_prefetch_directory_preview,
+        state,
+        visible_content_rows,
+        refresh_rendered_for_current_path,
+    )
 
     directory_preview_target_for_display_line = partial(SourcePane.directory_preview_target_for_display_line, state)
     copy_selected_source_range = partial(
@@ -305,6 +311,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         preview_selected_entry=preview_selected_entry,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
         maybe_grow_directory_preview=maybe_grow_directory_preview,
+        maybe_prefetch_directory_preview=maybe_prefetch_directory_preview,
         launch_editor_for_path=launch_editor_for_path,
         jump_to_next_git_modified=jump_to_next_git_modified,
         save_left_pane_width=save_left_pane_width_for_mode,

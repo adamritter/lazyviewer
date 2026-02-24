@@ -40,6 +40,7 @@ class FilterPanel:
         if self.owner.state.wrap_text and not was_browser_visible:
             self.owner.rebuild_screen_lines()
         self.owner.state.tree_filter_active = True
+        self.owner.set_tree_filter_prompt_row_visible(True)
         self.owner.state.tree_filter_mode = mode
         self.owner.state.tree_filter_editing = True
         self.owner.state.tree_filter_origin = self.owner.current_jump_location() if mode == "content" else None
@@ -69,6 +70,7 @@ class FilterPanel:
             restore_location = self.owner.state.tree_filter_origin.normalized()
         self.owner.state.tree_filter_active = False
         self.owner.state.tree_filter_editing = False
+        self.owner.set_tree_filter_prompt_row_visible(True)
         self.owner.state.tree_filter_mode = "files"
         if clear_query:
             self.owner.state.tree_filter_query = ""
@@ -193,6 +195,7 @@ class FilterPanel:
 
         if key == "TAB":
             self.owner.state.tree_filter_editing = True
+            self.owner.set_tree_filter_prompt_row_visible(True)
             self.owner.state.dirty = True
             return True
         if key == "ENTER":

@@ -117,6 +117,54 @@ class SourcePaneGeometryTests(unittest.TestCase):
             [{"reset_scroll": False, "reset_dir_budget": False}],
         )
 
+    def test_maybe_prefetch_directory_preview_grows_when_headroom_is_low(self) -> None:
+        state = _make_state([f"line_{idx}" for idx in range(30)])
+        state.current_path = state.tree_root
+        state.dir_preview_path = state.tree_root
+        state.dir_preview_truncated = True
+        state.dir_preview_max_entries = 25
+        state.start = 0
+        state.max_start = 4
+        refresh_calls: list[dict[str, object]] = []
+
+        def refresh_rendered(**kwargs) -> None:
+            refresh_calls.append(kwargs)
+            state.lines = state.lines + [f"extra_{idx}" for idx in range(20)]
+            state.max_start = 24
+
+        prefetched = SourcePane.maybe_prefetch_directory_preview(
+            state,
+            visible_content_rows=lambda: 20,
+            refresh_rendered_for_current_path_fn=refresh_rendered,
+        )
+
+        self.assertTrue(prefetched)
+        self.assertEqual(state.dir_preview_max_entries, 240)
+        self.assertEqual(
+            refresh_calls,
+            [{"reset_scroll": False, "reset_dir_budget": False}],
+        )
+
+    def test_maybe_prefetch_directory_preview_skips_when_headroom_is_sufficient(self) -> None:
+        state = _make_state([f"line_{idx}" for idx in range(100)])
+        state.current_path = state.tree_root
+        state.dir_preview_path = state.tree_root
+        state.dir_preview_truncated = True
+        state.dir_preview_max_entries = 250
+        state.start = 0
+        state.max_start = 100
+        refresh_calls: list[dict[str, object]] = []
+
+        prefetched = SourcePane.maybe_prefetch_directory_preview(
+            state,
+            visible_content_rows=lambda: 20,
+            refresh_rendered_for_current_path_fn=lambda **kwargs: refresh_calls.append(kwargs),
+        )
+
+        self.assertFalse(prefetched)
+        self.assertEqual(state.dir_preview_max_entries, 250)
+        self.assertEqual(refresh_calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

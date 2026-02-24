@@ -391,6 +391,7 @@ def _open_content_search_for_token(
         token,
         preview_selection=False,
         select_first_file=False,
+        debounce_prompt_row=True,
     )
     if preferred_hit_path is not None:
         selected_hit_idx = find_content_hit_index(

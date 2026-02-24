@@ -161,6 +161,7 @@ def _loop_callbacks(
         handle_picker_key=None,
         handle_tree_filter_key=None,
         tick_source_selection_drag=None,
+        maybe_prefetch_directory_preview=None,
     )
     if not overrides:
         return base
@@ -340,7 +341,7 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
         state = _make_state()
         terminal = _FakeTerminal()
         keys = iter(["q"])
-        calls = {"tree": 0, "git": 0, "overlay": 0}
+        calls = {"tree": 0, "git": 0, "overlay": 0, "prefetch": 0}
 
         with mock.patch(
             "lazyviewer.runtime.loop.shutil.get_terminal_size",
@@ -364,10 +365,90 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
                     refresh_git_status_overlay=lambda **_kwargs: calls.__setitem__(
                         "overlay", calls["overlay"] + 1
                     ),
+                    maybe_prefetch_directory_preview=lambda: calls.__setitem__(
+                        "prefetch", calls["prefetch"] + 1
+                    )
+                    or False,
                 ),
             )
 
-        self.assertEqual(calls, {"tree": 0, "git": 0, "overlay": 0})
+        self.assertEqual(calls, {"tree": 0, "git": 0, "overlay": 0, "prefetch": 0})
+
+    def test_idle_loop_runs_directory_prefetch_after_other_idle_callbacks(self) -> None:
+        state = _make_state()
+        terminal = _FakeTerminal()
+        keys = iter(["", "q"])
+        calls: list[str] = []
+
+        with mock.patch(
+            "lazyviewer.runtime.loop.IDLE_DIRECTORY_PREFETCH_DELAY_SECONDS",
+            0.0,
+        ), mock.patch(
+            "lazyviewer.runtime.loop.IDLE_DIRECTORY_PREFETCH_INTERVAL_SECONDS",
+            0.0,
+        ), mock.patch(
+            "lazyviewer.runtime.loop.shutil.get_terminal_size",
+            return_value=mock.Mock(columns=120, lines=40),
+        ), mock.patch(
+            "lazyviewer.runtime.loop.read_key",
+            side_effect=lambda *_args, **_kwargs: next(keys),
+        ), mock.patch(
+            "lazyviewer.runtime.loop.render_dual_page_context",
+            return_value=None,
+        ):
+            run_main_loop(
+                state=state,
+                terminal=terminal,  # type: ignore[arg-type]
+                stdin_fd=0,
+                timing=_loop_timing(),
+                callbacks=_loop_callbacks(
+                    handle_normal_key=lambda key, _columns: key == "q",
+                    maybe_refresh_tree_watch=lambda: calls.append("tree"),
+                    maybe_refresh_git_watch=lambda: calls.append("git"),
+                    refresh_git_status_overlay=lambda **_kwargs: calls.append("overlay"),
+                    maybe_prefetch_directory_preview=lambda: calls.append("prefetch") or False,
+                ),
+            )
+
+        self.assertEqual(calls, ["tree", "git", "overlay", "prefetch"])
+
+    def test_idle_directory_prefetch_that_grows_preview_marks_state_dirty(self) -> None:
+        state = _make_state()
+        terminal = _FakeTerminal()
+        keys = iter(["", "q"])
+        render_calls = {"count": 0}
+
+        def fake_render(_context) -> None:
+            render_calls["count"] += 1
+
+        with mock.patch(
+            "lazyviewer.runtime.loop.IDLE_DIRECTORY_PREFETCH_DELAY_SECONDS",
+            0.0,
+        ), mock.patch(
+            "lazyviewer.runtime.loop.IDLE_DIRECTORY_PREFETCH_INTERVAL_SECONDS",
+            0.0,
+        ), mock.patch(
+            "lazyviewer.runtime.loop.shutil.get_terminal_size",
+            return_value=mock.Mock(columns=120, lines=40),
+        ), mock.patch(
+            "lazyviewer.runtime.loop.read_key",
+            side_effect=lambda *_args, **_kwargs: next(keys),
+        ), mock.patch(
+            "lazyviewer.runtime.loop.render_dual_page_context",
+            side_effect=fake_render,
+        ):
+            run_main_loop(
+                state=state,
+                terminal=terminal,  # type: ignore[arg-type]
+                stdin_fd=0,
+                timing=_loop_timing(),
+                callbacks=_loop_callbacks(
+                    handle_normal_key=lambda key, _columns: key == "q",
+                    maybe_prefetch_directory_preview=lambda: True,
+                ),
+            )
+
+        self.assertEqual(render_calls["count"], 2)
 
     def test_height_only_resize_triggers_redraw_without_width_change(self) -> None:
         state = _make_state()

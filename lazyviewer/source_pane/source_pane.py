@@ -231,6 +231,41 @@ class SourcePane:
         return len(state.lines) > previous_line_count
 
     @staticmethod
+    def maybe_prefetch_directory_preview(
+        state: AppState,
+        visible_content_rows: Callable[[], int],
+        refresh_rendered_for_current_path_fn: Callable[..., None],
+        min_headroom_screens: int = 4,
+        target_headroom_screens: int = 12,
+    ) -> bool:
+        """Grow directory preview during idle to keep scroll headroom ahead."""
+        if state.dir_preview_path is None or not state.dir_preview_truncated:
+            return False
+        if state.current_path.resolve() != state.dir_preview_path:
+            return False
+        if state.dir_preview_max_entries >= SourcePane.DIR_PREVIEW_HARD_MAX_ENTRIES:
+            return False
+
+        visible_rows = max(1, visible_content_rows())
+        min_headroom_lines = max(visible_rows, visible_rows * max(1, min_headroom_screens))
+        headroom_lines = max(0, state.max_start - state.start)
+        if headroom_lines >= min_headroom_lines:
+            return False
+
+        previous_line_count = len(state.lines)
+        growth_step = SourcePane.directory_preview_growth_step(visible_rows)
+        target_entries = state.start + (visible_rows * max(1, target_headroom_screens))
+        next_max_entries = min(
+            SourcePane.DIR_PREVIEW_HARD_MAX_ENTRIES,
+            max(state.dir_preview_max_entries + growth_step, target_entries),
+        )
+        if next_max_entries <= state.dir_preview_max_entries:
+            return False
+        state.dir_preview_max_entries = next_max_entries
+        refresh_rendered_for_current_path_fn(reset_scroll=False, reset_dir_budget=False)
+        return len(state.lines) > previous_line_count
+
+    @staticmethod
     def toggle_tree_size_labels(
         state: AppState,
         refresh_rendered_for_current_path_fn: Callable[..., None],
