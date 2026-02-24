@@ -112,18 +112,6 @@ class App:
         """Advance active source-selection drag state."""
         self.source_pane.tick_source_selection_drag()
 
-    def handle_picker_key(self, key: str, double_click_seconds: float) -> tuple[bool, bool]:
-        """Dispatch one key through tree-pane picker behavior."""
-        return self.tree_pane.handle_picker_key(key, double_click_seconds)
-
-    def handle_tree_filter_key(self, key: str) -> bool:
-        """Dispatch one key through tree-filter behavior and pane mouse routing."""
-        return self.tree_pane.handle_tree_filter_key(
-            key,
-            handle_tree_mouse_wheel=self.handle_tree_mouse_wheel,
-            handle_tree_mouse_click=self.handle_tree_mouse_click,
-        )
-
     def handle_normal_key(self, key: str, term_columns: int) -> bool:
         """Handle one normal-mode key by dispatching directly to pane controllers."""
         return self._normal_key_handler.handle(key, term_columns)

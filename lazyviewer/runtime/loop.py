@@ -1,7 +1,7 @@
 """Main interactive event loop for the terminal UI.
 
 Coordinates periodic refreshes, rendering, and all input dispatch.
-This loop is intentionally wiring-heavy; feature logic lives in callbacks.
+This loop is intentionally wiring-heavy; feature logic lives in pane/panel objects.
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 
 from ..input import read_key
 from ..render import RenderContext, render_dual_page_context
@@ -30,43 +29,20 @@ class RuntimeLoopTiming:
 
 @dataclass(frozen=True)
 class RuntimeLoopCallbacks:
-    """Injected operations used by ``run_main_loop``.
+    """UI-root contract used by ``run_main_loop`` in tests and adapters."""
 
-    Keeping the loop callback-driven isolates feature logic outside the core
-    event loop and makes behavior easier to unit test.
-    """
-
-    get_tree_filter_loading_until: Callable[[], float]
-    tree_view_rows: Callable[[], int]
-    tree_filter_prompt_prefix: Callable[[], str]
-    tree_filter_placeholder: Callable[[], str]
-    visible_content_rows: Callable[[], int]
-    rebuild_screen_lines: Callable[..., None]
+    tree_pane: object
+    source_pane: object
+    layout: object
     maybe_refresh_tree_watch: Callable[[], None]
     maybe_refresh_git_watch: Callable[[], None]
     refresh_git_status_overlay: Callable[..., None]
-    current_preview_image_path: Callable[[], Path | None]
-    current_preview_image_geometry: Callable[[int], tuple[int, int, int, int]]
-    open_tree_filter: Callable[[str], None]
-    open_command_picker: Callable[[], None]
-    close_picker: Callable[..., None]
-    refresh_command_picker_matches: Callable[..., None]
-    activate_picker_selection: Callable[[], bool]
-    refresh_active_picker_matches: Callable[..., None]
-    handle_tree_mouse_wheel: Callable[[str], bool]
-    handle_tree_mouse_click: Callable[[str], bool]
-    toggle_help_panel: Callable[[], None]
-    close_tree_filter: Callable[..., None]
-    activate_tree_filter_selection: Callable[[], None]
-    move_tree_selection: Callable[[int], bool]
-    apply_tree_filter_query: Callable[..., None]
-    jump_to_next_content_hit: Callable[[int], bool]
-    set_named_mark: Callable[[str], bool]
-    jump_to_named_mark: Callable[[str], bool]
-    jump_back_in_history: Callable[[], bool]
-    jump_forward_in_history: Callable[[], bool]
     handle_normal_key: Callable[[str, int], bool]
     save_left_pane_width: Callable[[int, int], None]
+    handle_tree_mouse_wheel: Callable[[str], bool] | None = None
+    handle_tree_mouse_click: Callable[[str], bool] | None = None
+    handle_picker_key: Callable[[str, float], tuple[bool, bool]] | None = None
+    handle_tree_filter_key: Callable[[str], bool] | None = None
     tick_source_selection_drag: Callable[[], None] | None = None
 
 
@@ -82,130 +58,58 @@ def run_main_loop(
     Each iteration handles terminal resize bookkeeping, optional rendering,
     input decoding/dispatch, and periodic idle refresh hooks.
     """
-    tree_pane = getattr(callbacks, "tree_pane", None)
-    source_pane = getattr(callbacks, "source_pane", None)
-    layout = getattr(callbacks, "layout", None)
+    tree_pane = callbacks.tree_pane
+    source_pane = callbacks.source_pane
+    layout = callbacks.layout
 
-    if tree_pane is not None and source_pane is not None and layout is not None:
-        get_tree_filter_loading_until = tree_pane.filter.get_loading_until
-        tree_view_rows = tree_pane.filter.tree_view_rows
-        tree_filter_prompt_prefix = tree_pane.filter.tree_filter_prompt_prefix
-        tree_filter_placeholder = tree_pane.filter.tree_filter_placeholder
-        visible_content_rows = source_pane.geometry.visible_content_rows
-        rebuild_screen_lines = layout.rebuild_screen_lines
-        current_preview_image_path = layout.current_preview_image_path
-        current_preview_image_geometry = layout.current_preview_image_geometry
-        open_tree_filter = tree_pane.filter_panel.open
-        open_command_picker = tree_pane.picker_panel.open_command_picker
-        close_picker = tree_pane.picker_panel.close_picker
-        refresh_command_picker_matches = tree_pane.navigation.refresh_command_picker_matches
-        activate_picker_selection = tree_pane.picker_panel.activate_picker_selection
-        refresh_active_picker_matches = tree_pane.navigation.refresh_active_picker_matches
-        handle_tree_mouse_wheel = getattr(
-            callbacks,
-            "handle_tree_mouse_wheel",
-            source_pane.handle_tree_mouse_wheel,
-        )
-        handle_tree_mouse_click = getattr(
-            callbacks,
-            "handle_tree_mouse_click",
-            tree_pane.handle_tree_mouse_click,
-        )
-        toggle_help_panel = tree_pane.navigation.toggle_help_panel
-        close_tree_filter = tree_pane.filter_panel.close
-        activate_tree_filter_selection = tree_pane.filter_panel.activate_selection
-        move_tree_selection = tree_pane.filter.move_tree_selection
-        apply_tree_filter_query = tree_pane.filter.apply_tree_filter_query
-        jump_to_next_content_hit = tree_pane.filter.jump_to_next_content_hit
-        set_named_mark = tree_pane.navigation.set_named_mark
-        jump_to_named_mark = tree_pane.navigation.jump_to_named_mark
-        jump_back_in_history = tree_pane.navigation.jump_back_in_history
-        jump_forward_in_history = tree_pane.navigation.jump_forward_in_history
-        toggle_tree_filter_mode = tree_pane.filter_panel.toggle_mode
-        tick_source_selection_drag = getattr(
-            callbacks,
-            "tick_source_selection_drag",
-            source_pane.tick_source_selection_drag,
-        )
-        picker_key_dispatch = getattr(callbacks, "handle_picker_key", tree_pane.handle_picker_key)
-        tree_filter_key_dispatch = getattr(
-            callbacks,
-            "handle_tree_filter_key",
-            lambda key: tree_pane.handle_tree_filter_key(
-                key,
-                handle_tree_mouse_wheel=handle_tree_mouse_wheel,
-                handle_tree_mouse_click=handle_tree_mouse_click,
-            ),
-        )
+    get_tree_filter_loading_until = tree_pane.filter.get_loading_until
+    tree_view_rows = tree_pane.filter.tree_view_rows
+    tree_filter_prompt_prefix = tree_pane.filter.tree_filter_prompt_prefix
+    tree_filter_placeholder = tree_pane.filter.tree_filter_placeholder
+    visible_content_rows = source_pane.geometry.visible_content_rows
+    rebuild_screen_lines = layout.rebuild_screen_lines
+    current_preview_image_path = layout.current_preview_image_path
+    current_preview_image_geometry = layout.current_preview_image_geometry
+    open_command_picker = tree_pane.picker_panel.open_command_picker
+    set_named_mark = tree_pane.navigation.set_named_mark
+    jump_to_named_mark = tree_pane.navigation.jump_to_named_mark
+    jump_back_in_history = tree_pane.navigation.jump_back_in_history
+    jump_forward_in_history = tree_pane.navigation.jump_forward_in_history
+    toggle_tree_filter_mode = tree_pane.filter_panel.toggle_mode
+    handle_tree_mouse_wheel_override = getattr(callbacks, "handle_tree_mouse_wheel", None)
+    handle_tree_mouse_wheel = (
+        handle_tree_mouse_wheel_override
+        if handle_tree_mouse_wheel_override is not None
+        else source_pane.handle_tree_mouse_wheel
+    )
+    handle_tree_mouse_click_override = getattr(callbacks, "handle_tree_mouse_click", None)
+    handle_tree_mouse_click = (
+        handle_tree_mouse_click_override
+        if handle_tree_mouse_click_override is not None
+        else tree_pane.handle_tree_mouse_click
+    )
+    tick_source_selection_drag_override = getattr(callbacks, "tick_source_selection_drag", None)
+    tick_source_selection_drag = (
+        tick_source_selection_drag_override
+        if tick_source_selection_drag_override is not None
+        else source_pane.tick_source_selection_drag
+    )
+    handle_picker_key_override = getattr(callbacks, "handle_picker_key", None)
+    if handle_picker_key_override is not None:
+        picker_key_dispatch = handle_picker_key_override
     else:
-        get_tree_filter_loading_until = callbacks.get_tree_filter_loading_until
-        tree_view_rows = callbacks.tree_view_rows
-        tree_filter_prompt_prefix = callbacks.tree_filter_prompt_prefix
-        tree_filter_placeholder = callbacks.tree_filter_placeholder
-        visible_content_rows = callbacks.visible_content_rows
-        rebuild_screen_lines = callbacks.rebuild_screen_lines
-        current_preview_image_path = callbacks.current_preview_image_path
-        current_preview_image_geometry = callbacks.current_preview_image_geometry
-        open_tree_filter = callbacks.open_tree_filter
-        open_command_picker = callbacks.open_command_picker
-        close_picker = callbacks.close_picker
-        refresh_command_picker_matches = callbacks.refresh_command_picker_matches
-        activate_picker_selection = callbacks.activate_picker_selection
-        refresh_active_picker_matches = callbacks.refresh_active_picker_matches
-        handle_tree_mouse_wheel = callbacks.handle_tree_mouse_wheel
-        handle_tree_mouse_click = callbacks.handle_tree_mouse_click
-        toggle_help_panel = callbacks.toggle_help_panel
-        close_tree_filter = callbacks.close_tree_filter
-        activate_tree_filter_selection = callbacks.activate_tree_filter_selection
-        move_tree_selection = callbacks.move_tree_selection
-        apply_tree_filter_query = callbacks.apply_tree_filter_query
-        jump_to_next_content_hit = callbacks.jump_to_next_content_hit
-        set_named_mark = callbacks.set_named_mark
-        jump_to_named_mark = callbacks.jump_to_named_mark
-        jump_back_in_history = callbacks.jump_back_in_history
-        jump_forward_in_history = callbacks.jump_forward_in_history
-        tick_source_selection_drag = callbacks.tick_source_selection_drag
-        from ..input import handle_picker_key as _fallback_handle_picker_key
-        from ..input import handle_tree_filter_key as _fallback_handle_tree_filter_key
-
-        def picker_key_dispatch(key: str, double_click_seconds: float) -> tuple[bool, bool]:
-            return _fallback_handle_picker_key(
-                key,
-                state,
-                double_click_seconds,
-                close_picker=close_picker,
-                refresh_command_picker_matches=refresh_command_picker_matches,
-                activate_picker_selection=activate_picker_selection,
-                visible_content_rows=visible_content_rows,
-                refresh_active_picker_matches=refresh_active_picker_matches,
-            )
-
+        picker_key_dispatch = tree_pane.picker_panel.handle_key
+    handle_tree_filter_key_override = getattr(callbacks, "handle_tree_filter_key", None)
+    if handle_tree_filter_key_override is not None:
+        tree_filter_key_dispatch = handle_tree_filter_key_override
+    else:
         def tree_filter_key_dispatch(key: str) -> bool:
-            return _fallback_handle_tree_filter_key(
+            return tree_pane.filter_panel.handle_key(
                 key,
-                state,
                 handle_tree_mouse_wheel=handle_tree_mouse_wheel,
                 handle_tree_mouse_click=handle_tree_mouse_click,
-                toggle_help_panel=toggle_help_panel,
-                close_tree_filter=close_tree_filter,
-                activate_tree_filter_selection=activate_tree_filter_selection,
-                move_tree_selection=move_tree_selection,
-                apply_tree_filter_query=apply_tree_filter_query,
-                jump_to_next_content_hit=jump_to_next_content_hit,
+                toggle_help_panel=tree_pane.navigation.toggle_help_panel,
             )
-
-        def toggle_tree_filter_mode(mode: str) -> None:
-            """Open/switch/close tree filter UI based on current editing state."""
-            if state.tree_filter_active:
-                if state.tree_filter_mode == mode and state.tree_filter_editing:
-                    close_tree_filter(clear_query=True)
-                elif state.tree_filter_mode != mode:
-                    open_tree_filter(mode)
-                else:
-                    state.tree_filter_editing = True
-                    state.dirty = True
-                return
-            open_tree_filter(mode)
 
     maybe_refresh_tree_watch = callbacks.maybe_refresh_tree_watch
     maybe_refresh_git_watch = callbacks.maybe_refresh_git_watch

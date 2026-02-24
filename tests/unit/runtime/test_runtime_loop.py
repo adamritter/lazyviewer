@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import replace
+from types import SimpleNamespace
 from pathlib import Path
 import time
 import unittest
@@ -62,43 +63,103 @@ def _loop_timing() -> RuntimeLoopTiming:
     )
 
 
+class _FakeFilter:
+    def get_loading_until(self) -> float:
+        return 0.0
+
+    def tree_view_rows(self) -> int:
+        return 20
+
+    def tree_filter_prompt_prefix(self) -> str:
+        return "p>"
+
+    def tree_filter_placeholder(self) -> str:
+        return "type"
+
+
+class _FakeFilterPanel:
+    def open(self, _mode: str) -> None:
+        pass
+
+    def toggle_mode(self, _mode: str) -> None:
+        pass
+
+    def close(self, **_kwargs) -> None:
+        pass
+
+    def activate_selection(self) -> None:
+        pass
+
+    def handle_key(self, _key: str, **_kwargs) -> bool:
+        return False
+
+
+class _FakePickerPanel:
+    def open_command_picker(self) -> None:
+        pass
+
+    def close_picker(self, **_kwargs) -> None:
+        pass
+
+    def activate_picker_selection(self) -> bool:
+        return False
+
+    def handle_key(self, _key: str, _double_click_seconds: float) -> tuple[bool, bool]:
+        return False, False
+
+
+def _fake_tree_pane() -> object:
+    navigation = SimpleNamespace(
+        set_named_mark=lambda _key: False,
+        jump_to_named_mark=lambda _key: False,
+        jump_back_in_history=lambda: False,
+        jump_forward_in_history=lambda: False,
+        toggle_help_panel=lambda: None,
+    )
+    return SimpleNamespace(
+        filter=_FakeFilter(),
+        filter_panel=_FakeFilterPanel(),
+        picker_panel=_FakePickerPanel(),
+        navigation=navigation,
+        handle_tree_mouse_click=lambda _key: False,
+    )
+
+
+def _fake_source_pane() -> object:
+    geometry = SimpleNamespace(visible_content_rows=lambda: 20)
+    return SimpleNamespace(
+        geometry=geometry,
+        handle_tree_mouse_wheel=lambda _key: False,
+        tick_source_selection_drag=lambda: None,
+    )
+
+
+def _fake_layout() -> object:
+    return SimpleNamespace(
+        rebuild_screen_lines=lambda **_kwargs: None,
+        current_preview_image_path=lambda: None,
+        current_preview_image_geometry=lambda _columns: (1, 1, 1, 1),
+    )
+
+
 def _loop_callbacks(
     *,
     handle_normal_key,
     **overrides,
 ) -> RuntimeLoopCallbacks:
     base = RuntimeLoopCallbacks(
-        get_tree_filter_loading_until=lambda: 0.0,
-        tree_view_rows=lambda: 20,
-        tree_filter_prompt_prefix=lambda: "p>",
-        tree_filter_placeholder=lambda: "type",
-        visible_content_rows=lambda: 20,
-        rebuild_screen_lines=lambda **_kwargs: None,
+        tree_pane=_fake_tree_pane(),
+        source_pane=_fake_source_pane(),
+        layout=_fake_layout(),
         maybe_refresh_tree_watch=lambda: None,
         maybe_refresh_git_watch=lambda: None,
         refresh_git_status_overlay=lambda **_kwargs: None,
-        current_preview_image_path=lambda: None,
-        current_preview_image_geometry=lambda _columns: (1, 1, 1, 1),
-        open_tree_filter=lambda _mode: None,
-        open_command_picker=lambda: None,
-        close_picker=lambda **_kwargs: None,
-        refresh_command_picker_matches=lambda **_kwargs: None,
-        activate_picker_selection=lambda: False,
-        refresh_active_picker_matches=lambda **_kwargs: None,
-        handle_tree_mouse_wheel=lambda _key: False,
-        handle_tree_mouse_click=lambda _key: False,
-        toggle_help_panel=lambda: None,
-        close_tree_filter=lambda **_kwargs: None,
-        activate_tree_filter_selection=lambda: None,
-        move_tree_selection=lambda _direction: False,
-        apply_tree_filter_query=lambda *_args, **_kwargs: None,
-        jump_to_next_content_hit=lambda _direction: False,
-        set_named_mark=lambda _key: False,
-        jump_to_named_mark=lambda _key: False,
-        jump_back_in_history=lambda: False,
-        jump_forward_in_history=lambda: False,
         handle_normal_key=handle_normal_key,
         save_left_pane_width=lambda _total, _left: None,
+        handle_tree_mouse_wheel=None,
+        handle_tree_mouse_click=None,
+        handle_picker_key=None,
+        handle_tree_filter_key=None,
         tick_source_selection_drag=None,
     )
     if not overrides:

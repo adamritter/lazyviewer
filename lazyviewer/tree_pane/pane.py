@@ -92,26 +92,3 @@ class TreePane:
         if col is None or row is None:
             return True
         return self.mouse.handle_click(col, row, is_left_down=is_left_down)
-
-    def toggle_tree_filter_mode(self, mode: str) -> None:
-        """Open/switch/close tree filter UI based on current editing state."""
-        self.filter_panel.toggle_mode(mode)
-
-    def handle_picker_key(self, key: str, double_click_seconds: float) -> tuple[bool, bool]:
-        """Dispatch one key through picker controller when picker is active."""
-        return self.picker_panel.handle_key(key, double_click_seconds)
-
-    def handle_tree_filter_key(
-        self,
-        key: str,
-        *,
-        handle_tree_mouse_wheel: Callable[[str], bool],
-        handle_tree_mouse_click: Callable[[str], bool],
-    ) -> bool:
-        """Dispatch one key through tree-filter controller when filter is active."""
-        return self.filter_panel.handle_key(
-            key,
-            handle_tree_mouse_wheel=handle_tree_mouse_wheel,
-            handle_tree_mouse_click=handle_tree_mouse_click,
-            toggle_help_panel=self.navigation.toggle_help_panel,
-        )
