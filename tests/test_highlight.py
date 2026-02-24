@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.highlight import colorize_source, sanitize_terminal_text
+from lazyviewer.source_pane.syntax import colorize_source, sanitize_terminal_text
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
@@ -26,7 +26,7 @@ class HighlightSanitizationTests(unittest.TestCase):
     def test_fallback_colorize_keeps_spacing_for_extensionless_text(self) -> None:
         source = "Permission  is  hereby granted, free of charge:\n"
 
-        with mock.patch("lazyviewer.highlight.pygments_highlight", return_value=None):
+        with mock.patch("lazyviewer.source_pane.syntax.pygments_highlight", return_value=None):
             rendered = colorize_source(source, Path("LICENSE"))
 
         plain = ANSI_RE.sub("", rendered)

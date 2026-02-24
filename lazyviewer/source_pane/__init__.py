@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from ..highlight import colorize_source
+from .syntax import colorize_source
 from .directory import (
     DIR_PREVIEW_CACHE_MAX,
     DIR_PREVIEW_DEFAULT_DEPTH,

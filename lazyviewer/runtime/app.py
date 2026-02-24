@@ -50,7 +50,7 @@ from ..config import (
 )
 from ..editor import launch_editor
 from ..git_status import collect_git_status_overlay
-from ..highlight import colorize_source
+from ..source_pane.syntax import colorize_source
 from ..input import NormalKeyOps, handle_normal_key as handle_normal_key_event
 from ..source_pane import (
     DIR_PREVIEW_GROWTH_STEP,

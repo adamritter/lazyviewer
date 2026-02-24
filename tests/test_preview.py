@@ -154,6 +154,30 @@ class PreviewBehaviorTests(unittest.TestCase):
             self.assertIn("large.bin", plain)
             self.assertNotIn("large.bin [10 KB]", plain)
 
+    def test_build_directory_preview_appends_top_of_file_doc_one_liner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            docstring_file = root / "docstring.py"
+            comment_file = root / "comment.py"
+            plain_file = root / "plain.py"
+            docstring_file.write_text('"""Render widgets quickly."""\nvalue = 1\n', encoding="utf-8")
+            comment_file.write_text("# Utility helpers for tests.\nvalue = 2\n", encoding="utf-8")
+            plain_file.write_text("value = 3\n", encoding="utf-8")
+
+            rendered, truncated = preview.build_directory_preview(
+                root,
+                show_hidden=False,
+                max_depth=2,
+                max_entries=20,
+            )
+            plain = strip_ansi(rendered)
+
+            self.assertFalse(truncated)
+            self.assertIn("docstring.py  -- Render widgets quickly.", plain)
+            self.assertIn("comment.py  -- Utility helpers for tests.", plain)
+            self.assertIn("plain.py", plain)
+            self.assertNotIn("plain.py  --", plain)
+
     def test_build_rendered_for_path_file_returns_plain_text_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             file_path = Path(tmp) / "demo.py"

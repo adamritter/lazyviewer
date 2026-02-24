@@ -13,7 +13,7 @@ from pathlib import Path
 import re
 import subprocess
 
-from ..highlight import colorize_source, read_text, sanitize_terminal_text
+from .syntax import colorize_source, read_text, sanitize_terminal_text
 from ..watch import build_git_watch_signature
 
 GIT_DIFF_PREVIEW_CACHE_MAX = 128
@@ -159,6 +159,49 @@ def _boost_foreground_contrast_for_diff(params: str) -> str:
     while index < len(parts):
         token = parts[index]
 
+        if token in {"38", "48"} and index + 1 < len(parts):
+            mode = parts[index + 1]
+            if mode == "5" and index + 2 < len(parts):
+                color_token = parts[index + 2]
+                if token == "38":
+                    try:
+                        color_index = int(color_token)
+                    except ValueError:
+                        color_index = -1
+                    if 232 <= color_index <= 248:
+                        boosted.extend(["38", "5", _DIFF_CONTRAST_8BIT])
+                        index += 3
+                        continue
+                boosted.extend([token, "5", color_token])
+                index += 3
+                continue
+            if mode == "2" and index + 4 < len(parts):
+                red_token = parts[index + 2]
+                green_token = parts[index + 3]
+                blue_token = parts[index + 4]
+                if token == "38":
+                    try:
+                        red = int(red_token)
+                        green = int(green_token)
+                        blue = int(blue_token)
+                    except ValueError:
+                        red = green = blue = -1
+                    if (
+                        red >= 0
+                        and green >= 0
+                        and blue >= 0
+                        and abs(red - green) <= 8
+                        and abs(green - blue) <= 8
+                        and max(red, green, blue) < 190
+                    ):
+                        boosted.extend(["38", "2", *_DIFF_CONTRAST_TRUECOLOR])
+                        index += 5
+                        continue
+                boosted.extend([token, "2", red_token, green_token, blue_token])
+                index += 5
+                continue
+
+        # Drop faint text attribute so dim tokens stay legible on diff backgrounds.
         if token == "2":
             index += 1
             continue
@@ -167,36 +210,6 @@ def _boost_foreground_contrast_for_diff(params: str) -> str:
             boosted.extend(["38", "5", _DIFF_CONTRAST_8BIT])
             index += 1
             continue
-
-        if token == "38" and index + 1 < len(parts):
-            mode = parts[index + 1]
-            if mode == "5" and index + 2 < len(parts):
-                try:
-                    color_index = int(parts[index + 2])
-                except ValueError:
-                    color_index = -1
-                if 232 <= color_index <= 248:
-                    boosted.extend(["38", "5", _DIFF_CONTRAST_8BIT])
-                    index += 3
-                    continue
-            if mode == "2" and index + 4 < len(parts):
-                try:
-                    red = int(parts[index + 2])
-                    green = int(parts[index + 3])
-                    blue = int(parts[index + 4])
-                except ValueError:
-                    red = green = blue = -1
-                if (
-                    red >= 0
-                    and green >= 0
-                    and blue >= 0
-                    and abs(red - green) <= 8
-                    and abs(green - blue) <= 8
-                    and max(red, green, blue) < 190
-                ):
-                    boosted.extend(["38", "2", *_DIFF_CONTRAST_TRUECOLOR])
-                    index += 5
-                    continue
 
         boosted.append(token)
         index += 1

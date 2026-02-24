@@ -18,6 +18,7 @@ from ..state import AppState
 _CLICK_SEARCH_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 _TRAILING_GIT_BADGES_RE = re.compile(r"^(.*?)(?:\s(?:\[(?:M|\?)\])+)$")
 _TRAILING_SIZE_LABEL_RE = re.compile(r"^(.*?)(?:\s\[\d+\sKB\])$")
+_TRAILING_DOC_SUMMARY_RE = re.compile(r"^(.*?)(?:\s{2}--\s.+)$")
 _FROM_IMPORT_RE = re.compile(
     r"^\s*from\s+(?P<module>\.+[A-Za-z_][A-Za-z0-9_\.]*|\.+|[A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+(?P<imports>.+?)\s*$"
 )
@@ -95,6 +96,9 @@ def directory_preview_target_for_display_line(state: AppState, display_idx: int)
                 name_part = plain_line[branch_idx + 3 :]
                 if name_part and not name_part.startswith("<error:"):
                     name_part = name_part.rstrip()
+                    doc_summary_match = _TRAILING_DOC_SUMMARY_RE.match(name_part)
+                    if doc_summary_match is not None:
+                        name_part = doc_summary_match.group(1)
                     badge_match = _TRAILING_GIT_BADGES_RE.match(name_part)
                     if badge_match is not None:
                         name_part = badge_match.group(1)

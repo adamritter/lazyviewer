@@ -15,7 +15,7 @@ import os
 import sys
 from pathlib import Path
 
-from ..highlight import colorize_source, read_text, sanitize_terminal_text
+from .syntax import colorize_source, read_text, sanitize_terminal_text
 from .diff import build_unified_diff_preview_for_path
 from .directory import (
     DIR_PREVIEW_DEFAULT_DEPTH,

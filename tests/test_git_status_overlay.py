@@ -40,6 +40,18 @@ class GitDiffPreviewColorContrastTests(unittest.TestCase):
         self.assertIn("\033[38;5;246;48;2;36;74;52m@unittest", rendered)
         self.assertNotIn("\033[90;48;2;36;74;52m", rendered)
 
+    def test_boost_foreground_contrast_preserves_non_muted_truecolor_foreground(self) -> None:
+        self.assertEqual(
+            _boost_foreground_contrast_for_diff("38;2;220;180;120"),
+            "38;2;220;180;120",
+        )
+
+    def test_apply_line_background_keeps_valid_truecolor_foreground_sgr(self) -> None:
+        line = "\033[38;2;220;180;120mtoken\033[0m"
+        rendered = _apply_line_background(line, _ADDED_BG_SGR)
+        self.assertIn("\033[38;2;220;180;120;48;2;36;74;52mtoken", rendered)
+        self.assertNotIn("\033[38;220;180;120;48;2;36;74;52m", rendered)
+
 
 @unittest.skipIf(shutil.which("git") is None, "git is required for git overlay tests")
 class GitStatusOverlayTests(unittest.TestCase):

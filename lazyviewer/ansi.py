@@ -94,7 +94,13 @@ def slice_ansi_line(text: str, start_cols: int, max_cols: int) -> str:
                 is_sgr = seq.endswith("m")
                 if is_sgr:
                     pending_sgr = seq
-                if col >= start_cols:
+                emit_clear_to_eol_past_end = (
+                    seq == "\033[K"
+                    and shown == 0
+                    and start_cols >= col
+                    and bool(pending_sgr)
+                )
+                if col >= start_cols or emit_clear_to_eol_past_end:
                     if not injected_style and pending_sgr and not is_sgr:
                         out.append(pending_sgr)
                         injected_style = True

@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from collections import OrderedDict
 import os
+import re
 from pathlib import Path
 
+from .syntax import sanitize_terminal_text
 from ..git_status import format_git_status_badges
 from ..gitignore import get_gitignore_matcher
 
@@ -20,8 +22,129 @@ DIR_PREVIEW_GROWTH_STEP = 400
 DIR_PREVIEW_HARD_MAX_ENTRIES = 20_000
 DIR_PREVIEW_CACHE_MAX = 128
 TREE_SIZE_LABEL_MIN_BYTES = 10 * 1024
+DOC_SUMMARY_READ_BYTES = 4_096
+DOC_SUMMARY_MAX_FILE_BYTES = 256 * 1024
+DOC_SUMMARY_MAX_CHARS = 96
+
+_CODING_COOKIE_RE = re.compile(r"^#.*coding[:=]\s*[-\w.]+")
+_TRIPLE_QUOTE_PREFIXES = ('"""', "'''")
+_LINE_COMMENT_PREFIXES = ("#", "//", "--", ";")
 
 _DIR_PREVIEW_CACHE: OrderedDict[tuple[str, bool, int, int, bool, bool, int, int], tuple[str, bool]] = OrderedDict()
+
+
+def _normalize_doc_summary(text: str) -> str | None:
+    """Normalize doc text to one safe short line."""
+    candidate = sanitize_terminal_text(" ".join(text.strip().split()))
+    if not candidate:
+        return None
+    if len(candidate) > DOC_SUMMARY_MAX_CHARS:
+        return candidate[: DOC_SUMMARY_MAX_CHARS - 3].rstrip() + "..."
+    return candidate
+
+
+def _extract_triple_quote_summary(lines: list[str], start_idx: int, delimiter: str) -> str | None:
+    """Extract one-line summary from a top-level triple-quoted block."""
+    first = lines[start_idx].lstrip()
+    body = first[len(delimiter) :]
+    if delimiter in body:
+        return _normalize_doc_summary(body.split(delimiter, 1)[0])
+
+    summary = _normalize_doc_summary(body)
+    if summary:
+        return summary
+
+    for idx in range(start_idx + 1, len(lines)):
+        line = lines[idx]
+        if delimiter in line:
+            return _normalize_doc_summary(line.split(delimiter, 1)[0])
+        summary = _normalize_doc_summary(line)
+        if summary:
+            return summary
+    return None
+
+
+def _extract_block_comment_summary(lines: list[str], start_idx: int) -> str | None:
+    """Extract one-line summary from C/JS-style block comment at file start."""
+    first = lines[start_idx].lstrip()
+    body = first[2:]
+    if "*/" in body:
+        return _normalize_doc_summary(body.split("*/", 1)[0].lstrip("*").strip())
+
+    summary = _normalize_doc_summary(body.lstrip("*").strip())
+    if summary:
+        return summary
+
+    for idx in range(start_idx + 1, len(lines)):
+        line = lines[idx]
+        if "*/" in line:
+            return _normalize_doc_summary(line.split("*/", 1)[0].lstrip("*").strip())
+        summary = _normalize_doc_summary(line.lstrip("*").strip())
+        if summary:
+            return summary
+    return None
+
+
+def _extract_line_comment_summary(lines: list[str], start_idx: int, prefix: str) -> str | None:
+    """Extract one-line summary from contiguous top-of-file line comments."""
+    for idx in range(start_idx, len(lines)):
+        stripped = lines[idx].lstrip()
+        if not stripped:
+            continue
+        if not stripped.startswith(prefix):
+            break
+        summary = _normalize_doc_summary(stripped[len(prefix) :])
+        if summary:
+            return summary
+    return None
+
+
+def _top_file_doc_summary(path: Path, size_bytes: int | None) -> str | None:
+    """Return top-of-file one-line documentation summary when present."""
+    if size_bytes is not None and size_bytes > DOC_SUMMARY_MAX_FILE_BYTES:
+        return None
+
+    try:
+        with path.open("rb") as handle:
+            sample = handle.read(DOC_SUMMARY_READ_BYTES)
+    except OSError:
+        return None
+    if not sample or b"\x00" in sample:
+        return None
+
+    text = sample.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    if not lines:
+        return None
+    if lines[0].startswith("\ufeff"):
+        lines[0] = lines[0].lstrip("\ufeff")
+
+    idx = 0
+    while idx < len(lines) and not lines[idx].strip():
+        idx += 1
+    if idx >= len(lines):
+        return None
+
+    first_stripped = lines[idx].lstrip()
+    if first_stripped.startswith("#!"):
+        idx += 1
+    if idx < len(lines) and _CODING_COOKIE_RE.match(lines[idx].strip()):
+        idx += 1
+    while idx < len(lines) and not lines[idx].strip():
+        idx += 1
+    if idx >= len(lines):
+        return None
+
+    first = lines[idx].lstrip()
+    for delimiter in _TRIPLE_QUOTE_PREFIXES:
+        if first.startswith(delimiter):
+            return _extract_triple_quote_summary(lines, idx, delimiter)
+    if first.startswith("/*"):
+        return _extract_block_comment_summary(lines, idx)
+    for prefix in _LINE_COMMENT_PREFIXES:
+        if first.startswith(prefix):
+            return _extract_line_comment_summary(lines, idx, prefix)
+    return None
 
 
 def _cache_key_for_directory(
@@ -142,6 +265,7 @@ def build_directory_preview(
     file_color = "\033[38;5;252m"
     branch_color = "\033[2;38;5;245m"
     note_color = "\033[2;38;5;250m"
+    doc_color = "\033[2;38;5;244m"
     size_color = "\033[38;5;109m"
     reset = "\033[0m"
 
@@ -202,11 +326,18 @@ def build_directory_preview(
             suffix = "/" if is_dir else ""
             name_color = dir_color if is_dir else file_color
             size_label = ""
+            doc_label = ""
             if show_size_labels and (not is_dir) and size_bytes is not None and size_bytes >= TREE_SIZE_LABEL_MIN_BYTES:
                 size_kb = size_bytes // 1024
                 size_label = f"{size_color} [{size_kb} KB]{reset}"
+            if not is_dir:
+                doc_summary = _top_file_doc_summary(child_path, size_bytes)
+                if doc_summary:
+                    doc_label = f"{doc_color}  -- {doc_summary}{reset}"
             badges = format_git_status_badges(child_path, git_status_overlay)
-            lines_out.append(f"{branch_color}{prefix}{branch}{reset}{name_color}{name}{suffix}{reset}{size_label}{badges}")
+            lines_out.append(
+                f"{branch_color}{prefix}{branch}{reset}{name_color}{name}{suffix}{reset}{size_label}{badges}{doc_label}"
+            )
             emitted += 1
             if is_dir:
                 walk(child_path, prefix + ("   " if last else "│  "), depth + 1)

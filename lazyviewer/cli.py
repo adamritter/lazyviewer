@@ -10,7 +10,7 @@ import argparse
 from pathlib import Path
 
 from .runtime import run_pager
-from .highlight import read_text
+from .source_pane.syntax import read_text
 
 
 def main(default_path: Path | None = None) -> None:
