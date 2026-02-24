@@ -10,6 +10,7 @@ import os
 import sys
 
 from .ansi import clip_ansi_line
+from ..ui_theme import DEFAULT_THEME, UITheme
 
 HELP_PANEL_TREE_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mTREE\033[0m",
@@ -17,6 +18,8 @@ HELP_PANEL_TREE_LINES: tuple[str, ...] = (
     "\033[38;5;229mCtrl+U/D\033[0m jump dirs",
     "\033[38;5;229mr\033[0m set root to root selected",
     "\033[38;5;229mR\033[0m set root to parent",
+    "\033[38;5;229ma\033[0m add selected dir as root",
+    "\033[38;5;229md\033[0m delete selected root",
     "\033[38;5;229mCtrl+P\033[0m jump to file",
     "\033[38;5;229m/\033[0m find in all files",
     "\033[38;5;229mShift+Left/Right\033[0m resize tree",
@@ -26,7 +29,7 @@ HELP_PANEL_TREE_LINES: tuple[str, ...] = (
 
 HELP_PANEL_TEXT_LINES: tuple[str, ...] = (
     "\033[1;38;5;81mTEXT + EXTRAS\033[0m",
-    "\033[38;5;229mUp/Down\033[0m line  \033[38;5;229md/u\033[0m half",
+    "\033[38;5;229mUp/Down\033[0m line  \033[38;5;229mu\033[0m half up",
     "\033[38;5;229mSpace/f/B\033[0m page  \033[38;5;229mg/G/10G\033[0m jump",
     "\033[38;5;229mLeft/Right\033[0m x-scroll  \033[38;5;229mwheel L/R\033[0m x-scroll",
     "\033[38;5;229mw\033[0m wrap  \033[38;5;229me\033[0m edit",
@@ -95,30 +98,61 @@ HELP_PANEL_SEARCH_HITS_TEXT_ONLY_LINES: tuple[str, ...] = (
 )
 
 
+def _apply_help_theme(line: str, theme: UITheme) -> str:
+    """Translate default help ANSI tokens into the active UI theme."""
+    if not line:
+        return line
+    rendered = line
+    replacements = (
+        ("\033[1;38;5;81m", theme.help_heading),
+        ("\033[38;5;229m", theme.help_key),
+        ("\033[2;38;5;250m", theme.help_dim),
+        ("\033[1;38;5;45m", theme.help_modal_title),
+        ("\033[38;5;45m", theme.help_modal_border),
+        ("\033[2m", theme.help_backdrop),
+        ("\033[0m", theme.reset),
+    )
+    for needle, replacement in replacements:
+        rendered = rendered.replace(needle, replacement)
+    return rendered
+
+
+def _apply_help_theme_lines(lines: tuple[str, ...], theme: UITheme) -> tuple[str, ...]:
+    """Apply active theme colors to a tuple of help lines."""
+    return tuple(_apply_help_theme(line, theme) for line in lines)
+
+
 def help_panel_lines(
+    theme: UITheme | None = None,
     tree_filter_active: bool = False,
     tree_filter_mode: str = "files",
     tree_filter_editing: bool = False,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     """Return contextual help-line sets for tree, text, and text-only layouts."""
+    active_theme = theme or DEFAULT_THEME
     if tree_filter_active and tree_filter_mode == "content":
         if tree_filter_editing:
             return (
-                HELP_PANEL_SEARCH_EDIT_TREE_LINES,
+                _apply_help_theme_lines(HELP_PANEL_SEARCH_EDIT_TREE_LINES, active_theme),
                 (),
-                HELP_PANEL_SEARCH_HITS_TEXT_ONLY_LINES,
+                _apply_help_theme_lines(HELP_PANEL_SEARCH_HITS_TEXT_ONLY_LINES, active_theme),
             )
         return (
-            HELP_PANEL_SEARCH_HITS_TREE_LINES,
-            HELP_PANEL_SEARCH_HITS_TEXT_LINES,
-            HELP_PANEL_SEARCH_HITS_TEXT_ONLY_LINES,
+            _apply_help_theme_lines(HELP_PANEL_SEARCH_HITS_TREE_LINES, active_theme),
+            _apply_help_theme_lines(HELP_PANEL_SEARCH_HITS_TEXT_LINES, active_theme),
+            _apply_help_theme_lines(HELP_PANEL_SEARCH_HITS_TEXT_ONLY_LINES, active_theme),
         )
-    return HELP_PANEL_TREE_LINES, HELP_PANEL_TEXT_LINES, HELP_PANEL_TEXT_ONLY_LINES
+    return (
+        _apply_help_theme_lines(HELP_PANEL_TREE_LINES, active_theme),
+        _apply_help_theme_lines(HELP_PANEL_TEXT_LINES, active_theme),
+        _apply_help_theme_lines(HELP_PANEL_TEXT_ONLY_LINES, active_theme),
+    )
 
 
 def help_panel_row_count(
     max_lines: int,
     show_help: bool,
+    theme: UITheme | None = None,
     browser_visible: bool = True,
     tree_filter_active: bool = False,
     tree_filter_mode: str = "files",
@@ -130,6 +164,7 @@ def help_panel_row_count(
     if max_lines <= 1:
         return 0
     tree_help_lines, text_help_lines, text_only_help_lines = help_panel_lines(
+        theme=theme,
         tree_filter_active=tree_filter_active,
         tree_filter_mode=tree_filter_mode,
         tree_filter_editing=tree_filter_editing,
@@ -144,8 +179,9 @@ def help_panel_row_count(
     return min(required_rows, max_lines - 1)
 
 
-def render_help_page(width: int, height: int) -> None:
+def render_help_page(width: int, height: int, theme: UITheme | None = None) -> None:
     """Render the full-screen modal help page directly to stdout."""
+    active_theme = theme or DEFAULT_THEME
     out: list[str] = []
     out.append("\033[H\033[J")
 
@@ -156,7 +192,7 @@ def render_help_page(width: int, height: int) -> None:
     inner_w = max(1, modal_w - 2)
     inner_h = max(1, modal_h - 2)
 
-    title = "\033[1;38;5;45mlazyviewer help\033[0m"
+    title = f"{active_theme.help_modal_title}lazyviewer help{active_theme.reset}"
     lines = [
         "",
         "\033[1;38;5;81mGeneral\033[0m",
@@ -175,6 +211,8 @@ def render_help_page(width: int, height: int) -> None:
         "  \033[38;5;229m.\033[0m show/hide hidden + gitignored files",
         "  \033[38;5;229mr\033[0m tree root -> selected directory (or selected file parent)",
         "  \033[38;5;229mR\033[0m tree root -> parent directory",
+        "  \033[38;5;229ma\033[0m add selected directory as workspace root",
+        "  \033[38;5;229md\033[0m delete selected workspace root (when more than one)",
         "  \033[38;5;229mCtrl+U\033[0m/\033[38;5;229mCtrl+D\033[0m smart directory jump around opened dirs (max 10)",
         "",
         "\033[1;38;5;81mTree pane\033[0m",
@@ -184,7 +222,7 @@ def render_help_page(width: int, height: int) -> None:
         "  click select + preview   double-click toggle dir/open file",
         "",
         "\033[1;38;5;81mSource pane\033[0m",
-        "  \033[38;5;229mUp/Down\033[0m line   \033[38;5;229md/u\033[0m half-page   \033[38;5;229mSpace/f/B\033[0m page   \033[38;5;229mg/G\033[0m top/bottom   \033[38;5;229m10G\033[0m goto",
+        "  \033[38;5;229mUp/Down\033[0m line   \033[38;5;229mu\033[0m half-page up   \033[38;5;229mSpace/f/B\033[0m page   \033[38;5;229mg/G\033[0m top/bottom   \033[38;5;229m10G\033[0m goto",
         "  \033[38;5;229mw\033[0m toggle wrap   \033[38;5;229mLeft/Right\033[0m horizontal scroll (wrap off)   \033[38;5;229me\033[0m edit in $EDITOR",
         "  drag in source pane to copy selected text to clipboard",
         "  mouse wheel scrolls source (left/right wheel x-scrolls when content overflows)",
@@ -195,23 +233,26 @@ def render_help_page(width: int, height: int) -> None:
         "\033[2;38;5;250mPress ? / Esc / q to close\033[0m",
     ]
 
+    lines = list(_apply_help_theme_lines(tuple(lines), active_theme))
+
     # Draw a subtle dim backdrop.
     for row in range(height):
-        out.append(f"\033[{row + 1};1H\033[2m")
+        out.append(f"\033[{row + 1};1H")
+        out.append(active_theme.help_backdrop)
         out.append(" " * max(1, width - 1))
-        out.append("\033[0m")
+        out.append(active_theme.reset)
 
     # Rounded frame.
-    out.append(f"\033[{y + 1};{x + 1}H\033[38;5;45m╭")
+    out.append(f"\033[{y + 1};{x + 1}H{active_theme.help_modal_border}╭")
     out.append("─" * inner_w)
-    out.append("╮\033[0m")
+    out.append(f"╮{active_theme.reset}")
     for i in range(inner_h):
-        out.append(f"\033[{y + 2 + i};{x + 1}H\033[38;5;45m│\033[0m")
+        out.append(f"\033[{y + 2 + i};{x + 1}H{active_theme.help_modal_border}│{active_theme.reset}")
         out.append(" " * inner_w)
-        out.append("\033[38;5;45m│\033[0m")
-    out.append(f"\033[{y + modal_h};{x + 1}H\033[38;5;45m╰")
+        out.append(f"{active_theme.help_modal_border}│{active_theme.reset}")
+    out.append(f"\033[{y + modal_h};{x + 1}H{active_theme.help_modal_border}╰")
     out.append("─" * inner_w)
-    out.append("╯\033[0m")
+    out.append(f"╯{active_theme.reset}")
 
     # Title
     title_x = x + max(2, (modal_w - 2 - len("lazyviewer help")) // 2)
@@ -224,6 +265,6 @@ def render_help_page(width: int, height: int) -> None:
         text = clip_ansi_line(lines[i], inner_w - 2)
         out.append(f"\033[{y + 2 + i};{x + 3}H")
         out.append(text)
-        out.append("\033[0m")
+        out.append(active_theme.reset)
 
     os.write(sys.stdout.fileno(), "".join(out).encode("utf-8", errors="replace"))

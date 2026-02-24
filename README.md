@@ -26,3 +26,5 @@ The code base is really ugly, far from how I'd like it to be, but it's partly be
 working on it with codex before this program existed :)
 
 I'm having fun using/developing it though, hopefully it will be fun/useful for others as well.
+
+Btw I suggest you use alias lv=lazyviewer

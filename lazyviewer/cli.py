@@ -16,6 +16,7 @@ from .runtime import run_pager
 from .source_pane import SourcePane
 from .source_pane.highlighting import rendered_preview_row
 from .source_pane.syntax import read_text
+from .ui_theme import available_theme_names
 
 
 def _positive_int(value: str) -> int:
@@ -82,6 +83,11 @@ def main(default_path: Path | None = None) -> None:
     )
     parser.add_argument("path", nargs="?", default=None, help="Path to file. Defaults to current directory.")
     parser.add_argument("--style", default="monokai", help="Pygments style name (for pygments rendering).")
+    parser.add_argument(
+        "--theme",
+        default=None,
+        help=f"UI theme name ({', '.join(available_theme_names())}).",
+    )
     parser.add_argument("--no-color", action="store_true", help="Disable color output even on TTY.")
     parser.add_argument("--nopager", action="store_true", help="Print output directly without interactive paging.")
     parser.add_argument("--render", metavar="PATH", help="Render source pane for PATH and exit.")
@@ -110,7 +116,7 @@ def main(default_path: Path | None = None) -> None:
         raise SystemExit(f"Path not found: {path}")
 
     source = "" if path.is_dir() else read_text(path)
-    run_pager(source, path, args.style, args.no_color, args.nopager)
+    run_pager(source, path, args.style, args.no_color, args.nopager, args.theme)
 
 
 if __name__ == "__main__":

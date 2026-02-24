@@ -6,6 +6,11 @@ from pathlib import Path
 
 from ..render.ansi import ANSI_ESCAPE_RE, char_display_width, clip_ansi_line
 from ..tree_model import TreeEntry, format_tree_entry
+from ..ui_theme import DEFAULT_THEME, UITheme
+from .workspace_roots import (
+    normalized_workspace_roots,
+    workspace_root_banner_rows,
+)
 
 FILTER_SPINNER_FRAMES: tuple[str, ...] = ("|", "/", "-", "\\")
 
@@ -77,6 +82,8 @@ class TreePaneRenderer:
         tree_start: int,
         tree_selected: int,
         tree_root: Path,
+        tree_roots: list[Path] | None,
+        workspace_expanded: dict[Path, set[Path]] | None,
         expanded: set[Path],
         show_tree_sizes: bool,
         git_status_overlay: dict[Path, int] | None,
@@ -100,6 +107,7 @@ class TreePaneRenderer:
         picker_focus: str,
         picker_list_start: int,
         picker_message: str,
+        theme: UITheme | None = None,
     ) -> None:
         """Normalize pane state used by row renderers.
 
@@ -110,7 +118,18 @@ class TreePaneRenderer:
         self.tree_entries = tree_entries
         self.tree_start = tree_start
         self.tree_selected = tree_selected
-        self.tree_root = tree_root
+        self.tree_root = tree_root.resolve()
+        self.tree_roots = normalized_workspace_roots(
+            tree_roots or [self.tree_root],
+            self.tree_root,
+        )
+        self.workspace_expanded = {
+            root.resolve(): {
+                path.resolve()
+                for path in paths
+            }
+            for root, paths in (workspace_expanded or {}).items()
+        }
         self.expanded = expanded
         self.show_tree_sizes = show_tree_sizes
         self.git_status_overlay = git_status_overlay
@@ -129,10 +148,16 @@ class TreePaneRenderer:
         self.picker_query = picker_query
         self.picker_focus = picker_focus
         self.picker_message = picker_message
+        self.theme = theme or DEFAULT_THEME
 
         self.picker_overlay_active = picker_active and picker_mode in {"symbols", "commands"}
         self.tree_filter_row_visible = tree_filter_active and tree_filter_row_visible and not self.picker_overlay_active
-        self.tree_row_offset = 1 if self.tree_filter_row_visible else 0
+        self.workspace_root_rows = workspace_root_banner_rows(
+            self.tree_roots,
+            self.tree_root,
+            picker_active=self.picker_overlay_active,
+        )
+        self.tree_row_offset = (1 if self.tree_filter_row_visible else 0) + self.workspace_root_rows
 
         self.picker_items = picker_items if self.picker_overlay_active and picker_items else []
         if self.picker_items:
@@ -147,8 +172,11 @@ class TreePaneRenderer:
         """Render one logical row without right-padding."""
         if self.picker_overlay_active:
             return self._render_picker_row(row)
+        prompt_row_offset = 0
         if self.tree_filter_row_visible and row == 0:
             return self._render_filter_row()
+        if self.tree_filter_row_visible:
+            prompt_row_offset = 1
         return self._render_tree_row(row)
 
     def padded_row_text(self, row: int) -> str:
@@ -170,9 +198,9 @@ class TreePaneRenderer:
 
         if row == 0:
             if self.picker_query:
-                query_text = f"\033[1;38;5;81m{query_prefix}{self.picker_query}\033[0m"
+                query_text = f"{self.theme.tree_filter_query}{query_prefix}{self.picker_query}{self.theme.reset}"
             else:
-                query_text = f"\033[2;38;5;250m{query_prefix}{placeholder}\033[0m"
+                query_text = f"{self.theme.tree_filter_hint}{query_prefix}{placeholder}{self.theme.reset}"
             tree_text = clip_ansi_line(query_text, self.left_width)
             if self.picker_focus == "query":
                 return selected_with_ansi(tree_text)
@@ -184,11 +212,11 @@ class TreePaneRenderer:
             if picker_idx == self.picker_selected:
                 if self.picker_focus == "tree":
                     return selected_with_ansi(tree_text)
-                return f"\033[38;5;81m{tree_text}\033[0m"
+                return f"{self.theme.tree_picker_selected}{tree_text}{self.theme.reset}"
             return tree_text
 
         if row == 1 and self.picker_message:
-            return clip_ansi_line(f"\033[2;38;5;250m{self.picker_message}\033[0m", self.left_width)
+            return clip_ansi_line(f"{self.theme.tree_filter_hint}{self.picker_message}{self.theme.reset}", self.left_width)
         return ""
 
     def _render_filter_row(self) -> str:
@@ -207,14 +235,18 @@ class TreePaneRenderer:
                 else f"{self.tree_filter_prefix} "
             )
             cursor = "_" if self.tree_filter_cursor_visible else " "
-            query_text = f"\033[1;38;5;81m{base}{cursor}\033[0m"
+            query_text = f"{self.theme.tree_filter_query}{base}{cursor}{self.theme.reset}"
         elif self.tree_filter_query:
-            query_text = f"\033[1;38;5;81m{self.tree_filter_prefix} {self.tree_filter_query}\033[0m"
+            query_text = (
+                f"{self.theme.tree_filter_query}{self.tree_filter_prefix} {self.tree_filter_query}{self.theme.reset}"
+            )
         else:
-            query_text = f"\033[2;38;5;250m{self.tree_filter_prefix} {self.tree_filter_placeholder}\033[0m"
+            query_text = (
+                f"{self.theme.tree_filter_hint}{self.tree_filter_prefix} {self.tree_filter_placeholder}{self.theme.reset}"
+            )
 
         if status_label:
-            query_text += f"\033[2;38;5;250m  {status_label}\033[0m"
+            query_text += f"{self.theme.tree_filter_hint}  {status_label}{self.theme.reset}"
 
         tree_text = clip_ansi_line(query_text, self.left_width)
         if self.tree_filter_editing:
@@ -229,11 +261,23 @@ class TreePaneRenderer:
 
         tree_text = format_tree_entry(
             self.tree_entries[tree_idx],
-            self.tree_root,
-            self.expanded,
+            (
+                self.tree_entries[tree_idx].workspace_root.resolve()
+                if self.tree_entries[tree_idx].workspace_root is not None
+                else self.tree_root
+            ),
+            (
+                self.workspace_expanded.get(
+                    self.tree_entries[tree_idx].workspace_root.resolve()
+                    if self.tree_entries[tree_idx].workspace_root is not None
+                    else self.tree_root,
+                    self.expanded,
+                )
+            ),
             git_status_overlay=self.git_status_overlay,
             search_query=self.tree_search_query,
             show_size_labels=self.show_tree_sizes,
+            theme=self.theme,
         )
         tree_text = clip_ansi_line(tree_text, self.left_width)
         if tree_idx == self.tree_selected:

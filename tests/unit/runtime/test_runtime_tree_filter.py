@@ -307,21 +307,25 @@ class RuntimeTreeFilterTests(unittest.TestCase):
                 0.02,
             ):
                 with mock.patch(
-                    "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg",
-                    side_effect=fake_streaming_search,
+                    "lazyviewer.tree_pane.panels.filter.controller.CONTENT_SEARCH_CLICK_INITIAL_WAIT_SECONDS",
+                    0.0,
                 ):
-                    ops.apply_tree_filter_query("alpha", debounce_prompt_row=True)
-                    self.assertFalse(state.tree_filter_prompt_row_visible)
-                    self.assertTrue(state.tree_filter_loading)
+                    with mock.patch(
+                        "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg",
+                        side_effect=fake_streaming_search,
+                    ):
+                        ops.apply_tree_filter_query("alpha", debounce_prompt_row=True)
+                        self.assertFalse(state.tree_filter_prompt_row_visible)
+                        self.assertTrue(state.tree_filter_loading)
 
-                    time.sleep(0.03)
-                    ops.poll_content_search_updates(timeout_seconds=0.0)
-                    self.assertTrue(state.tree_filter_prompt_row_visible)
-                    self.assertTrue(state.tree_filter_loading)
+                        time.sleep(0.03)
+                        ops.poll_content_search_updates(timeout_seconds=0.0)
+                        self.assertTrue(state.tree_filter_prompt_row_visible)
+                        self.assertTrue(state.tree_filter_loading)
 
-                    release_finish.set()
-                    self._drain_content_search(ops)
-                    self.assertFalse(state.tree_filter_loading)
+                        release_finish.set()
+                        self._drain_content_search(ops)
+                        self.assertFalse(state.tree_filter_loading)
 
     def test_content_search_ignores_stale_results_after_query_change(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

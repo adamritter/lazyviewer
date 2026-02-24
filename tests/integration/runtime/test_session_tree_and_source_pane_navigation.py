@@ -307,3 +307,75 @@ class AppRuntimeSessionTestsPart1(unittest.TestCase):
             self.assertIn("def run():", after_rows[0])
             self.assertIn("third = 3", after_rows[2])
             self.assertNotIn("second = 2", after_rows[2])
+
+    def test_workspace_root_add_and_delete_keys_manage_root_list(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            nested = root / "nested"
+            nested.mkdir()
+            (nested / "demo.py").write_text("print('nested')\n", encoding="utf-8")
+            snapshots: dict[str, object] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_normal_key = _callback(kwargs, "handle_normal_key")
+                nested_resolved = nested.resolve()
+                root_resolved = root.resolve()
+
+                nested_idx = next(
+                    idx
+                    for idx, entry in enumerate(state.tree_entries)
+                    if entry.path.resolve() == nested_resolved
+                )
+                state.selected_idx = nested_idx
+                handle_normal_key("a", 120)
+
+                snapshots["after_add_root"] = state.tree_root.resolve()
+                snapshots["after_add_roots"] = list(state.tree_roots)
+                snapshots["after_add_depth0_dirs"] = [
+                    entry.path.resolve()
+                    for entry in state.tree_entries
+                    if entry.is_dir and entry.depth == 0
+                ]
+
+                handle_normal_key("d", 120)
+                snapshots["after_delete_root"] = state.tree_root.resolve()
+                snapshots["after_delete_roots"] = list(state.tree_roots)
+
+                handle_normal_key("d", 120)
+                snapshots["after_delete_last_root"] = state.tree_root.resolve()
+                snapshots["after_delete_last_roots"] = list(state.tree_roots)
+                snapshots["status_after_delete_last"] = state.status_message
+
+                self.assertEqual(state.tree_root.resolve(), root_resolved)
+
+            with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.runtime.app.os.isatty", return_value=True
+            ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
+                "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
+            ), mock.patch("lazyviewer.runtime.app.load_show_hidden", return_value=False), mock.patch(
+                "lazyviewer.runtime.app.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            self.assertEqual(snapshots["after_add_root"], root.resolve())
+            self.assertEqual(snapshots["after_add_roots"], [root.resolve(), nested.resolve()])
+            self.assertEqual(
+                snapshots["after_add_depth0_dirs"],
+                [root.resolve(), nested.resolve()],
+            )
+            self.assertEqual(snapshots["after_delete_root"], root.resolve())
+            self.assertEqual(snapshots["after_delete_roots"], [root.resolve()])
+            self.assertEqual(snapshots["after_delete_last_root"], root.resolve())
+            self.assertEqual(snapshots["after_delete_last_roots"], [root.resolve()])
+            self.assertIn("cannot delete", str(snapshots["status_after_delete_last"]))

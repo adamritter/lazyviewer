@@ -18,6 +18,22 @@ from ..file_tree_model.types import DirectoryEntry, FileEntry
 from .types import TreeEntry
 
 
+def normalized_tree_roots(tree_roots: list[Path], active_root: Path) -> list[Path]:
+    """Return deduped workspace roots while ensuring active root is present."""
+    normalized: list[Path] = []
+    seen: set[Path] = set()
+    for raw_root in tree_roots:
+        resolved = raw_root.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        normalized.append(resolved)
+    resolved_active = active_root.resolve()
+    if resolved_active not in seen:
+        normalized.append(resolved_active)
+    return normalized
+
+
 def build_tree_entries(
     root: Path,
     expanded: set[Path],
@@ -26,6 +42,7 @@ def build_tree_entries(
     git_status_overlay: dict[Path, int] | None = None,
     doc_summary_for_path: Callable[[Path, int | None], str | None] | None = None,
     include_doc_summaries: bool = False,
+    workspace_root: Path | None = None,
 ) -> list[TreeEntry]:
     """Build full tree-entry list rooted at ``root`` honoring expansion state."""
     domain_root = build_file_tree(
@@ -39,6 +56,7 @@ def build_tree_entries(
     )
 
     entries: list[TreeEntry] = []
+    section_root = (workspace_root or root).resolve()
 
     def append_rows(node: DirectoryEntry | FileEntry, depth: int) -> None:
         """Append one domain node and any nested children as flat tree rows."""
@@ -50,6 +68,7 @@ def build_tree_entries(
                     True,
                     mtime_ns=node.mtime_ns,
                     git_status_flags=node.git_status_flags,
+                    workspace_root=section_root,
                 )
             )
             for child in node.children:
@@ -65,8 +84,39 @@ def build_tree_entries(
                 mtime_ns=node.mtime_ns,
                 git_status_flags=node.git_status_flags,
                 doc_summary=node.doc_summary,
+                workspace_root=section_root,
             )
         )
 
     append_rows(domain_root, 0)
+    return entries
+
+
+def build_workspace_tree_entries(
+    tree_roots: list[Path],
+    active_root: Path,
+    expanded: set[Path],
+    expanded_by_root: dict[Path, set[Path]] | None,
+    show_hidden: bool,
+    skip_gitignored: bool = False,
+    git_status_overlay: dict[Path, int] | None = None,
+    doc_summary_for_path: Callable[[Path, int | None], str | None] | None = None,
+    include_doc_summaries: bool = False,
+) -> list[TreeEntry]:
+    """Build one flat tree containing all configured workspace roots."""
+    roots = normalized_tree_roots(tree_roots, active_root)
+    entries: list[TreeEntry] = []
+    for root in roots:
+        expanded_for_root = set((expanded_by_root or {}).get(root, set(expanded)))
+        section_entries = build_tree_entries(
+            root,
+            expanded_for_root,
+            show_hidden,
+            skip_gitignored=skip_gitignored,
+            git_status_overlay=git_status_overlay,
+            doc_summary_for_path=doc_summary_for_path,
+            include_doc_summaries=include_doc_summaries,
+            workspace_root=root,
+        )
+        entries.extend(section_entries)
     return entries

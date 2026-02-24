@@ -10,6 +10,7 @@ from pathlib import Path
 from ..render.ansi import build_screen_lines
 from .screen import _centered_scroll_start, _first_git_change_screen_line
 from .state import AppState
+from ..ui_theme import resolve_theme
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class AppStateBootstrap:
     git_features_default_enabled: bool
     tree_size_labels_default_enabled: bool
     dir_preview_initial_max_entries: int
+    theme_name: str = "default"
 
     def build_state(
         self,
@@ -93,6 +95,10 @@ class AppStateBootstrap:
         return AppState(
             current_path=current_path,
             tree_root=tree_root,
+            tree_roots=[tree_root],
+            workspace_expanded={tree_root: {tree_root}},
+            theme_name=self.theme_name,
+            theme=resolve_theme(self.theme_name, no_color=no_color),
             expanded=expanded,
             tree_render_expanded=set(expanded),
             show_hidden=show_hidden,

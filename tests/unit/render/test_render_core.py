@@ -13,6 +13,7 @@ from lazyviewer.render import (
     help_panel_row_count,
     render_dual_page,
 )
+from lazyviewer.tree_model import TreeEntry
 
 
 class RenderStatusCoreTests(unittest.TestCase):
@@ -400,3 +401,41 @@ class RenderStatusCoreTests(unittest.TestCase):
         self.assertIn("TEXT-ONLY", rendered)
         self.assertIn("TREE", rendered)
         self.assertIn("TEXT", rendered)
+
+    def test_render_multiroot_uses_tree_entries_without_workspace_banner_rows(self) -> None:
+        writes: list[bytes] = []
+
+        def capture(_fd: int, data: bytes) -> int:
+            writes.append(data)
+            return len(data)
+
+        root = Path("/tmp").resolve()
+        nested = (root / "nested").resolve()
+        tree_entries = [TreeEntry(path=nested, depth=0, is_dir=True)]
+        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            render_dual_page(
+                text_lines=["line 1"],
+                text_start=0,
+                tree_entries=tree_entries,
+                tree_start=0,
+                tree_selected=0,
+                max_lines=4,
+                current_path=nested,
+                tree_root=nested,
+                expanded={nested},
+                width=120,
+                left_width=60,
+                text_x=0,
+                wrap_text=False,
+                browser_visible=True,
+                show_hidden=False,
+                tree_roots=[root, nested],
+            )
+
+        rendered = b"".join(writes).decode("utf-8", errors="replace")
+        plain = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", rendered)
+        rows = [row for row in plain.split("\r\n") if row]
+        left_rows = [row.split("│")[0].strip() for row in rows if "│" in row]
+        self.assertTrue(left_rows)
+        self.assertFalse(any(row.startswith("* ") for row in left_rows))
+        self.assertTrue(any(row.startswith(("▾ nested/", "▸ nested/")) for row in left_rows))

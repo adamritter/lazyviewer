@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -176,26 +177,131 @@ class NavigationController:
         self.state.jump_history.record(origin)
         return self.apply_jump_location(target)
 
+    def _normalize_tree_roots(self, *, include_active: bool = True) -> list[Path]:
+        """Normalize roots and synchronize per-root expansion state."""
+        normalized: list[Path] = []
+        seen: set[Path] = set()
+        for raw_root in self.state.tree_roots:
+            resolved = raw_root.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            normalized.append(resolved)
+
+        active_root = self.state.tree_root.resolve()
+        if include_active and active_root not in seen:
+            normalized.append(active_root)
+
+        self.state.tree_roots = normalized
+        workspace_expanded: dict[Path, set[Path]] = {}
+        flat_union: set[Path] = set()
+        for root in normalized:
+            existing = self.state.workspace_expanded.get(root)
+            if existing is not None:
+                scoped = {
+                    candidate.resolve()
+                    for candidate in existing
+                    if candidate.resolve().is_relative_to(root)
+                }
+            else:
+                scoped = {
+                    candidate.resolve()
+                    for candidate in self.state.expanded
+                    if candidate.resolve().is_relative_to(root)
+                }
+            workspace_expanded[root] = scoped
+            flat_union.update(scoped)
+        self.state.workspace_expanded = workspace_expanded
+        self.state.expanded = flat_union
+        return normalized
+
+    def _switch_active_tree_root(
+        self,
+        target_root: Path,
+        *,
+        preferred_path: Path | None,
+        preserve_old_root_expanded: bool = False,
+        include_previous_root: bool = True,
+    ) -> None:
+        """Switch active root, rebuild view, and resync watch/git state."""
+        old_root = self.state.tree_root.resolve()
+        target_root = target_root.resolve()
+        roots = self._normalize_tree_roots(include_active=include_previous_root)
+        if target_root not in roots:
+            roots.append(target_root)
+        self.state.tree_roots = roots
+
+        self.state.tree_root = target_root
+        if preserve_old_root_expanded and old_root != target_root:
+            self.state.expanded = {target_root, old_root}
+        else:
+            self.state.expanded = {target_root}
+        self.state.workspace_expanded = {}
+        self._normalize_tree_roots(include_active=include_previous_root)
+
+        focused_path = target_root if preferred_path is None else preferred_path.resolve()
+        if not focused_path.is_relative_to(target_root):
+            focused_path = target_root
+        self.rebuild_tree_entries(preferred_path=focused_path, center_selection=True)
+        self.preview_selected_entry(force=True)
+        self.schedule_tree_filter_index_warmup()
+        self.mark_tree_watch_dirty()
+        self.reset_git_watch_context()
+        self.refresh_git_status_overlay(force=True)
+        self.state.dirty = True
+
+    def _selected_target_and_root(self) -> tuple[Path, Path]:
+        """Return selected target path and its directory root candidate."""
+        selected_entry = (
+            self.state.tree_entries[self.state.selected_idx]
+            if self.state.tree_entries and 0 <= self.state.selected_idx < len(self.state.tree_entries)
+            else None
+        )
+        if selected_entry is not None:
+            selected_target = selected_entry.path.resolve()
+            target_root = selected_target if selected_entry.is_dir else selected_target.parent.resolve()
+            return selected_target, target_root
+
+        selected_target = self.state.current_path.resolve()
+        target_root = selected_target if selected_target.is_dir() else selected_target.parent.resolve()
+        return selected_target, target_root
+
     def reveal_path_in_tree(self, target: Path) -> None:
         """Expand ancestor directories and rebuild tree focused on ``target``."""
         target = target.resolve()
-        if target != self.state.tree_root:
+        roots = self._normalize_tree_roots()
+        scope_root = next((root for root in roots if target.is_relative_to(root)), self.state.tree_root.resolve())
+        scoped = set(self.state.workspace_expanded.get(scope_root, {scope_root}))
+        scoped.add(scope_root)
+        if target != scope_root:
             parent = target.parent
             while True:
                 resolved = parent.resolve()
-                if resolved == self.state.tree_root:
+                if resolved == scope_root:
                     break
-                self.state.expanded.add(resolved)
+                scoped.add(resolved)
                 if resolved.parent == resolved:
                     break
                 parent = resolved.parent
-        self.state.expanded.add(self.state.tree_root)
+        self.state.workspace_expanded[scope_root] = scoped
+        self.state.expanded = set().union(*self.state.workspace_expanded.values())
         self.rebuild_tree_entries(preferred_path=target, center_selection=True)
         self.mark_tree_watch_dirty()
 
     def jump_to_path(self, target: Path) -> None:
         """Reveal and open ``target`` path in tree and source preview state."""
         target = target.resolve()
+        current_root = self.state.tree_root.resolve()
+        if not target.is_relative_to(current_root):
+            workspace_root = next(
+                (root for root in self._normalize_tree_roots() if target.is_relative_to(root)),
+                None,
+            )
+            if workspace_root is not None:
+                self._switch_active_tree_root(
+                    workspace_root,
+                    preferred_path=target,
+                )
         self.reveal_path_in_tree(target)
         self.state.current_path = target
         self.refresh_rendered_for_current_path()
@@ -221,9 +327,37 @@ class NavigationController:
         parent_root = old_root.parent.resolve()
         if parent_root == old_root:
             return
-        self.state.tree_root = parent_root
-        self.state.expanded = {self.state.tree_root, old_root}
-        self.rebuild_tree_entries(preferred_path=old_root, center_selection=True)
+        self._switch_active_tree_root(
+            parent_root,
+            preferred_path=old_root,
+            preserve_old_root_expanded=True,
+        )
+
+    def reroot_to_selected_target(self) -> None:
+        """Reroot tree at selected entry (or current path fallback) directory."""
+        selected_target, target_root = self._selected_target_and_root()
+        old_root = self.state.tree_root.resolve()
+        if target_root == old_root:
+            return
+        self._switch_active_tree_root(
+            target_root,
+            preferred_path=selected_target,
+        )
+
+    def add_workspace_root_from_selected_target(self) -> None:
+        """Add selected directory as a workspace root without changing root priority."""
+        selected_target, target_root = self._selected_target_and_root()
+        roots = self._normalize_tree_roots()
+        if target_root not in roots:
+            roots.append(target_root)
+        self.state.tree_roots = roots
+        self.state.expanded.add(target_root)
+        self._normalize_tree_roots()
+        scoped = set(self.state.workspace_expanded.get(target_root, set()))
+        scoped.add(target_root)
+        self.state.workspace_expanded[target_root] = scoped
+        self.state.expanded = set().union(*self.state.workspace_expanded.values())
+        self.rebuild_tree_entries(preferred_path=selected_target, center_selection=True)
         self.preview_selected_entry(force=True)
         self.schedule_tree_filter_index_warmup()
         self.mark_tree_watch_dirty()
@@ -231,26 +365,53 @@ class NavigationController:
         self.refresh_git_status_overlay(force=True)
         self.state.dirty = True
 
-    def reroot_to_selected_target(self) -> None:
-        """Reroot tree at selected entry (or current path fallback) directory."""
-        selected_entry = (
-            self.state.tree_entries[self.state.selected_idx]
-            if self.state.tree_entries and 0 <= self.state.selected_idx < len(self.state.tree_entries)
-            else None
-        )
-        if selected_entry is not None:
-            selected_target = selected_entry.path.resolve()
-            target_root = selected_target if selected_entry.is_dir else selected_target.parent.resolve()
-        else:
-            selected_target = self.state.current_path.resolve()
-            target_root = selected_target if selected_target.is_dir() else selected_target.parent.resolve()
-
-        old_root = self.state.tree_root.resolve()
-        if target_root == old_root:
+    def remove_active_workspace_root(self) -> None:
+        """Remove selected workspace root (or current-file root) when possible."""
+        roots = self._normalize_tree_roots()
+        if len(roots) <= 1:
+            self.state.status_message = "cannot delete the only root"
+            self.state.status_message_until = time.monotonic() + 1.5
+            self.state.dirty = True
             return
-        self.state.tree_root = target_root
-        self.state.expanded = {self.state.tree_root}
-        self.rebuild_tree_entries(preferred_path=selected_target, center_selection=True)
+
+        selected_root: Path | None = None
+        if self.state.tree_entries and 0 <= self.state.selected_idx < len(self.state.tree_entries):
+            selected_entry = self.state.tree_entries[self.state.selected_idx]
+            if selected_entry.is_dir and selected_entry.depth == 0:
+                candidate = selected_entry.path.resolve()
+                if candidate in roots:
+                    selected_root = candidate
+
+        if selected_root is None:
+            current_path = self.state.current_path.resolve()
+            selected_root = next(
+                (
+                    root
+                    for root in sorted(roots, key=lambda item: len(item.parts), reverse=True)
+                    if current_path.is_relative_to(root)
+                ),
+                None,
+            )
+
+        if selected_root is None:
+            selected_root = self.state.tree_root.resolve() if self.state.tree_root.resolve() in roots else roots[-1]
+
+        roots = [root for root in roots if root != selected_root]
+        if not roots:
+            return
+        self.state.tree_roots = roots
+        self.state.expanded.discard(selected_root)
+        self.state.workspace_expanded.pop(selected_root, None)
+        self._normalize_tree_roots()
+
+        if self.state.tree_root.resolve() == selected_root:
+            self.state.tree_root = roots[0]
+
+        preferred_path = self.state.current_path.resolve()
+        if not any(preferred_path.is_relative_to(root) for root in roots):
+            preferred_path = roots[0]
+            self.state.current_path = preferred_path
+        self.rebuild_tree_entries(preferred_path=preferred_path, center_selection=True)
         self.preview_selected_entry(force=True)
         self.schedule_tree_filter_index_warmup()
         self.mark_tree_watch_dirty()

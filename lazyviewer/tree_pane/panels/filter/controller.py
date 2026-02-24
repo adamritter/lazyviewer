@@ -18,11 +18,13 @@ from ....search.fuzzy import (
 )
 from ....tree_model import (
     build_tree_entries,
+    build_workspace_tree_entries,
     filter_tree_entries_for_content_matches,
     filter_tree_entries_for_files,
     find_content_hit_index,
     next_file_entry_index,
 )
+from ...workspace_roots import normalized_workspace_roots, workspace_root_banner_rows
 from . import matching as filter_matching
 from .helpers import skip_gitignored_for_hidden_mode
 from .limits import (
@@ -108,15 +110,45 @@ class TreeFilterController:
         self.state.dirty = True
 
     def tree_view_rows(self) -> int:
-        """Return visible tree rows, reserving one row for active filter prompt."""
+        """Return visible tree rows after subtracting root-banner and prompt rows."""
         rows = self.visible_content_rows()
+        rows -= workspace_root_banner_rows(
+            self.state.tree_roots,
+            self.state.tree_root,
+            picker_active=self.state.picker_active,
+        )
         if (
             self.state.tree_filter_active
             and self.state.tree_filter_prompt_row_visible
             and not self.state.picker_active
         ):
             return max(1, rows - 1)
-        return rows
+        return max(1, rows)
+
+    def normalized_workspace_expanded(self) -> dict[Path, set[Path]]:
+        """Return per-root expansion sets and synchronize legacy flat expansion."""
+        roots = normalized_workspace_roots(self.state.tree_roots, self.state.tree_root)
+        by_root: dict[Path, set[Path]] = {}
+        flat_union: set[Path] = set()
+        for root in roots:
+            existing = self.state.workspace_expanded.get(root)
+            if existing is not None:
+                normalized = {
+                    candidate.resolve()
+                    for candidate in existing
+                    if candidate.resolve().is_relative_to(root)
+                }
+            else:
+                normalized = {
+                    candidate.resolve()
+                    for candidate in self.state.expanded
+                    if candidate.resolve().is_relative_to(root)
+                }
+            by_root[root] = normalized
+            flat_union.update(normalized)
+        self.state.workspace_expanded = by_root
+        self.state.expanded = flat_union
+        return by_root
 
     def reset_tree_filter_session_state(self) -> None:
         """Reset per-session transient filter state."""
@@ -530,6 +562,7 @@ class TreeFilterController:
         preferred_path: Path | None = None,
         center_selection: bool = False,
         force_first_file: bool = False,
+        preferred_workspace_root: Path | None = None,
         content_matches_override: dict[Path, list[filter_matching.ContentMatch]] | None = None,
         content_truncated_override: bool | None = None,
     ) -> None:
@@ -537,8 +570,13 @@ class TreeFilterController:
         previous_selected_hit_path: Path | None = None
         previous_selected_hit_line: int | None = None
         previous_selected_hit_column: int | None = None
+        previous_selected_path: Path | None = None
+        previous_selected_workspace_root: Path | None = None
         if self.state.tree_entries and 0 <= self.state.selected_idx < len(self.state.tree_entries):
             previous_entry = self.state.tree_entries[self.state.selected_idx]
+            previous_selected_path = previous_entry.path.resolve()
+            if previous_entry.workspace_root is not None:
+                previous_selected_workspace_root = previous_entry.workspace_root.resolve()
             if previous_entry.kind == "search_hit":
                 previous_selected_hit_path = previous_entry.path.resolve()
                 previous_selected_hit_line = previous_entry.line
@@ -549,6 +587,16 @@ class TreeFilterController:
                 preferred_path = self.state.tree_entries[self.state.selected_idx].path.resolve()
             else:
                 preferred_path = self.state.current_path.resolve()
+
+        preferred_target = preferred_path.resolve()
+        preferred_workspace_scope = preferred_workspace_root.resolve() if preferred_workspace_root is not None else None
+        if (
+            preferred_workspace_scope is None
+            and previous_selected_path is not None
+            and previous_selected_workspace_root is not None
+            and previous_selected_path == preferred_target
+        ):
+            preferred_workspace_scope = previous_selected_workspace_root
 
         if self.state.tree_filter_active and self.state.tree_filter_query:
             if self.state.tree_filter_mode == "content":
@@ -598,10 +646,13 @@ class TreeFilterController:
         else:
             self.state.tree_filter_match_count = 0
             self.state.tree_filter_truncated = False
+            workspace_expanded = self.normalized_workspace_expanded()
             self.state.tree_render_expanded = set(self.state.expanded)
-            self.state.tree_entries = build_tree_entries(
+            self.state.tree_entries = build_workspace_tree_entries(
+                self.state.tree_roots,
                 self.state.tree_root,
                 self.state.expanded,
+                workspace_expanded,
                 self.state.show_hidden,
                 skip_gitignored=skip_gitignored_for_hidden_mode(self.state.show_hidden),
             )
@@ -610,7 +661,6 @@ class TreeFilterController:
             first_idx = self.next_tree_filter_result_entry_index(-1, 1)
             self.state.selected_idx = first_idx if first_idx is not None else 0
         else:
-            preferred_target = preferred_path.resolve()
             self.state.selected_idx = 0
             matched_preferred = False
             if (
@@ -630,13 +680,34 @@ class TreeFilterController:
                     matched_preferred = True
 
             if not matched_preferred:
+                first_match_idx: int | None = None
+                root_match_idx: int | None = None
+                scoped_match_idx: int | None = None
                 for idx, entry in enumerate(self.state.tree_entries):
                     if entry.kind == "search_hit":
                         continue
-                    if entry.path.resolve() == preferred_target:
-                        self.state.selected_idx = idx
-                        matched_preferred = True
-                        break
+                    if entry.path.resolve() != preferred_target:
+                        continue
+                    if first_match_idx is None:
+                        first_match_idx = idx
+                    entry_root = entry.workspace_root.resolve() if entry.workspace_root is not None else None
+                    if (
+                        preferred_workspace_scope is not None
+                        and entry_root is not None
+                        and entry_root == preferred_workspace_scope
+                        and scoped_match_idx is None
+                    ):
+                        scoped_match_idx = idx
+                    if entry_root is not None and entry_root == preferred_target and entry.depth == 0:
+                        root_match_idx = idx
+                chosen_idx = (
+                    scoped_match_idx
+                    if scoped_match_idx is not None
+                    else root_match_idx if root_match_idx is not None else first_match_idx
+                )
+                if chosen_idx is not None:
+                    self.state.selected_idx = chosen_idx
+                    matched_preferred = True
 
             if not matched_preferred:
                 if self.state.tree_filter_active and self.state.tree_filter_query:

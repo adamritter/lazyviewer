@@ -30,12 +30,13 @@ class CliDefaultPathTests(unittest.TestCase):
                 os.chdir(previous_cwd)
 
             run_pager.assert_called_once()
-            source, path, style, no_color, nopager = run_pager.call_args.args
+            source, path, style, no_color, nopager, theme = run_pager.call_args.args
             self.assertEqual(source, "")
             self.assertEqual(path.resolve(), root)
             self.assertEqual(style, "monokai")
             self.assertFalse(no_color)
             self.assertFalse(nopager)
+            self.assertIsNone(theme)
 
     def test_main_uses_explicit_path_argument_over_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

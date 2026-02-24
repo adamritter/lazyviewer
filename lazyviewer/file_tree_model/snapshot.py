@@ -36,7 +36,6 @@ def _normalize_expanded(root: Path, expanded: set[Path]) -> frozenset[Path]:
         if not resolved.is_relative_to(root):
             continue
         normalized.add(resolved)
-    normalized.add(root)
     return frozenset(normalized)
 
 

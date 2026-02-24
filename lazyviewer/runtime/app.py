@@ -42,6 +42,7 @@ from .config import (
     load_content_search_left_pane_percent,
     load_left_pane_percent,
     load_named_marks,
+    load_theme_name,
     save_content_search_left_pane_percent,
     save_left_pane_percent,
     load_show_hidden,
@@ -59,6 +60,7 @@ from ..tree_model import (
     compute_left_width,
 )
 from ..file_tree_model.watch import build_git_watch_signature, build_tree_watch_signature, resolve_git_paths
+from ..ui_theme import normalize_theme_name
 
 DOUBLE_CLICK_SECONDS = 0.35
 FILTER_CURSOR_BLINK_SECONDS = 0.5
@@ -72,7 +74,14 @@ CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT = 50.0
 CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT = 8.0
 
 
-def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: bool) -> None:
+def run_pager(
+    content: str,
+    path: Path,
+    style: str,
+    no_color: bool,
+    nopager: bool,
+    theme_name: str | None = None,
+) -> None:
     """Initialize pager runtime state, wire subsystems, and run event loop."""
     if nopager or not os.isatty(sys.stdin.fileno()):
         rendered = content
@@ -81,6 +90,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         sys.stdout.write(content if no_color else rendered)
         return
 
+    selected_theme_name = normalize_theme_name(theme_name or load_theme_name())
     state_bootstrap = AppStateBootstrap(
         skip_gitignored_for_hidden_mode=_skip_gitignored_for_hidden_mode,
         load_show_hidden=load_show_hidden,
@@ -93,6 +103,7 @@ def run_pager(content: str, path: Path, style: str, no_color: bool, nopager: boo
         git_features_default_enabled=GIT_FEATURES_DEFAULT_ENABLED,
         tree_size_labels_default_enabled=TREE_SIZE_LABELS_DEFAULT_ENABLED,
         dir_preview_initial_max_entries=SourcePane.DIR_PREVIEW_INITIAL_MAX_ENTRIES,
+        theme_name=selected_theme_name,
     )
     state = state_bootstrap.build_state(path=path, style=style, no_color=no_color)
 

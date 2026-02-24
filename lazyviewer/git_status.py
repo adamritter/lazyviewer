@@ -11,6 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 
+from .ui_theme import DEFAULT_THEME, UITheme
+
 GIT_STATUS_CHANGED = 1
 GIT_STATUS_UNTRACKED = 2
 
@@ -20,8 +22,14 @@ def _merge_flags(overlay: dict[Path, int], target: Path, flags: int) -> None:
     overlay[target] = overlay.get(target, 0) | flags
 
 
-def format_git_status_badges(path: Path, git_status_overlay: dict[Path, int] | None) -> str:
+def format_git_status_badges(
+    path: Path,
+    git_status_overlay: dict[Path, int] | None,
+    *,
+    theme: UITheme | None = None,
+) -> str:
     """Render ANSI-colored status badges for a tree entry path."""
+    active_theme = theme or DEFAULT_THEME
     if not git_status_overlay:
         return ""
 
@@ -31,9 +39,9 @@ def format_git_status_badges(path: Path, git_status_overlay: dict[Path, int] | N
 
     badges: list[str] = []
     if flags & GIT_STATUS_CHANGED:
-        badges.append("\033[38;5;214m[M]\033[0m")
+        badges.append(f"{active_theme.git_badge_changed}[M]{active_theme.reset}")
     if flags & GIT_STATUS_UNTRACKED:
-        badges.append("\033[38;5;42m[?]\033[0m")
+        badges.append(f"{active_theme.git_badge_untracked}[?]{active_theme.reset}")
     if not badges:
         return ""
     return " " + "".join(badges)

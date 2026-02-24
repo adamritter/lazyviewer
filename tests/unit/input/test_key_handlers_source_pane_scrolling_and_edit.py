@@ -234,6 +234,24 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
         self.assertFalse(should_quit)
         self.assertEqual(state.start, 2)
 
+    def test_d_scrolls_half_page_when_browser_hidden(self) -> None:
+        state = _make_state()
+        state.browser_visible = False
+        state.lines = [f"line {idx}\n" for idx in range(40)]
+        visible_rows = 10
+        state.max_start = max(0, len(state.lines) - visible_rows)
+
+        should_quit = self._invoke(
+            state=state,
+            key="d",
+            toggle_git_features=lambda: None,
+            jump_to_next_git_modified=lambda _direction: False,
+            visible_rows=visible_rows,
+        )
+
+        self.assertFalse(should_quit)
+        self.assertEqual(state.start, 5)
+
     def test_right_scroll_clamps_to_max_horizontal_offset(self) -> None:
         state = _make_state()
         state.browser_visible = False

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .navigation import JumpHistory, JumpLocation
 from ..tree_model import TreeEntry
+from ..ui_theme import DEFAULT_THEME, UITheme
 
 
 @dataclass
@@ -38,6 +39,10 @@ class AppState:
     usable: int
     max_start: int
     last_right_width: int
+    tree_roots: list[Path] = field(default_factory=list)
+    workspace_expanded: dict[Path, set[Path]] = field(default_factory=dict)
+    theme_name: str = DEFAULT_THEME.name
+    theme: UITheme = field(default_factory=lambda: DEFAULT_THEME)
     browser_visible: bool = True
     show_help: bool = False
     show_tree_sizes: bool = True

@@ -7,7 +7,13 @@ entries now live in ``lazyviewer.file_tree_model`` and are flattened into
 
 from __future__ import annotations
 
-from .build import DirectoryChild, build_tree_entries, list_directory_children, maybe_gitignore_matcher
+from .build import (
+    DirectoryChild,
+    build_tree_entries,
+    build_workspace_tree_entries,
+    list_directory_children,
+    maybe_gitignore_matcher,
+)
 from .doc_summary import clear_doc_summary_cache
 from .filtering import (
     filter_tree_entries_for_content_matches,
@@ -28,6 +34,7 @@ __all__ = [
     "TreeEntry",
     "DirectoryChild",
     "build_tree_entries",
+    "build_workspace_tree_entries",
     "list_directory_children",
     "maybe_gitignore_matcher",
     "clear_doc_summary_cache",

@@ -1,5 +1,6 @@
   3. Symbol outline (s) using Tree-sitter (functions/classes/imports), jump on Enter.
-  4. Back/forward nav stack (Alt-Left/Alt-Right).
-  5. Bookmarks (m{key} to mark, '{key} to jump).
   6. Async indexing + cache to keep UI always instant.
   7. Read-only git context overlay (changed/untracked badges only, no actions).
+  - multi tree root
+  
+

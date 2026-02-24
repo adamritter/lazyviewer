@@ -102,6 +102,25 @@ def save_show_hidden(show_hidden: bool) -> None:
     save_config(config)
 
 
+def load_theme_name() -> str | None:
+    """Load persisted UI theme name, returning ``None`` when unset/invalid."""
+    value = load_config().get("theme")
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped if stripped else None
+
+
+def save_theme_name(theme_name: str) -> None:
+    """Persist selected UI theme name."""
+    stripped = str(theme_name).strip()
+    if not stripped:
+        return
+    config = load_config()
+    config["theme"] = stripped
+    save_config(config)
+
+
 def _coerce_nonnegative_int(value: object) -> int:
     """Normalize JSON scalar values for scroll offsets.
 

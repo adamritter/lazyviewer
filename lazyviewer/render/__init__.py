@@ -21,6 +21,7 @@ from .help import (
     render_help_page,
 )
 from ..tree_model import TreeEntry, clamp_left_width
+from ..ui_theme import DEFAULT_THEME, UITheme
 
 
 @dataclass
@@ -42,6 +43,8 @@ class RenderContext:
     wrap_text: bool
     browser_visible: bool
     show_hidden: bool
+    tree_roots: list[Path] | None = None
+    workspace_expanded: dict[Path, set[Path]] | None = None
     show_help: bool = False
     show_tree_sizes: bool = True
     status_message: str = ""
@@ -73,6 +76,7 @@ class RenderContext:
     preview_is_git_diff: bool = False
     source_selection_anchor: tuple[int, int] | None = None
     source_selection_focus: tuple[int, int] | None = None
+    theme: UITheme = DEFAULT_THEME
 
 
 def render_dual_page_context(context: RenderContext) -> None:
@@ -93,6 +97,8 @@ def render_dual_page_context(context: RenderContext) -> None:
         context.wrap_text,
         context.browser_visible,
         context.show_hidden,
+        tree_roots=context.tree_roots,
+        workspace_expanded=context.workspace_expanded,
         show_help=context.show_help,
         show_tree_sizes=context.show_tree_sizes,
         status_message=context.status_message,
@@ -124,6 +130,7 @@ def render_dual_page_context(context: RenderContext) -> None:
         preview_is_git_diff=context.preview_is_git_diff,
         source_selection_anchor=context.source_selection_anchor,
         source_selection_focus=context.source_selection_focus,
+        theme=context.theme,
     )
 
 
@@ -207,11 +214,16 @@ def render_dual_page(
     preview_is_git_diff: bool = False,
     source_selection_anchor: tuple[int, int] | None = None,
     source_selection_focus: tuple[int, int] | None = None,
+    tree_roots: list[Path] | None = None,
+    workspace_expanded: dict[Path, set[Path]] | None = None,
+    theme: UITheme | None = None,
 ) -> None:
     """Render one full terminal frame for split or text-only mode."""
+    active_theme = theme or DEFAULT_THEME
     out: list[str] = []
     out.append("\033[H\033[J")
     tree_help_lines, text_help_lines, text_only_help_lines = help_panel_lines(
+        theme=active_theme,
         tree_filter_active=tree_filter_active,
         tree_filter_mode=tree_filter_mode,
         tree_filter_editing=tree_filter_editing,
@@ -268,9 +280,9 @@ def render_dual_page(
             status_message,
         )
         status = build_status_line(left_status, width)
-        out.append("\033[7m")
+        out.append(active_theme.reverse)
         out.append(status)
-        out.append("\033[0m")
+        out.append(active_theme.reset)
         os.write(sys.stdout.fileno(), "".join(out).encode("utf-8", errors="replace"))
         return
 
@@ -303,6 +315,8 @@ def render_dual_page(
         tree_start=tree_start,
         tree_selected=tree_selected,
         tree_root=tree_root,
+        tree_roots=tree_roots,
+        workspace_expanded=workspace_expanded,
         expanded=expanded,
         show_tree_sizes=show_tree_sizes,
         git_status_overlay=git_status_overlay,
@@ -326,17 +340,20 @@ def render_dual_page(
         picker_focus=picker_focus,
         picker_list_start=picker_list_start,
         picker_message=picker_message,
+        theme=active_theme,
     )
 
     for row in range(content_rows):
         out.append(tree_renderer.padded_row_text(row))
-
-        out.append("\033[2m│\033[0m")
+        if active_theme.divider:
+            out.append(f"{active_theme.divider}│{active_theme.reset}")
+        else:
+            out.append("│")
 
         text_raw = source_renderer.render_row(row)
         out.append(text_raw)
         if "\033" in text_raw:
-            out.append("\033[0m")
+            out.append(active_theme.reset)
         out.append("\r\n")
 
     for row in range(help_rows):
@@ -346,12 +363,15 @@ def render_dual_page(
         left_len = sum(char_display_width(ch, 0) for ch in left_plain)
         if left_len < left_width:
             out.append(" " * (left_width - left_len))
-        out.append("\033[2m│\033[0m")
+        if active_theme.divider:
+            out.append(f"{active_theme.divider}│{active_theme.reset}")
+        else:
+            out.append("│")
 
         right_help = clip_ansi_line(_help_line(text_help_lines, row), right_width)
         out.append(right_help)
         if "\033" in right_help:
-            out.append("\033[0m")
+            out.append(active_theme.reset)
         out.append("\r\n")
 
     left_status = _compose_status_left_text(
@@ -363,8 +383,8 @@ def render_dual_page(
         status_message,
     )
     status = build_status_line(left_status, width)
-    out.append("\033[7m")
+    out.append(active_theme.reverse)
     out.append(status)
-    out.append("\033[0m")
+    out.append(active_theme.reset)
 
     os.write(sys.stdout.fileno(), "".join(out).encode("utf-8", errors="replace"))

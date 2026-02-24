@@ -245,6 +245,8 @@ def run_main_loop(
                     max_lines=state.usable,
                     current_path=state.current_path,
                     tree_root=state.tree_root,
+                    tree_roots=state.tree_roots,
+                    workspace_expanded=state.workspace_expanded,
                     expanded=state.tree_render_expanded,
                     width=term.columns,
                     left_width=state.left_width,
@@ -313,6 +315,7 @@ def run_main_loop(
                     preview_is_git_diff=state.preview_is_git_diff,
                     source_selection_anchor=state.source_selection_anchor,
                     source_selection_focus=state.source_selection_focus,
+                    theme=state.theme,
                 )
                 render_dual_page_context(render_context)
                 desired_image_state: tuple[str, int, int, int, int] | None = None

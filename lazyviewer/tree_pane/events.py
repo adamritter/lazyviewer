@@ -12,6 +12,7 @@ from pathlib import Path
 import time
 
 from ..runtime.state import AppState
+from .workspace_roots import normalized_workspace_roots, workspace_root_banner_rows
 
 
 class TreePaneMouseHandlers:
@@ -89,15 +90,33 @@ class TreePaneMouseHandlers:
             state.dirty = True
             return True
 
-        raw_clicked_idx = state.tree_start + (row - 1 - (1 if query_row_visible else 0))
+        root_row_count = workspace_root_banner_rows(
+            state.tree_roots,
+            state.tree_root,
+            picker_active=state.picker_active,
+        )
+        row_offset = (1 if query_row_visible else 0) + root_row_count
+        if row <= row_offset:
+            return True
+
+        raw_clicked_idx = state.tree_start + (row - 1 - row_offset)
         if not (0 <= raw_clicked_idx < len(state.tree_entries)):
             return True
 
         raw_clicked_entry = state.tree_entries[raw_clicked_idx]
+        raw_workspace_root = (
+            raw_clicked_entry.workspace_root.resolve()
+            if raw_clicked_entry.workspace_root is not None
+            else state.tree_root.resolve()
+        )
         raw_arrow_col = 1 + (raw_clicked_entry.depth * 2)
         if is_left_down and raw_clicked_entry.is_dir and raw_arrow_col <= col <= (raw_arrow_col + 1):
             resolved = raw_clicked_entry.path.resolve()
-            self._toggle_directory_entry(resolved, content_mode_toggle=True)
+            self._toggle_directory_entry(
+                resolved,
+                workspace_root=raw_workspace_root,
+                content_mode_toggle=True,
+            )
             state.last_click_idx = -1
             state.last_click_time = 0.0
             return True
@@ -126,7 +145,12 @@ class TreePaneMouseHandlers:
         entry = state.tree_entries[state.selected_idx]
         if entry.is_dir:
             resolved = entry.path.resolve()
-            self._toggle_directory_entry(resolved)
+            workspace_root = (
+                entry.workspace_root.resolve()
+                if entry.workspace_root is not None
+                else state.tree_root.resolve()
+            )
+            self._toggle_directory_entry(resolved, workspace_root=workspace_root)
             return True
 
         self._copy_text_to_clipboard(entry.path.name)
@@ -136,6 +160,7 @@ class TreePaneMouseHandlers:
     def _toggle_directory_entry(
         self,
         resolved: Path,
+        workspace_root: Path,
         content_mode_toggle: bool = False,
     ) -> None:
         """Toggle a directory and rebuild the rendered tree snapshot.
@@ -146,16 +171,42 @@ class TreePaneMouseHandlers:
         ``state.expanded``.
         """
         state = self._state
+        roots = normalized_workspace_roots(state.tree_roots, state.tree_root)
+        by_root: dict[Path, set[Path]] = {}
+        for root in roots:
+            existing = state.workspace_expanded.get(root)
+            if existing is not None:
+                normalized = {
+                    candidate.resolve()
+                    for candidate in existing
+                    if candidate.resolve().is_relative_to(root)
+                }
+            else:
+                normalized = {
+                    candidate.resolve()
+                    for candidate in state.expanded
+                    if candidate.resolve().is_relative_to(root)
+                }
+            by_root[root] = normalized
+
+        scope = workspace_root.resolve()
+        scoped = set(by_root.get(scope, set()))
+
         if content_mode_toggle and state.tree_filter_active and state.tree_filter_mode == "content":
             if resolved in state.tree_filter_collapsed_dirs:
                 state.tree_filter_collapsed_dirs.remove(resolved)
-                state.expanded.add(resolved)
+                scoped.add(resolved)
             else:
-                if resolved != state.tree_root:
-                    state.tree_filter_collapsed_dirs.add(resolved)
-                state.expanded.discard(resolved)
+                state.tree_filter_collapsed_dirs.add(resolved)
+                scoped.discard(resolved)
         else:
-            state.expanded.symmetric_difference_update({resolved})
+            if resolved in scoped:
+                scoped.discard(resolved)
+            else:
+                scoped.add(resolved)
+        by_root[scope] = scoped
+        state.workspace_expanded = by_root
+        state.expanded = set().union(*by_root.values())
         self._rebuild_tree_entries(preferred_path=resolved)
         self._mark_tree_watch_dirty()
         state.dirty = True

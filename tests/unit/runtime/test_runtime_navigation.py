@@ -167,6 +167,82 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
         self.assertEqual(state.named_marks["a"].text_x, 2)
         save_named_marks.assert_called_once_with(state.named_marks)
 
+    def test_add_workspace_root_from_selected_target_tracks_root_list(self) -> None:
+        visible_rows = 8
+        width = 80
+        root = Path("/tmp").resolve()
+        nested = root / "nested"
+        state = _make_state(wrap_text=False, rendered="first\n", visible_rows=visible_rows, width=width)
+        state.tree_entries = [
+            TreeEntry(path=root, depth=0, is_dir=True),
+            TreeEntry(path=nested, depth=1, is_dir=True),
+        ]
+        state.selected_idx = 1
+        rebuild_calls: list[Path] = []
+
+        ops = NavigationController(
+            state=state,
+            command_palette_items=(),
+            rebuild_screen_lines=lambda **_kwargs: None,
+            rebuild_tree_entries=lambda **kwargs: rebuild_calls.append(kwargs["preferred_path"].resolve()),
+            preview_selected_entry=lambda **_kwargs: None,
+            schedule_tree_filter_index_warmup=lambda: None,
+            mark_tree_watch_dirty=lambda: None,
+            reset_git_watch_context=lambda: None,
+            refresh_git_status_overlay=lambda **_kwargs: None,
+            visible_content_rows=lambda: visible_rows,
+            refresh_rendered_for_current_path=lambda **_kwargs: None,
+            open_tree_filter=lambda _mode: None,
+        )
+
+        ops.add_workspace_root_from_selected_target()
+
+        self.assertEqual(state.tree_root, root)
+        self.assertEqual(state.tree_roots, [root, nested])
+        self.assertEqual(rebuild_calls[-1], nested)
+
+    def test_remove_active_workspace_root_keeps_last_root_and_sets_status(self) -> None:
+        visible_rows = 8
+        width = 80
+        state = _make_state(wrap_text=False, rendered="first\n", visible_rows=visible_rows, width=width)
+        root = state.tree_root.resolve()
+        nested = root / "nested"
+        state.tree_roots = [root, nested]
+        state.tree_root = root
+        state.current_path = nested / "demo.py"
+        state.tree_entries = [
+            TreeEntry(path=root, depth=0, is_dir=True),
+            TreeEntry(path=nested, depth=0, is_dir=True),
+        ]
+        state.selected_idx = 1
+        rebuild_calls: list[Path] = []
+
+        ops = NavigationController(
+            state=state,
+            command_palette_items=(),
+            rebuild_screen_lines=lambda **_kwargs: None,
+            rebuild_tree_entries=lambda **kwargs: rebuild_calls.append(kwargs["preferred_path"].resolve()),
+            preview_selected_entry=lambda **_kwargs: None,
+            schedule_tree_filter_index_warmup=lambda: None,
+            mark_tree_watch_dirty=lambda: None,
+            reset_git_watch_context=lambda: None,
+            refresh_git_status_overlay=lambda **_kwargs: None,
+            visible_content_rows=lambda: visible_rows,
+            refresh_rendered_for_current_path=lambda **_kwargs: None,
+            open_tree_filter=lambda _mode: None,
+        )
+
+        ops.remove_active_workspace_root()
+        self.assertEqual(state.tree_root, root)
+        self.assertEqual(state.tree_roots, [root])
+        self.assertEqual(rebuild_calls[-1], (nested / "demo.py").resolve())
+
+        state.status_message = ""
+        ops.remove_active_workspace_root()
+        self.assertEqual(state.tree_root, root)
+        self.assertEqual(state.tree_roots, [root])
+        self.assertIn("cannot delete", state.status_message)
+
 
 if __name__ == "__main__":
     unittest.main()
