@@ -87,6 +87,26 @@ class GitStatusOverlayTests(unittest.TestCase):
             self.assertTrue(overlay[root] & GIT_STATUS_CHANGED)
             self.assertTrue(overlay[root] & GIT_STATUS_UNTRACKED)
 
+    def test_collect_overlay_marks_files_inside_untracked_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            self._init_repo(root)
+            (root / "src").mkdir()
+            tracked = root / "src" / "main.py"
+            tracked.write_text("print('v1')\n", encoding="utf-8")
+            self._commit_all(root, "initial")
+
+            untracked_dir = root / "tests" / "unit" / "tree_model"
+            untracked_dir.mkdir(parents=True)
+            nested_untracked = untracked_dir / "test_doc_summary.py"
+            nested_untracked.write_text("def test_demo():\n    pass\n", encoding="utf-8")
+
+            overlay = collect_git_status_overlay(root)
+
+            self.assertTrue(overlay[nested_untracked.resolve()] & GIT_STATUS_UNTRACKED)
+            self.assertTrue(overlay[untracked_dir.resolve()] & GIT_STATUS_UNTRACKED)
+            self.assertTrue(overlay[root] & GIT_STATUS_UNTRACKED)
+
     def test_collect_overlay_filters_results_to_requested_tree_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()

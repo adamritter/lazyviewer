@@ -126,7 +126,7 @@ def collect_git_status_overlay(tree_root: Path, timeout_seconds: float = 0.25) -
 
     status_proc = _run_git(
         repo_root,
-        ["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+        ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
         timeout_seconds,
     )
     if status_proc is None or status_proc.returncode != 0:
