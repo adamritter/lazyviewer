@@ -71,11 +71,16 @@ class App:
 
     def handle_tree_mouse_click(self, mouse_key: str) -> bool:
         """Route click events through source pane first, then tree pane."""
+        origin = self.tree_pane.navigation.current_jump_location()
         source_result = self.source_pane.handle_tree_mouse_click(mouse_key)
         if source_result.handled:
+            self.tree_pane.navigation.record_jump_if_changed(origin)
             return True
         if source_result.route_to_tree:
-            return self.tree_pane.handle_tree_mouse_click(mouse_key)
+            handled = self.tree_pane.handle_tree_mouse_click(mouse_key)
+            if handled:
+                self.tree_pane.navigation.record_jump_if_changed(origin)
+            return handled
         return False
 
     def tick_source_selection_drag(self) -> None:
