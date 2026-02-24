@@ -64,7 +64,7 @@ class RuntimeTreeFilterTests(unittest.TestCase):
             )
 
             with mock.patch(
-                "lazyviewer.filter_panel.controller.search_project_content_rg",
+                "lazyviewer.filter_panel.matching.search_project_content_rg",
                 return_value=({}, False, None),
             ) as search_mock:
                 ops.apply_tree_filter_query("a")

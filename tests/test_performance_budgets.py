@@ -160,7 +160,7 @@ class PerformanceBudgetTests(unittest.TestCase):
                 time.sleep(0.07)
                 return {}, False, None
 
-            with mock.patch("lazyviewer.filter_panel.controller.search_project_content_rg", side_effect=slow_search):
+            with mock.patch("lazyviewer.filter_panel.matching.search_project_content_rg", side_effect=slow_search):
                 cold_start = time.perf_counter()
                 ops.apply_tree_filter_query("alpha")
                 cold_elapsed = time.perf_counter() - cold_start

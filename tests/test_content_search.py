@@ -77,7 +77,7 @@ class AppRuntimeContentSearchTests(unittest.TestCase):
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
             ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.filter_panel.controller.search_project_content_rg", side_effect=fake_search_content
+                "lazyviewer.filter_panel.matching.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch("lazyviewer.runtime.app.os.isatty", return_value=True), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
             ), mock.patch(
@@ -161,7 +161,7 @@ class AppRuntimeContentSearchTests(unittest.TestCase):
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
             ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.filter_panel.controller.search_project_content_rg", side_effect=fake_search_content
+                "lazyviewer.filter_panel.matching.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch("lazyviewer.runtime.app.os.isatty", return_value=True), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
             ), mock.patch(
@@ -257,7 +257,7 @@ class AppRuntimeContentSearchTests(unittest.TestCase):
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
             ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.filter_panel.controller.search_project_content_rg", side_effect=fake_search_content
+                "lazyviewer.filter_panel.matching.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch("lazyviewer.runtime.app.os.isatty", return_value=True), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
             ), mock.patch(
@@ -366,7 +366,7 @@ class AppRuntimeContentSearchTests(unittest.TestCase):
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
             ), mock.patch(
-                "lazyviewer.filter_panel.controller.search_project_content_rg", side_effect=fake_search_content
+                "lazyviewer.filter_panel.matching.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch(
                 "lazyviewer.runtime.app.collect_project_file_labels", return_value=[]
             ), mock.patch(
@@ -451,7 +451,7 @@ class AppRuntimeContentSearchTests(unittest.TestCase):
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
             ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.filter_panel.controller.search_project_content_rg", side_effect=fake_search_content
+                "lazyviewer.filter_panel.matching.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch("lazyviewer.runtime.app.os.isatty", return_value=True), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
             ), mock.patch(
@@ -516,7 +516,7 @@ class AppRuntimeContentSearchTests(unittest.TestCase):
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
             ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.filter_panel.controller.search_project_content_rg", side_effect=fake_search_content
+                "lazyviewer.filter_panel.matching.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch("lazyviewer.runtime.app.shutil.get_terminal_size", return_value=os.terminal_size((100, 24))), mock.patch(
                 "lazyviewer.runtime.app.load_left_pane_percent", return_value=30.0
             ), mock.patch(
@@ -571,7 +571,7 @@ class AppRuntimeContentSearchTests(unittest.TestCase):
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
             ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.filter_panel.controller.search_project_content_rg", side_effect=fake_search_content
+                "lazyviewer.filter_panel.matching.search_project_content_rg", side_effect=fake_search_content
             ) as search_mock, mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(
