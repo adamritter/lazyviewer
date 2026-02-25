@@ -4,6 +4,8 @@ LazyViewer
 A TUI source code viewer I vibe coded to browse full source code with git diff previews inline with
 easy keyboard navigation of both the source code and the file tree.
 
+![LazyViewer Demo](./lazyviewer-demo.gif)
+
 As I am coding with LLMs, they create a lot of code that I wanted to browse fast, and I haven't
 found a great viewer for it where I can see the changes like in Cursor/VSCode GUI, but still
 fit well with the TUIs. The best I found were LazyGit (awesome tool) and nvim
@@ -51,14 +53,3 @@ pip install lazyviewer
 - Fedora: `sudo dnf install ripgrep`
 - Arch: `sudo pacman -S ripgrep`
 - Windows (winget): `winget install BurntSushi.ripgrep`
-
-Marketing Demos
----------------
-
-Scripted asciinema recordings live in `demos/asciinema/`.
-
-Generate all marketing casts + GIFs:
-
-```bash
-bash demos/asciinema/record_all.sh
-```
