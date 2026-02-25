@@ -59,7 +59,7 @@ def _callback(kwargs: dict[str, object], name: str):
 
 
 class AppRuntimeCoreTests(unittest.TestCase):
-    def test_first_git_change_screen_line_handles_plain_and_ansi_markers(self) -> None:
+    def test_first_git_change_screen_line_handles_plain_and_diff_markers(self) -> None:
         plain_lines = [
             "  unchanged",
             "- removed",
@@ -73,11 +73,11 @@ class AppRuntimeCoreTests(unittest.TestCase):
         ]
         self.assertEqual(_first_git_change_screen_line(ansi_lines), 1)
 
-        background_lines = [
+        non_diff_background_lines = [
             "\033[38;5;252munchanged\033[0m",
             "\033[38;5;252;48;5;22madded\033[0m",
         ]
-        self.assertEqual(_first_git_change_screen_line(background_lines), 1)
+        self.assertIsNone(_first_git_change_screen_line(non_diff_background_lines))
 
         truecolor_background_lines = [
             "\033[38;5;252munchanged\033[0m",
@@ -116,4 +116,3 @@ class AppRuntimeCoreTests(unittest.TestCase):
             _tree_order_key_for_relative_path(Path("zzz"), is_dir=True),
             _tree_order_key_for_relative_path(Path("zzz/inner.py")),
         )
-

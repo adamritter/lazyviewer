@@ -11,19 +11,18 @@ from pathlib import Path
 
 from ..render.ansi import ANSI_ESCAPE_RE
 
+_DIFF_CHANGE_BG_TOKENS = (
+    "48;2;36;74;52",
+    "48;2;92;43;49",
+)
+
 
 def _line_has_git_change_marker(line: str) -> bool:
     """Detect whether a rendered diff line represents an added/removed change."""
     plain = ANSI_ESCAPE_RE.sub("", line)
     if plain.startswith("+ ") or plain.startswith("- "):
         return True
-    for match in ANSI_ESCAPE_RE.finditer(line):
-        seq = match.group(0)
-        if not seq.endswith("m"):
-            continue
-        if seq.startswith("\x1b[48;") or ";48;" in seq:
-            return True
-    return False
+    return any(token in line for token in _DIFF_CHANGE_BG_TOKENS)
 
 
 def _git_change_block_start_lines(screen_lines: list[str]) -> list[int]:
