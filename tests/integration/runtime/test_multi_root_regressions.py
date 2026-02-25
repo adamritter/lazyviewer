@@ -9,7 +9,7 @@ from collections import Counter
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.render import render_dual_page
+from lazyviewer.render import build_dual_page_rows, render_dual_page
 from lazyviewer.render.ansi import ANSI_ESCAPE_RE
 from lazyviewer.runtime import app as app_runtime
 from lazyviewer.search.content import ContentMatch
@@ -72,6 +72,67 @@ def _render_tree_left_rows(state, *, max_lines: int = 12, width: int = 140, left
     rows = [line for line in plain.split("\r\n") if line]
     content_rows = rows[:-1] if rows else []
     return [line.split("│")[0].rstrip() if "│" in line else line.rstrip() for line in content_rows]
+
+
+def _render_full_frame_rows(state) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Render full frame rows (ANSI + plain) for deterministic replay checks."""
+    width = max(1, int(state.left_width) + 1 + int(state.right_width))
+    if not state.browser_visible:
+        width = max(1, int(state.right_width))
+    rows = build_dual_page_rows(
+        text_lines=state.lines,
+        text_start=state.start,
+        tree_entries=state.tree_entries,
+        tree_start=state.tree_start,
+        tree_selected=state.selected_idx,
+        max_lines=max(1, int(state.usable)),
+        current_path=state.current_path,
+        tree_root=state.tree_root,
+        expanded=state.tree_render_expanded,
+        width=width,
+        left_width=state.left_width,
+        text_x=state.text_x,
+        wrap_text=state.wrap_text,
+        browser_visible=state.browser_visible,
+        show_hidden=state.show_hidden,
+        show_help=state.show_help,
+        show_tree_sizes=state.show_tree_sizes,
+        status_message=state.status_message,
+        tree_filter_active=state.tree_filter_active,
+        tree_filter_row_visible=state.tree_filter_prompt_row_visible,
+        tree_filter_mode=state.tree_filter_mode,
+        tree_filter_query=state.tree_filter_query,
+        tree_filter_editing=state.tree_filter_editing,
+        tree_filter_cursor_visible=False,
+        tree_filter_match_count=state.tree_filter_match_count,
+        tree_filter_truncated=state.tree_filter_truncated,
+        tree_filter_loading=state.tree_filter_loading,
+        tree_filter_spinner_frame=0,
+        tree_filter_prefix="p>",
+        tree_filter_placeholder="type to filter files",
+        picker_active=state.picker_active,
+        picker_mode=state.picker_mode,
+        picker_query=state.picker_query,
+        picker_items=state.picker_match_labels,
+        picker_selected=state.picker_selected,
+        picker_focus=state.picker_focus,
+        picker_list_start=state.picker_list_start,
+        picker_message=state.picker_message,
+        git_status_overlay=state.git_status_overlay,
+        tree_search_query="",
+        text_search_query="",
+        text_search_current_line=0,
+        text_search_current_column=0,
+        preview_is_git_diff=state.preview_is_git_diff,
+        source_selection_anchor=state.source_selection_anchor,
+        source_selection_focus=state.source_selection_focus,
+        tree_roots=state.tree_roots,
+        workspace_expanded=state.workspace_expanded,
+        theme=state.theme,
+    )
+    ansi_rows = tuple(rows)
+    plain_rows = tuple(ANSI_ESCAPE_RE.sub("", row) for row in rows)
+    return ansi_rows, plain_rows
 
 
 class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
@@ -1434,6 +1495,512 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
 
             self._run_with_fake_loop(root, fake_run_main_loop)
             self.assertGreater(int(snapshots["executed"]), 0)
+
+    def test_multiroot_full_replay_is_deterministic_across_record_and_replay_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            for rel_path in (
+                "alpha/a.py",
+                "alpha/deep/a2.py",
+                "beta/b.py",
+                "beta/deep/b2.py",
+                "gamma/c.py",
+                "gamma/deep/c2.py",
+            ):
+                target = root / rel_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(f"print('{rel_path}')\n", encoding="utf-8")
+
+            trace: list[dict[str, object]] = []
+            snapshots: list[dict[str, object]] = []
+
+            def section_snapshot(state) -> list[set[Path]]:
+                return [{path.resolve() for path in expanded_paths} for expanded_paths in state.workspace_expanded]
+
+            def entry_selector_for_index(state, index: int) -> dict[str, object]:
+                entry = state.tree_entries[index]
+                self.assertIsNotNone(entry.workspace_section)
+                self.assertIsNotNone(entry.workspace_root)
+                assert entry.workspace_section is not None
+                assert entry.workspace_root is not None
+                return {
+                    "path": str(entry.path.resolve()),
+                    "workspace_section": int(entry.workspace_section),
+                    "workspace_root": str(entry.workspace_root.resolve()),
+                    "depth": int(entry.depth),
+                    "is_dir": bool(entry.is_dir),
+                    "kind": str(entry.kind),
+                }
+
+            def find_index_for_selector(state, selector: dict[str, object]) -> int:
+                target_path = str(selector["path"])
+                target_section = int(selector["workspace_section"])
+                target_workspace_root = str(selector["workspace_root"])
+                target_depth = int(selector["depth"])
+                target_is_dir = bool(selector["is_dir"])
+                target_kind = str(selector["kind"])
+                matches = [
+                    idx
+                    for idx, entry in enumerate(state.tree_entries)
+                    if str(entry.path.resolve()) == target_path
+                    and entry.workspace_section == target_section
+                    and str(entry.workspace_root.resolve()) == target_workspace_root
+                    and entry.depth == target_depth
+                    and entry.is_dir == target_is_dir
+                    and entry.kind == target_kind
+                ]
+                self.assertEqual(
+                    len(matches),
+                    1,
+                    msg=f"selector did not resolve uniquely: {selector}",
+                )
+                return matches[0]
+
+            def state_signature(state) -> dict[str, object]:
+                frame_ansi_rows, frame_plain_rows = _render_full_frame_rows(state)
+                return {
+                    "tree_roots": tuple(str(path.resolve()) for path in state.tree_roots),
+                    "workspace_expanded": tuple(
+                        tuple(sorted(str(path.resolve()) for path in expanded_paths))
+                        for expanded_paths in state.workspace_expanded
+                    ),
+                    "expanded": tuple(sorted(str(path.resolve()) for path in state.expanded)),
+                    "selected_idx": int(state.selected_idx),
+                    "selected_entry": entry_selector_for_index(state, state.selected_idx),
+                    "current_path": str(state.current_path.resolve()),
+                    "tree_entries": tuple(
+                        (
+                            str(entry.path.resolve()),
+                            int(entry.depth),
+                            bool(entry.is_dir),
+                            int(entry.workspace_section) if entry.workspace_section is not None else None,
+                            str(entry.workspace_root.resolve()) if entry.workspace_root is not None else None,
+                            str(entry.kind),
+                            int(entry.line) if entry.line is not None else None,
+                            int(entry.column) if entry.column is not None else None,
+                        )
+                        for entry in state.tree_entries
+                    ),
+                    "tree_start": int(state.tree_start),
+                    "tree_filter_active": bool(state.tree_filter_active),
+                    "tree_filter_mode": str(state.tree_filter_mode),
+                    "tree_filter_query": str(state.tree_filter_query),
+                    "tree_filter_editing": bool(state.tree_filter_editing),
+                    "frame_ansi_rows": frame_ansi_rows,
+                    "frame_plain_rows": frame_plain_rows,
+                }
+
+            def assert_invariants(state) -> None:
+                self.assertTrue(state.tree_roots)
+                self.assertTrue(state.tree_entries)
+                self.assertTrue(0 <= state.selected_idx < len(state.tree_entries))
+
+                roots = normalized_workspace_roots(state.tree_roots, state.tree_root)
+                self.assertEqual([path.resolve() for path in state.tree_roots], roots)
+                self.assertEqual(len(state.workspace_expanded), len(roots))
+                self.assertEqual(
+                    [entry.path.resolve() for entry in state.tree_entries if entry.is_dir and entry.depth == 0],
+                    roots,
+                )
+                for scope_root, expanded_paths in zip(roots, state.workspace_expanded):
+                    for expanded_path in expanded_paths:
+                        resolved_expanded = expanded_path.resolve()
+                        self.assertTrue(resolved_expanded.is_relative_to(scope_root))
+                        self.assertTrue(resolved_expanded.is_relative_to(root))
+                self.assertEqual(
+                    {path.resolve() for path in state.expanded},
+                    set().union(*section_snapshot(state)),
+                )
+
+                row_keys = []
+                for entry in state.tree_entries:
+                    self.assertEqual(entry.kind, "path")
+                    self.assertIsNotNone(entry.workspace_root)
+                    self.assertIsNotNone(entry.workspace_section)
+                    assert entry.workspace_root is not None
+                    assert entry.workspace_section is not None
+                    entry_scope = entry.workspace_root.resolve()
+                    entry_path = entry.path.resolve()
+                    self.assertTrue(entry_path.is_relative_to(entry_scope))
+                    self.assertTrue(entry_path.is_relative_to(root))
+                    row_keys.append(
+                        (
+                            entry_path,
+                            entry.depth,
+                            entry.is_dir,
+                            entry.workspace_section,
+                            entry_scope,
+                        )
+                    )
+                self.assertEqual(len(row_keys), len(set(row_keys)))
+                self.assertTrue(state.current_path.resolve().is_relative_to(root))
+
+            def ensure_filter_closed(state, callbacks) -> None:
+                if state.tree_filter_active:
+                    callbacks.tree_pane.filter.close_tree_filter(clear_query=True, restore_origin=False)
+
+            def assert_search_undo_roundtrip(state, callbacks, origin_path: Path, target_path: Path) -> None:
+                if target_path == origin_path:
+                    return
+                navigation = callbacks.tree_pane.navigation
+                moved_back = navigation.jump_back_in_history()
+                self.assertTrue(moved_back)
+                self.assertEqual(state.current_path.resolve(), origin_path)
+                moved_forward = navigation.jump_forward_in_history()
+                self.assertTrue(moved_forward)
+                self.assertEqual(state.current_path.resolve(), target_path)
+
+            def apply_step(state, callbacks, step: dict[str, object]) -> None:
+                op = str(step["op"])
+                selector = step.get("selector")
+                if selector is not None:
+                    assert isinstance(selector, dict)
+                    state.selected_idx = find_index_for_selector(state, selector)
+
+                if op in {"toggle_enter", "toggle_mouse", "add_root", "delete_root", "reroot_parent", "reroot_selected"}:
+                    ensure_filter_closed(state, callbacks)
+
+                if op == "toggle_enter":
+                    selected_before = state.tree_entries[state.selected_idx]
+                    selected_path = selected_before.path.resolve()
+                    self.assertTrue(selected_before.is_dir)
+                    self.assertIsNotNone(selected_before.workspace_section)
+                    assert selected_before.workspace_section is not None
+                    selected_section = selected_before.workspace_section
+                    before_sections = section_snapshot(state)
+                    before_has = selected_path in before_sections[selected_section]
+                    callbacks.handle_normal_key("ENTER", 120)
+                    selected_after = state.tree_entries[state.selected_idx]
+                    self.assertEqual(selected_after.path.resolve(), selected_path)
+                    self.assertEqual(selected_after.workspace_section, selected_section)
+                    after_sections = section_snapshot(state)
+                    for section_idx in range(len(before_sections)):
+                        if section_idx != selected_section:
+                            self.assertEqual(after_sections[section_idx], before_sections[section_idx])
+                    after_has = selected_path in after_sections[selected_section]
+                    self.assertNotEqual(before_has, after_has)
+                    return
+
+                if op == "toggle_mouse":
+                    selected_before = state.tree_entries[state.selected_idx]
+                    selected_path = selected_before.path.resolve()
+                    self.assertTrue(selected_before.is_dir)
+                    self.assertIsNotNone(selected_before.workspace_section)
+                    assert selected_before.workspace_section is not None
+                    selected_section = selected_before.workspace_section
+                    before_sections = section_snapshot(state)
+                    before_has = selected_path in before_sections[selected_section]
+                    row = (state.selected_idx - state.tree_start) + 1
+                    col = 1 + (selected_before.depth * 2)
+                    callbacks.tree_pane.handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{col}:{row}")
+                    selected_after = state.tree_entries[state.selected_idx]
+                    self.assertEqual(selected_after.path.resolve(), selected_path)
+                    self.assertEqual(selected_after.workspace_section, selected_section)
+                    after_sections = section_snapshot(state)
+                    for section_idx in range(len(before_sections)):
+                        if section_idx != selected_section:
+                            self.assertEqual(after_sections[section_idx], before_sections[section_idx])
+                    after_has = selected_path in after_sections[selected_section]
+                    self.assertNotEqual(before_has, after_has)
+                    return
+
+                if op == "add_root":
+                    selected_before = state.tree_entries[state.selected_idx]
+                    target_root = (
+                        selected_before.path.resolve()
+                        if selected_before.is_dir
+                        else selected_before.path.resolve().parent.resolve()
+                    )
+                    before_roots = [path.resolve() for path in state.tree_roots]
+                    callbacks.handle_normal_key("a", 120)
+                    after_roots = [path.resolve() for path in state.tree_roots]
+                    self.assertEqual(len(after_roots), len(before_roots) + 1)
+                    self.assertEqual(after_roots[-1], target_root)
+                    selected_after = state.tree_entries[state.selected_idx]
+                    self.assertEqual(selected_after.path.resolve(), target_root)
+                    self.assertEqual(selected_after.depth, 0)
+                    self.assertEqual(selected_after.workspace_section, len(after_roots) - 1)
+                    return
+
+                if op == "delete_root":
+                    selected_before = state.tree_entries[state.selected_idx]
+                    self.assertIsNotNone(selected_before.workspace_section)
+                    assert selected_before.workspace_section is not None
+                    selected_section = selected_before.workspace_section
+                    before_roots = [path.resolve() for path in state.tree_roots]
+                    callbacks.handle_normal_key("d", 120)
+                    after_roots = [path.resolve() for path in state.tree_roots]
+                    if len(before_roots) == 1:
+                        self.assertEqual(after_roots, before_roots)
+                        self.assertIn("cannot delete", state.status_message)
+                    else:
+                        expected_after = before_roots[:selected_section] + before_roots[selected_section + 1 :]
+                        self.assertEqual(after_roots, expected_after)
+                        selected_after = state.tree_entries[state.selected_idx]
+                        self.assertIsNotNone(selected_after.workspace_section)
+                        assert selected_after.workspace_section is not None
+                        self.assertTrue(0 <= selected_after.workspace_section < len(after_roots))
+                    return
+
+                if op == "reroot_parent":
+                    selected_before = state.tree_entries[state.selected_idx]
+                    selected_path = selected_before.path.resolve()
+                    self.assertIsNotNone(selected_before.workspace_section)
+                    assert selected_before.workspace_section is not None
+                    section = selected_before.workspace_section
+                    before_roots = [path.resolve() for path in state.tree_roots]
+                    section_root = before_roots[section]
+                    parent_root = section_root.parent.resolve()
+                    expected_after = list(before_roots)
+                    expected_after[section] = parent_root
+                    callbacks.handle_normal_key("R", 120)
+                    after_roots = [path.resolve() for path in state.tree_roots]
+                    self.assertEqual(after_roots, expected_after)
+                    selected_after = state.tree_entries[state.selected_idx]
+                    self.assertEqual(selected_after.path.resolve(), selected_path)
+                    self.assertEqual(selected_after.workspace_section, section)
+                    return
+
+                if op == "reroot_selected":
+                    selected_before = state.tree_entries[state.selected_idx]
+                    selected_path = selected_before.path.resolve()
+                    target_root = selected_path if selected_before.is_dir else selected_path.parent.resolve()
+                    self.assertIsNotNone(selected_before.workspace_section)
+                    assert selected_before.workspace_section is not None
+                    section = selected_before.workspace_section
+                    before_roots = [path.resolve() for path in state.tree_roots]
+                    expected_after = list(before_roots)
+                    expected_after[section] = target_root
+                    callbacks.handle_normal_key("r", 120)
+                    after_roots = [path.resolve() for path in state.tree_roots]
+                    self.assertEqual(after_roots, expected_after)
+                    selected_after = state.tree_entries[state.selected_idx]
+                    self.assertEqual(selected_after.path.resolve(), selected_path)
+                    self.assertEqual(selected_after.workspace_section, section)
+                    return
+
+                if op == "add_delete_roundtrip":
+                    selected_before = state.tree_entries[state.selected_idx]
+                    target_root = (
+                        selected_before.path.resolve()
+                        if selected_before.is_dir
+                        else selected_before.path.resolve().parent.resolve()
+                    )
+                    before_roots = [path.resolve() for path in state.tree_roots]
+                    callbacks.handle_normal_key("a", 120)
+                    after_add = [path.resolve() for path in state.tree_roots]
+                    self.assertEqual(len(after_add), len(before_roots) + 1)
+                    self.assertEqual(after_add[-1], target_root)
+                    last_root_idx = next(
+                        idx
+                        for idx, entry in enumerate(state.tree_entries)
+                        if entry.is_dir
+                        and entry.depth == 0
+                        and entry.workspace_section == len(after_add) - 1
+                        and entry.path.resolve() == target_root
+                    )
+                    state.selected_idx = last_root_idx
+                    callbacks.handle_normal_key("d", 120)
+                    after_delete = [path.resolve() for path in state.tree_roots]
+                    self.assertEqual(after_delete, before_roots)
+                    return
+
+                if op == "ctrl_p_jump":
+                    target_path = Path(str(step["target_path"])).resolve()
+                    origin_path = state.current_path.resolve()
+                    query = str(step["query"])
+                    callbacks.tree_pane.filter_panel.toggle_mode("files")
+                    self.assertTrue(state.tree_filter_active)
+                    self.assertEqual(state.tree_filter_mode, "files")
+                    callbacks.tree_pane.filter.apply_tree_filter_query(
+                        query,
+                        preview_selection=False,
+                        select_first_file=True,
+                    )
+                    target_idx = next(
+                        idx
+                        for idx, entry in enumerate(state.tree_entries)
+                        if (not entry.is_dir) and entry.path.resolve() == target_path
+                    )
+                    state.selected_idx = target_idx
+                    callbacks.tree_pane.filter_panel.activate_selection()
+                    self.assertFalse(state.tree_filter_active)
+                    self.assertEqual(state.current_path.resolve(), target_path)
+                    assert_search_undo_roundtrip(state, callbacks, origin_path, target_path)
+                    return
+
+                if op == "slash_jump":
+                    target_path = Path(str(step["target_path"])).resolve()
+                    origin_path = state.current_path.resolve()
+                    query = str(step["query"])
+                    callbacks.tree_pane.filter_panel.toggle_mode("content")
+                    self.assertTrue(state.tree_filter_active)
+                    self.assertEqual(state.tree_filter_mode, "content")
+                    state.tree_filter_query = query
+                    callbacks.tree_pane.filter.rebuild_tree_entries(
+                        preferred_path=target_path,
+                        force_first_file=True,
+                        content_matches_override={
+                            target_path: [
+                                ContentMatch(
+                                    path=target_path,
+                                    line=1,
+                                    column=1,
+                                    preview=query,
+                                )
+                            ]
+                        },
+                        content_truncated_override=False,
+                    )
+                    hit_idx = next(
+                        idx
+                        for idx, entry in enumerate(state.tree_entries)
+                        if entry.kind == "search_hit" and entry.path.resolve() == target_path
+                    )
+                    state.selected_idx = hit_idx
+                    callbacks.tree_pane.filter_panel.activate_selection()
+                    self.assertTrue(state.tree_filter_active)
+                    self.assertEqual(state.tree_filter_mode, "content")
+                    self.assertFalse(state.tree_filter_editing)
+                    self.assertEqual(state.current_path.resolve(), target_path)
+                    assert_search_undo_roundtrip(state, callbacks, origin_path, target_path)
+                    callbacks.tree_pane.filter.close_tree_filter(clear_query=True, restore_origin=False)
+                    self.assertFalse(state.tree_filter_active)
+                    return
+
+                raise AssertionError(f"unknown replay operation: {op}")
+
+            def build_step(state, callbacks, rng: random.Random) -> dict[str, object] | None:
+                def dir_indices() -> list[int]:
+                    return [idx for idx, entry in enumerate(state.tree_entries) if entry.is_dir]
+
+                def visible_dir_indices() -> list[int]:
+                    tree_rows = callbacks.tree_pane.filter.tree_view_rows()
+                    return [
+                        idx
+                        for idx, entry in enumerate(state.tree_entries)
+                        if entry.is_dir and state.tree_start <= idx < state.tree_start + tree_rows
+                    ]
+
+                def file_indices() -> list[int]:
+                    return [idx for idx, entry in enumerate(state.tree_entries) if not entry.is_dir]
+
+                operation_name = rng.choice(
+                    (
+                        "toggle_enter",
+                        "toggle_mouse",
+                        "add_root",
+                        "delete_root",
+                        "reroot_parent",
+                        "reroot_selected",
+                        "add_delete_roundtrip",
+                        "ctrl_p_jump",
+                        "slash_jump",
+                    )
+                )
+
+                if operation_name == "toggle_enter":
+                    candidates = dir_indices()
+                    if not candidates:
+                        return None
+                    idx = rng.choice(candidates)
+                    return {"op": operation_name, "selector": entry_selector_for_index(state, idx)}
+
+                if operation_name == "toggle_mouse":
+                    candidates = visible_dir_indices()
+                    if not candidates:
+                        return None
+                    idx = rng.choice(candidates)
+                    return {"op": operation_name, "selector": entry_selector_for_index(state, idx)}
+
+                if operation_name in {"add_root", "delete_root", "reroot_selected", "add_delete_roundtrip"}:
+                    if not state.tree_entries:
+                        return None
+                    idx = rng.randrange(len(state.tree_entries))
+                    return {"op": operation_name, "selector": entry_selector_for_index(state, idx)}
+
+                if operation_name == "reroot_parent":
+                    candidates: list[int] = []
+                    roots = [path.resolve() for path in state.tree_roots]
+                    for idx, entry in enumerate(state.tree_entries):
+                        if entry.workspace_section is None:
+                            continue
+                        section = entry.workspace_section
+                        if not (0 <= section < len(roots)):
+                            continue
+                        section_root = roots[section]
+                        parent_root = section_root.parent.resolve()
+                        if parent_root == section_root:
+                            continue
+                        if not parent_root.is_relative_to(root):
+                            continue
+                        candidates.append(idx)
+                    if not candidates:
+                        return None
+                    idx = rng.choice(candidates)
+                    return {"op": operation_name, "selector": entry_selector_for_index(state, idx)}
+
+                if operation_name in {"ctrl_p_jump", "slash_jump"}:
+                    files = file_indices()
+                    if not files:
+                        return None
+                    idx = rng.choice(files)
+                    target_path = state.tree_entries[idx].path.resolve()
+                    query = target_path.name
+                    return {
+                        "op": operation_name,
+                        "target_path": str(target_path),
+                        "query": query,
+                    }
+
+                return None
+
+            random_seeds = (1337, 2026, 4242)
+            operations_per_seed = 40
+
+            def fake_run_main_loop_record(**kwargs) -> None:
+                callbacks = kwargs["callbacks"]
+                state = kwargs["state"]
+                assert_invariants(state)
+                snapshots.append(state_signature(state))
+                for seed in random_seeds:
+                    rng = random.Random(seed)
+                    executed = 0
+                    attempts = 0
+                    max_attempts = operations_per_seed * 20
+                    while executed < operations_per_seed and attempts < max_attempts:
+                        attempts += 1
+                        step = build_step(state, callbacks, rng)
+                        if step is None:
+                            continue
+                        apply_step(state, callbacks, step)
+                        assert_invariants(state)
+                        trace.append(step)
+                        snapshots.append(state_signature(state))
+                        executed += 1
+                    self.assertEqual(executed, operations_per_seed, msg=f"seed {seed} executed {executed} steps")
+
+            def fake_run_main_loop_replay(**kwargs) -> None:
+                callbacks = kwargs["callbacks"]
+                state = kwargs["state"]
+                assert_invariants(state)
+                self.assertTrue(snapshots)
+                self.assertEqual(state_signature(state), snapshots[0], msg="initial replay state mismatch")
+                for step_idx, step in enumerate(trace, start=1):
+                    apply_step(state, callbacks, step)
+                    assert_invariants(state)
+                    actual = state_signature(state)
+                    expected = snapshots[step_idx]
+                    self.assertEqual(
+                        actual,
+                        expected,
+                        msg=f"replay mismatch at step {step_idx}: {step}",
+                    )
+
+            self._run_with_fake_loop(root, fake_run_main_loop_record)
+            self.assertEqual(len(trace), len(random_seeds) * operations_per_seed)
+            self.assertEqual(len(snapshots), len(trace) + 1)
+            self._run_with_fake_loop(root, fake_run_main_loop_replay)
 
 
 if __name__ == "__main__":
