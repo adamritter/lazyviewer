@@ -333,6 +333,11 @@ class NavigationController:
         roots = self._normalize_tree_roots()
         if not roots:
             return
+        selected_target = (
+            self.state.tree_entries[self.state.selected_idx].path.resolve()
+            if self.state.tree_entries and 0 <= self.state.selected_idx < len(self.state.tree_entries)
+            else self.state.current_path.resolve()
+        )
         selected_section = self._selected_workspace_section()
         if selected_section is None:
             active_root = self.state.tree_root.resolve()
@@ -370,7 +375,7 @@ class NavigationController:
             self.state.tree_root = parent_root
 
         self.rebuild_tree_entries(
-            preferred_path=selected_scope,
+            preferred_path=selected_target,
             preferred_workspace_root=parent_root,
             preferred_workspace_section=selected_section,
             center_selection=True,
