@@ -35,7 +35,7 @@ HELP_PANEL_TEXT_LINES: tuple[str, ...] = (
     "\033[38;5;229mw\033[0m wrap  \033[38;5;229me\033[0m edit",
     "\033[38;5;229m:\033[0m commands  \033[38;5;229ms\033[0m symbols",
     "\033[38;5;229mn/N/p\033[0m next/prev modification",
-    "\033[38;5;229m.\033[0m hidden+ignored  \033[38;5;229mAlt+Left/Right\033[0m history",
+    "\033[38;5;229m.\033[0m show hidden+ignored  \033[38;5;229mAlt+Left/Right\033[0m history",
     "\033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
 )
 
@@ -48,7 +48,7 @@ HELP_PANEL_TEXT_ONLY_LINES: tuple[str, ...] = (
     "\033[38;5;229me\033[0m edit  \033[38;5;229ms\033[0m symbols  \033[38;5;229m:\033[0m commands",
     "\033[38;5;229mn/N/p\033[0m mods  \033[38;5;229mCtrl+G\033[0m lazygit  \033[38;5;229mCtrl+O\033[0m git on/off",
     "\033[38;5;229mr/R\033[0m root  \033[38;5;229mm{key}/'{key}\033[0m marks",
-    "\033[38;5;229m.\033[0m hidden+ignored  \033[38;5;229mAlt+Left/Right\033[0m  \033[38;5;229m?\033[0m/\033[38;5;229mq\033[0m",
+    "\033[38;5;229m.\033[0m show hidden+ignored  \033[38;5;229mAlt+Left/Right\033[0m  \033[38;5;229m?\033[0m/\033[38;5;229mq\033[0m",
 )
 
 
@@ -82,7 +82,7 @@ HELP_PANEL_SEARCH_HITS_TEXT_LINES: tuple[str, ...] = (
     "\033[38;5;229mLeft/Right\033[0m x-scroll  \033[38;5;229mwheel L/R\033[0m x-scroll  \033[38;5;229mw\033[0m wrap",
     "\033[38;5;229m/\033[0m or \033[38;5;229mTab\033[0m edit query  \033[38;5;229mEnter\033[0m open hit",
     "\033[38;5;229mEsc\033[0m close search  \033[38;5;229mCtrl+P\033[0m file filter",
-    "\033[38;5;229m.\033[0m hidden+ignored  \033[38;5;229mAlt+Left/Right\033[0m history",
+    "\033[38;5;229m.\033[0m show hidden+ignored  \033[38;5;229mAlt+Left/Right\033[0m history",
     "\033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
 )
 
@@ -93,7 +93,7 @@ HELP_PANEL_SEARCH_HITS_TEXT_ONLY_LINES: tuple[str, ...] = (
     "\033[38;5;229mUp/Down\033[0m line  \033[38;5;229mLeft/Right\033[0m x-scroll  \033[38;5;229mwheel L/R\033[0m x-scroll",
     "\033[38;5;229m/\033[0m/\033[38;5;229mTab\033[0m edit query  \033[38;5;229mEnter\033[0m open hit",
     "\033[38;5;229mEsc\033[0m close search  \033[38;5;229mCtrl+P\033[0m files",
-    "\033[38;5;229m.\033[0m hidden+ignored  \033[38;5;229mAlt+Left/Right\033[0m history",
+    "\033[38;5;229m.\033[0m show hidden+ignored  \033[38;5;229mAlt+Left/Right\033[0m history",
     "\033[38;5;229m?\033[0m help  \033[38;5;229mq\033[0m quit",
 )
 
