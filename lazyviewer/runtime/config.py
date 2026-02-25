@@ -9,9 +9,24 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from platformdirs import user_config_dir
+
 from .navigation import JumpLocation, is_named_mark_key
 
-CONFIG_PATH = Path.home() / ".config" / "lazyviewer.json"
+APP_NAME = "lazyviewer"
+CONFIG_FILENAME = "config.json"
+DEFAULT_CONFIG_PATH = Path(user_config_dir(APP_NAME, appauthor=False)) / CONFIG_FILENAME
+LEGACY_CONFIG_PATH = Path.home() / ".config" / "lazyviewer.json"
+CONFIG_PATH = DEFAULT_CONFIG_PATH
+
+
+def _load_config_path() -> Path:
+    """Return preferred config path, falling back to legacy location when needed."""
+    if CONFIG_PATH.exists():
+        return CONFIG_PATH
+    if CONFIG_PATH == DEFAULT_CONFIG_PATH and LEGACY_CONFIG_PATH.exists():
+        return LEGACY_CONFIG_PATH
+    return CONFIG_PATH
 
 
 def load_config() -> dict[str, object]:
@@ -20,8 +35,9 @@ def load_config() -> dict[str, object]:
     Returns an empty dict when the file is missing, unreadable, malformed, or
     does not decode to a top-level JSON object.
     """
+    config_path = _load_config_path()
     try:
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        data = json.loads(config_path.read_text(encoding="utf-8"))
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}

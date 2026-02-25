@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "lazyviewer"
 version = "0.1.0"
 description = "Terminal source tree viewer with split-pane preview and search"
+readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
@@ -21,13 +22,20 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Software Development",
   "Topic :: Utilities",
 ]
 dependencies = [
   "Pygments>=2.15",
+  "platformdirs>=4.2",
   "tree-sitter-languages>=1.10",
 ]
+
+[project.urls]
+Homepage = "https://github.com/adamritter/lazyviewer"
+Repository = "https://github.com/adamritter/lazyviewer"
+Issues = "https://github.com/adamritter/lazyviewer/issues"
 
 [project.scripts]
 lazyviewer = "lazyviewer.cli:main"

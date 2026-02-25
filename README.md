@@ -20,11 +20,34 @@ but it can be turned off, and it's quite interactive (ripgrep for a syntax with 
 
 
 There are lots of ways I'm tempted to improve it (inline editor support?), but at the same time
-I'm trying to keep it minimal and focus on the smooth interaction of the features.
+I'm trying to keep it minimal and focus on the smooth interaction of the features that isn't available using other tools that treat them as separate features of a more complex program.
 
 The code base is really ugly, far from how I'd like it to be, but it's partly because I started
 working on it with codex before this program existed :)
 
 I'm having fun using/developing it though, hopefully it will be fun/useful for others as well.
 
-Btw I suggest you use alias lv=lazyviewer
+Tip: add `alias lv='lazyviewer'` to your shell config.
+
+Install
+-------
+
+The easiest way:
+
+```bash
+pipx install lazyviewer
+```
+
+Or with pip:
+
+```bash
+pip install lazyviewer
+```
+
+`/` content search uses `ripgrep` (`rg`). Install it with your package manager:
+
+- macOS (Homebrew): `brew install ripgrep`
+- Ubuntu/Debian: `sudo apt install ripgrep`
+- Fedora: `sudo dnf install ripgrep`
+- Arch: `sudo pacman -S ripgrep`
+- Windows (winget): `winget install BurntSushi.ripgrep`

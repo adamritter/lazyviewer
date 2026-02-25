@@ -67,6 +67,29 @@ class ConfigBehaviorTests(unittest.TestCase):
             self.assertEqual(loaded["b"], JumpLocation(path=Path("/tmp/b.py"), start=0, text_x=0))
             self.assertEqual(loaded["c"], JumpLocation(path=Path("/tmp/c.py"), start=0, text_x=2))
 
+    def test_load_config_falls_back_to_legacy_path_when_default_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            default_path = Path(tmp) / "native" / "config.json"
+            legacy_path = Path(tmp) / "lazyviewer.json"
+            legacy_path.write_text('{"show_hidden": true}\n', encoding="utf-8")
+            with mock.patch("lazyviewer.runtime.config.CONFIG_PATH", default_path), mock.patch(
+                "lazyviewer.runtime.config.DEFAULT_CONFIG_PATH", default_path
+            ), mock.patch("lazyviewer.runtime.config.LEGACY_CONFIG_PATH", legacy_path):
+                loaded = config.load_config()
+            self.assertEqual(loaded.get("show_hidden"), True)
+
+    def test_load_config_does_not_use_legacy_for_custom_config_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            custom_path = Path(tmp) / "custom.json"
+            default_path = Path(tmp) / "native" / "config.json"
+            legacy_path = Path(tmp) / "lazyviewer.json"
+            legacy_path.write_text('{"show_hidden": true}\n', encoding="utf-8")
+            with mock.patch("lazyviewer.runtime.config.CONFIG_PATH", custom_path), mock.patch(
+                "lazyviewer.runtime.config.DEFAULT_CONFIG_PATH", default_path
+            ), mock.patch("lazyviewer.runtime.config.LEGACY_CONFIG_PATH", legacy_path):
+                loaded = config.load_config()
+            self.assertEqual(loaded, {})
+
 
 if __name__ == "__main__":
     unittest.main()
