@@ -91,8 +91,10 @@ class AppRuntimeMouseTestsPart2(unittest.TestCase):
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
             ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.runtime.app.shutil.which", side_effect=fake_which
-            ), mock.patch("lazyviewer.runtime.app.subprocess.run") as subprocess_run, mock.patch(
+                "lazyviewer.runtime.app_helpers.sys.platform", "darwin"
+            ), mock.patch(
+                "lazyviewer.runtime.app_helpers.shutil.which", side_effect=fake_which
+            ), mock.patch("lazyviewer.runtime.app_helpers.subprocess.run") as subprocess_run, mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
@@ -163,8 +165,10 @@ class AppRuntimeMouseTestsPart2(unittest.TestCase):
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
             ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.runtime.app.shutil.which", side_effect=fake_which
-            ), mock.patch("lazyviewer.runtime.app.subprocess.run"), mock.patch(
+                "lazyviewer.runtime.app_helpers.sys.platform", "darwin"
+            ), mock.patch(
+                "lazyviewer.runtime.app_helpers.shutil.which", side_effect=fake_which
+            ), mock.patch("lazyviewer.runtime.app_helpers.subprocess.run"), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
@@ -228,8 +232,10 @@ class AppRuntimeMouseTestsPart2(unittest.TestCase):
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
             ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.runtime.app.shutil.which", side_effect=fake_which
-            ), mock.patch("lazyviewer.runtime.app.subprocess.run"), mock.patch(
+                "lazyviewer.runtime.app_helpers.sys.platform", "darwin"
+            ), mock.patch(
+                "lazyviewer.runtime.app_helpers.shutil.which", side_effect=fake_which
+            ), mock.patch("lazyviewer.runtime.app_helpers.subprocess.run"), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
