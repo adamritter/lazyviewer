@@ -587,6 +587,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 self.assertTrue(0 <= state.selected_idx < len(state.tree_entries))
 
                 roots = normalized_workspace_roots(state.tree_roots, state.tree_root)
+                self.assertEqual([path.resolve() for path in state.tree_roots], roots)
                 depth0_entries = [entry for entry in state.tree_entries if entry.is_dir and entry.depth == 0]
                 self.assertEqual(
                     [entry.path.resolve() for entry in depth0_entries],
@@ -652,6 +653,17 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     if not candidates:
                         return None
                     return candidates[rng.randrange(len(candidates))]
+
+                def random_file_index() -> int | None:
+                    candidates = [idx for idx, entry in enumerate(state.tree_entries) if not entry.is_dir]
+                    if not candidates:
+                        return None
+                    return candidates[rng.randrange(len(candidates))]
+
+                def random_entry_index() -> int | None:
+                    if not state.tree_entries:
+                        return None
+                    return rng.randrange(len(state.tree_entries))
 
                 def key_toggle_random_directory() -> bool:
                     idx = random_dir_index()
@@ -725,6 +737,25 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     self.assertEqual(selected_after.workspace_section, len(after_tree_roots) - 1)
                     return True
 
+                def add_random_file_parent_root_and_assert() -> bool:
+                    idx = random_file_index()
+                    if idx is None:
+                        return False
+                    selected_before = state.tree_entries[idx]
+                    selected_file = selected_before.path.resolve()
+                    new_root = selected_file.parent.resolve()
+                    before_tree_roots = [path.resolve() for path in state.tree_roots]
+                    state.selected_idx = idx
+                    callbacks.handle_normal_key("a", 120)
+                    after_tree_roots = [path.resolve() for path in state.tree_roots]
+                    self.assertEqual(len(after_tree_roots), len(before_tree_roots) + 1)
+                    self.assertEqual(after_tree_roots[-1], new_root)
+                    selected_after = state.tree_entries[state.selected_idx]
+                    self.assertEqual(selected_after.path.resolve(), new_root)
+                    self.assertEqual(selected_after.depth, 0)
+                    self.assertEqual(selected_after.workspace_section, len(after_tree_roots) - 1)
+                    return True
+
                 def remove_random_depth0_root_and_assert() -> bool:
                     if len(state.tree_roots) <= 1:
                         return False
@@ -748,6 +779,36 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     self.assertEqual(after_tree_roots, expected_after)
                     self.assertEqual(len(after_tree_roots), len(before_tree_roots) - 1)
                     self.assertEqual(after_counts[selected_root], before_counts[selected_root] - 1)
+
+                    selected_after = state.tree_entries[state.selected_idx]
+                    self.assertIsNotNone(selected_after.workspace_section)
+                    assert selected_after.workspace_section is not None
+                    self.assertTrue(0 <= selected_after.workspace_section < len(after_tree_roots))
+                    self.assertTrue(
+                        selected_after.path.resolve().is_relative_to(after_tree_roots[selected_after.workspace_section])
+                    )
+                    return True
+
+                def remove_random_entry_section_and_assert() -> bool:
+                    if len(state.tree_roots) <= 1:
+                        return False
+                    idx = random_entry_index()
+                    if idx is None:
+                        return False
+                    selected_before = state.tree_entries[idx]
+                    self.assertIsNotNone(selected_before.workspace_section)
+                    assert selected_before.workspace_section is not None
+                    selected_section = selected_before.workspace_section
+                    before_tree_roots = [path.resolve() for path in state.tree_roots]
+                    expected_after = before_tree_roots[:selected_section] + before_tree_roots[selected_section + 1 :]
+                    if not expected_after:
+                        return False
+
+                    state.selected_idx = idx
+                    callbacks.handle_normal_key("d", 120)
+                    after_tree_roots = [path.resolve() for path in state.tree_roots]
+                    self.assertEqual(after_tree_roots, expected_after)
+                    self.assertEqual(len(after_tree_roots), len(before_tree_roots) - 1)
 
                     selected_after = state.tree_entries[state.selected_idx]
                     self.assertIsNotNone(selected_after.workspace_section)
@@ -806,6 +867,30 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     self.assertEqual(selected_after.workspace_section, before_section)
                     self.assertEqual(selected_after.path.resolve(), selected_target)
                     self.assertEqual(selected_after.depth, 0)
+                    return True
+
+                def reroot_selected_target_from_random_file_and_assert_section() -> bool:
+                    idx = random_file_index()
+                    if idx is None:
+                        return False
+                    selected_before = state.tree_entries[idx]
+                    selected_target = selected_before.path.resolve()
+                    target_root = selected_target.parent.resolve()
+                    self.assertIsNotNone(selected_before.workspace_section)
+                    assert selected_before.workspace_section is not None
+                    before_section = selected_before.workspace_section
+                    before_roots = [path.resolve() for path in state.tree_roots]
+                    expected_after = list(before_roots)
+                    expected_after[before_section] = target_root
+                    state.selected_idx = idx
+                    callbacks.handle_normal_key("r", 120)
+                    after_roots = [path.resolve() for path in state.tree_roots]
+                    self.assertEqual(after_roots, expected_after)
+                    selected_after = state.tree_entries[state.selected_idx]
+                    self.assertIsNotNone(selected_after.workspace_section)
+                    assert selected_after.workspace_section is not None
+                    self.assertEqual(selected_after.workspace_section, before_section)
+                    self.assertEqual(selected_after.path.resolve(), selected_target)
                     return True
 
                 def duplicate_random_depth0_root_and_assert() -> bool:
@@ -988,16 +1073,38 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                         self.assertEqual(selected_after.depth, 0)
                     return True
 
+                def ensure_visible_file_in_any_section() -> bool:
+                    if random_file_index() is not None:
+                        return True
+                    candidate_idx = next(
+                        (
+                            row_idx
+                            for row_idx, entry in enumerate(state.tree_entries)
+                            if entry.is_dir and entry.depth > 0
+                        ),
+                        None,
+                    )
+                    if candidate_idx is None:
+                        return False
+                    state.selected_idx = candidate_idx
+                    callbacks.handle_normal_key("ENTER", 120)
+                    return random_file_index() is not None
+
                 operations = (
                     key_toggle_random_directory,
                     mouse_toggle_random_directory,
                     add_random_directory_root_and_assert,
+                    add_random_file_parent_root_and_assert,
                     duplicate_random_depth0_root_and_assert,
                     remove_random_depth0_root_and_assert,
+                    remove_random_entry_section_and_assert,
                     reroot_parent_from_random_depth0_root_and_assert_section,
                     reroot_selected_target_from_random_directory_and_assert_section,
+                    reroot_selected_target_from_random_file_and_assert_section,
                 )
 
+                assert_invariants(state)
+                self.assertTrue(ensure_visible_file_in_any_section())
                 assert_invariants(state)
                 self.assertTrue(add_nested_root_then_delete_original_root_and_assert())
                 assert_invariants(state)
@@ -1008,11 +1115,13 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 self.assertTrue(reroot_key_on_nonzero_section_stays_in_same_section("r"))
                 assert_invariants(state)
                 executed = 4
-                for _ in range(120):
-                    operation = operations[rng.randrange(len(operations))]
-                    if operation():
-                        executed += 1
-                        assert_invariants(state)
+                for seed in (1337, 2026, 9001):
+                    rng = random.Random(seed)
+                    for _ in range(80):
+                        operation = operations[rng.randrange(len(operations))]
+                        if operation():
+                            executed += 1
+                            assert_invariants(state)
                 snapshots["executed"] = executed
 
             self._run_with_fake_loop(root, fake_run_main_loop)
