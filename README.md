@@ -51,3 +51,14 @@ pip install lazyviewer
 - Fedora: `sudo dnf install ripgrep`
 - Arch: `sudo pacman -S ripgrep`
 - Windows (winget): `winget install BurntSushi.ripgrep`
+
+Marketing Demos
+---------------
+
+Scripted asciinema recordings live in `demos/asciinema/`.
+
+Generate all marketing casts + GIFs:
+
+```bash
+bash demos/asciinema/record_all.sh
+```
