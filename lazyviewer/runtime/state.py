@@ -40,7 +40,7 @@ class AppState:
     max_start: int
     last_right_width: int
     tree_roots: list[Path] = field(default_factory=list)
-    workspace_expanded: dict[Path, set[Path]] = field(default_factory=dict)
+    workspace_expanded: list[set[Path]] = field(default_factory=list)
     theme_name: str = DEFAULT_THEME.name
     theme: UITheme = field(default_factory=lambda: DEFAULT_THEME)
     browser_visible: bool = True
@@ -79,8 +79,11 @@ class AppState:
     picker_match_lines: list[int] = field(default_factory=list)
     picker_match_commands: list[str] = field(default_factory=list)
     picker_file_labels: list[str] = field(default_factory=list)
+    picker_file_paths: list[Path] = field(default_factory=list)
+    picker_file_workspace_sections: list[int] = field(default_factory=list)
     picker_file_labels_folded: list[str] = field(default_factory=list)
     picker_files_root: Path | None = None
+    picker_files_roots_signature: tuple[str, ...] | None = None
     picker_files_show_hidden: bool | None = None
     picker_symbol_file: Path | None = None
     picker_symbol_labels: list[str] = field(default_factory=list)

@@ -52,6 +52,54 @@ class RuntimeTreeFilterTests(unittest.TestCase):
                 return
         self.fail("timed out waiting for background content search to finish")
 
+    def test_file_filter_searches_all_workspace_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp).resolve()
+            root_a = (workspace / "root-a").resolve()
+            root_b = (workspace / "root-b").resolve()
+            root_a.mkdir()
+            root_b.mkdir()
+
+            file_a = root_a / "src" / "alpha_only_a.py"
+            file_b = root_b / "pkg" / "alpha_only_b.py"
+            file_a.parent.mkdir(parents=True)
+            file_b.parent.mkdir(parents=True)
+            file_a.write_text("print('a')\n", encoding="utf-8")
+            file_b.write_text("print('b')\n", encoding="utf-8")
+            (root_a / "src" / "other.txt").write_text("noop\n", encoding="utf-8")
+            (root_b / "pkg" / "other.txt").write_text("noop\n", encoding="utf-8")
+
+            state = _make_state(root_a)
+            state.tree_roots = [root_a, root_b]
+            state.workspace_expanded = [{root_a}, {root_b}]
+            state.expanded = {root_a, root_b}
+            state.tree_filter_active = True
+            state.tree_filter_mode = "files"
+
+            ops = TreeFilterController(
+                state=state,
+                visible_content_rows=lambda: 20,
+                rebuild_screen_lines=lambda **_kwargs: None,
+                preview_selected_entry=lambda **_kwargs: None,
+                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                record_jump_if_changed=lambda _origin: None,
+                jump_to_path=lambda _target: None,
+                jump_to_line=lambda _line: None,
+            )
+
+            ops.apply_tree_filter_query("alpha_only")
+
+            file_rows = [entry for entry in state.tree_entries if not entry.is_dir]
+            matched_paths = {entry.path.resolve() for entry in file_rows}
+            self.assertEqual(matched_paths, {file_a.resolve(), file_b.resolve()})
+            section_by_path = {entry.path.resolve(): entry.workspace_section for entry in file_rows}
+            self.assertEqual(section_by_path[file_a.resolve()], 0)
+            self.assertEqual(section_by_path[file_b.resolve()], 1)
+            root_rows = [entry for entry in state.tree_entries if entry.is_dir and entry.depth == 0]
+            self.assertEqual([entry.path.resolve() for entry in root_rows], [root_a, root_b])
+            self.assertEqual(state.tree_filter_match_count, 2)
+            self.assertFalse(state.tree_filter_truncated)
+
     def test_content_search_reuses_cached_results_when_backspacing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()

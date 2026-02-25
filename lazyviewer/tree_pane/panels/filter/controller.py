@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable
 from collections import OrderedDict
 from pathlib import Path
@@ -24,7 +25,10 @@ from ....tree_model import (
     find_content_hit_index,
     next_file_entry_index,
 )
-from ...workspace_roots import normalized_workspace_roots, workspace_root_banner_rows
+from ...workspace_roots import (
+    normalized_workspace_expanded_sections,
+    workspace_root_banner_rows,
+)
 from . import matching as filter_matching
 from .helpers import skip_gitignored_for_hidden_mode
 from .limits import (
@@ -125,30 +129,18 @@ class TreeFilterController:
             return max(1, rows - 1)
         return max(1, rows)
 
-    def normalized_workspace_expanded(self) -> dict[Path, set[Path]]:
+    def normalized_workspace_expanded(self) -> list[set[Path]]:
         """Return per-root expansion sets and synchronize legacy flat expansion."""
-        roots = normalized_workspace_roots(self.state.tree_roots, self.state.tree_root)
-        by_root: dict[Path, set[Path]] = {}
-        flat_union: set[Path] = set()
-        for root in roots:
-            existing = self.state.workspace_expanded.get(root)
-            if existing is not None:
-                normalized = {
-                    candidate.resolve()
-                    for candidate in existing
-                    if candidate.resolve().is_relative_to(root)
-                }
-            else:
-                normalized = {
-                    candidate.resolve()
-                    for candidate in self.state.expanded
-                    if candidate.resolve().is_relative_to(root)
-                }
-            by_root[root] = normalized
-            flat_union.update(normalized)
-        self.state.workspace_expanded = by_root
+        roots, sections, flat_union = normalized_workspace_expanded_sections(
+            self.state.tree_roots,
+            self.state.tree_root,
+            self.state.workspace_expanded,
+            self.state.expanded,
+        )
+        self.state.tree_roots = roots
+        self.state.workspace_expanded = sections
         self.state.expanded = flat_union
-        return by_root
+        return sections
 
     def reset_tree_filter_session_state(self) -> None:
         """Reset per-session transient filter state."""
@@ -488,18 +480,92 @@ class TreeFilterController:
         return True
 
     # matching/cache
+    @staticmethod
+    def _workspace_roots_signature(roots: list[Path]) -> tuple[str, ...]:
+        """Build cache signature preserving root order and duplicate sections."""
+        return tuple(str(root.resolve()) for root in roots)
+
+    def _collect_workspace_file_labels_parallel(
+        self,
+        roots: list[Path],
+        *,
+        show_hidden: bool,
+        skip_gitignored: bool,
+    ) -> list[list[str]]:
+        """Collect per-root label indexes in parallel and keep section order stable."""
+        if not roots:
+            return []
+
+        labels_by_section: list[list[str]] = [[] for _ in roots]
+
+        if len(roots) == 1:
+            labels_by_section[0] = collect_project_file_labels(
+                roots[0],
+                show_hidden,
+                skip_gitignored=skip_gitignored,
+            )
+            return labels_by_section
+
+        max_workers = min(8, len(roots))
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="lazyviewer-file-index") as executor:
+            futures = [
+                executor.submit(
+                    collect_project_file_labels,
+                    root,
+                    show_hidden,
+                    skip_gitignored=skip_gitignored,
+                )
+                for root in roots
+            ]
+            for section_idx, future in enumerate(futures):
+                try:
+                    labels_by_section[section_idx] = future.result()
+                except Exception:
+                    labels_by_section[section_idx] = []
+
+        return labels_by_section
+
     def refresh_tree_filter_file_index(self) -> None:
-        """Refresh cached file-label index when root/hidden-mode changes."""
-        root = self.state.tree_root.resolve()
-        if self.state.picker_files_root == root and self.state.picker_files_show_hidden == self.state.show_hidden:
-            return
-        self.state.picker_file_labels = collect_project_file_labels(
-            root,
-            self.state.show_hidden,
-            skip_gitignored=skip_gitignored_for_hidden_mode(self.state.show_hidden),
+        """Refresh cached file-label index when roots/hidden-mode change."""
+        roots, sections, flat_union = normalized_workspace_expanded_sections(
+            self.state.tree_roots,
+            self.state.tree_root,
+            self.state.workspace_expanded,
+            self.state.expanded,
         )
+        self.state.tree_roots = roots
+        self.state.workspace_expanded = sections
+        self.state.expanded = flat_union
+
+        roots_signature = self._workspace_roots_signature(roots)
+        if (
+            self.state.picker_files_roots_signature == roots_signature
+            and self.state.picker_files_show_hidden == self.state.show_hidden
+        ):
+            return
+
+        skip_gitignored = skip_gitignored_for_hidden_mode(self.state.show_hidden)
+        labels_by_section = self._collect_workspace_file_labels_parallel(
+            roots,
+            show_hidden=self.state.show_hidden,
+            skip_gitignored=skip_gitignored,
+        )
+        labels: list[str] = []
+        file_paths: list[Path] = []
+        file_sections: list[int] = []
+        for section_idx, root in enumerate(roots):
+            section_labels = labels_by_section[section_idx] if section_idx < len(labels_by_section) else []
+            for label in section_labels:
+                labels.append(label)
+                file_paths.append(root / label)
+                file_sections.append(section_idx)
+
+        self.state.picker_file_labels = labels
+        self.state.picker_file_paths = file_paths
+        self.state.picker_file_workspace_sections = file_sections
         self.state.picker_file_labels_folded = []
-        self.state.picker_files_root = root
+        self.state.picker_files_root = roots[0] if roots else self.state.tree_root.resolve()
+        self.state.picker_files_roots_signature = roots_signature
         self.state.picker_files_show_hidden = self.state.show_hidden
 
     def default_selected_index(self, prefer_files: bool = False) -> int:
@@ -563,6 +629,7 @@ class TreeFilterController:
         center_selection: bool = False,
         force_first_file: bool = False,
         preferred_workspace_root: Path | None = None,
+        preferred_workspace_section: int | None = None,
         content_matches_override: dict[Path, list[filter_matching.ContentMatch]] | None = None,
         content_truncated_override: bool | None = None,
     ) -> None:
@@ -572,11 +639,13 @@ class TreeFilterController:
         previous_selected_hit_column: int | None = None
         previous_selected_path: Path | None = None
         previous_selected_workspace_root: Path | None = None
+        previous_selected_workspace_section: int | None = None
         if self.state.tree_entries and 0 <= self.state.selected_idx < len(self.state.tree_entries):
             previous_entry = self.state.tree_entries[self.state.selected_idx]
             previous_selected_path = previous_entry.path.resolve()
             if previous_entry.workspace_root is not None:
                 previous_selected_workspace_root = previous_entry.workspace_root.resolve()
+            previous_selected_workspace_section = previous_entry.workspace_section
             if previous_entry.kind == "search_hit":
                 previous_selected_hit_path = previous_entry.path.resolve()
                 previous_selected_hit_line = previous_entry.line
@@ -590,6 +659,7 @@ class TreeFilterController:
 
         preferred_target = preferred_path.resolve()
         preferred_workspace_scope = preferred_workspace_root.resolve() if preferred_workspace_root is not None else None
+        preferred_workspace_scope_section = preferred_workspace_section
         if (
             preferred_workspace_scope is None
             and previous_selected_path is not None
@@ -597,6 +667,13 @@ class TreeFilterController:
             and previous_selected_path == preferred_target
         ):
             preferred_workspace_scope = previous_selected_workspace_root
+        if (
+            preferred_workspace_scope_section is None
+            and previous_selected_path is not None
+            and previous_selected_workspace_section is not None
+            and previous_selected_path == preferred_target
+        ):
+            preferred_workspace_scope_section = previous_selected_workspace_section
 
         if self.state.tree_filter_active and self.state.tree_filter_query:
             if self.state.tree_filter_mode == "content":
@@ -633,16 +710,46 @@ class TreeFilterController:
                 )
                 self.state.tree_filter_truncated = len(raw_matched) > match_limit
                 matched = raw_matched[:match_limit] if match_limit > 0 else []
-                root = self.state.tree_root.resolve()
-                matched_paths = [root / label for _, label, _ in matched]
-                self.state.tree_filter_match_count = len(matched_paths)
-                self.state.tree_entries, self.state.tree_render_expanded = filter_tree_entries_for_files(
+                matched_paths_by_section: dict[int, list[Path]] = {}
+                for index, _label, _score in matched:
+                    if not (0 <= index < len(self.state.picker_file_paths)):
+                        continue
+                    section_idx = (
+                        self.state.picker_file_workspace_sections[index]
+                        if index < len(self.state.picker_file_workspace_sections)
+                        else 0
+                    )
+                    matched_paths_by_section.setdefault(section_idx, []).append(self.state.picker_file_paths[index])
+
+                roots, sections, flat_union = normalized_workspace_expanded_sections(
+                    self.state.tree_roots,
                     self.state.tree_root,
+                    self.state.workspace_expanded,
                     self.state.expanded,
-                    self.state.show_hidden,
-                    matched_paths,
-                    skip_gitignored=skip_gitignored_for_hidden_mode(self.state.show_hidden),
                 )
+                self.state.tree_roots = roots
+                self.state.workspace_expanded = sections
+                self.state.expanded = flat_union
+
+                all_entries = []
+                render_expanded: set[Path] = set()
+                skip_gitignored = skip_gitignored_for_hidden_mode(self.state.show_hidden)
+                for section_idx, root in enumerate(roots):
+                    section_entries, section_expanded = filter_tree_entries_for_files(
+                        root,
+                        sections[section_idx] if section_idx < len(sections) else self.state.expanded,
+                        self.state.show_hidden,
+                        matched_paths_by_section.get(section_idx, []),
+                        skip_gitignored=skip_gitignored,
+                        workspace_root=root,
+                        workspace_section=section_idx,
+                    )
+                    all_entries.extend(section_entries)
+                    render_expanded.update(section_expanded)
+
+                self.state.tree_filter_match_count = sum(len(paths) for paths in matched_paths_by_section.values())
+                self.state.tree_entries = all_entries
+                self.state.tree_render_expanded = render_expanded
         else:
             self.state.tree_filter_match_count = 0
             self.state.tree_filter_truncated = False
@@ -682,7 +789,8 @@ class TreeFilterController:
             if not matched_preferred:
                 first_match_idx: int | None = None
                 root_match_idx: int | None = None
-                scoped_match_idx: int | None = None
+                scoped_section_match_idx: int | None = None
+                scoped_root_match_idx: int | None = None
                 for idx, entry in enumerate(self.state.tree_entries):
                     if entry.kind == "search_hit":
                         continue
@@ -691,19 +799,31 @@ class TreeFilterController:
                     if first_match_idx is None:
                         first_match_idx = idx
                     entry_root = entry.workspace_root.resolve() if entry.workspace_root is not None else None
+                    entry_section = entry.workspace_section
+                    if (
+                        preferred_workspace_scope_section is not None
+                        and entry_section is not None
+                        and entry_section == preferred_workspace_scope_section
+                        and scoped_section_match_idx is None
+                    ):
+                        scoped_section_match_idx = idx
                     if (
                         preferred_workspace_scope is not None
                         and entry_root is not None
                         and entry_root == preferred_workspace_scope
-                        and scoped_match_idx is None
+                        and scoped_root_match_idx is None
                     ):
-                        scoped_match_idx = idx
+                        scoped_root_match_idx = idx
                     if entry_root is not None and entry_root == preferred_target and entry.depth == 0:
                         root_match_idx = idx
                 chosen_idx = (
-                    scoped_match_idx
-                    if scoped_match_idx is not None
-                    else root_match_idx if root_match_idx is not None else first_match_idx
+                    scoped_section_match_idx
+                    if scoped_section_match_idx is not None
+                    else (
+                        scoped_root_match_idx
+                        if scoped_root_match_idx is not None
+                        else root_match_idx if root_match_idx is not None else first_match_idx
+                    )
                 )
                 if chosen_idx is not None:
                     self.state.selected_idx = chosen_idx

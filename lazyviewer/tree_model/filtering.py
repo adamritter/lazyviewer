@@ -16,9 +16,12 @@ def filter_tree_entries_for_files(
     show_hidden: bool,
     matched_files: Iterable[Path],
     skip_gitignored: bool = False,
+    workspace_root: Path | None = None,
+    workspace_section: int | None = None,
 ) -> tuple[list[TreeEntry], set[Path]]:
     """Build filtered tree for matched files and their ancestor directories."""
     root = root.resolve()
+    section_root = (workspace_root or root).resolve()
     visible_dirs: set[Path] = {root}
     visible_files: set[Path] = set()
     forced_expanded: set[Path] = {root}
@@ -58,13 +61,30 @@ def filter_tree_entries_for_files(
     for parent, children in children_by_parent.items():
         children.sort(key=child_sort_key)
 
-    filtered_entries: list[TreeEntry] = [TreeEntry(root, 0, True)]
+    filtered_entries: list[TreeEntry] = [
+        TreeEntry(
+            root,
+            0,
+            True,
+            workspace_root=section_root,
+            workspace_section=workspace_section,
+        )
+    ]
 
     def walk(directory: Path, depth: int) -> None:
         """Emit filtered directory/file rows recursively."""
         for child in children_by_parent.get(directory, []):
             is_dir = child in visible_dirs
-            filtered_entries.append(TreeEntry(child, depth, is_dir, file_size=safe_file_size(child, is_dir)))
+            filtered_entries.append(
+                TreeEntry(
+                    child,
+                    depth,
+                    is_dir,
+                    file_size=safe_file_size(child, is_dir),
+                    workspace_root=section_root,
+                    workspace_section=workspace_section,
+                )
+            )
             if is_dir and child in render_expanded:
                 walk(child, depth + 1)
 
@@ -72,7 +92,15 @@ def filter_tree_entries_for_files(
         walk(root, 1)
 
     if not filtered_entries:
-        filtered_entries = [TreeEntry(root, 0, True)]
+        filtered_entries = [
+            TreeEntry(
+                root,
+                0,
+                True,
+                workspace_root=section_root,
+                workspace_section=workspace_section,
+            )
+        ]
     return filtered_entries, render_expanded
 
 
