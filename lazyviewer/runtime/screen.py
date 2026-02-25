@@ -47,9 +47,8 @@ def _first_git_change_screen_line(screen_lines: list[str]) -> int | None:
 
 def _centered_scroll_start(target_line: int, max_start: int, visible_rows: int) -> int:
     """Compute a scroll start that keeps target near upper-middle viewport."""
-    anchor = max(0, min(target_line, max_start))
-    centered = max(0, anchor - max(1, visible_rows // 3))
-    return max(0, min(centered, max_start))
+    desired_start = max(0, target_line - max(1, visible_rows // 3))
+    return max(0, min(desired_start, max_start))
 
 
 def _tree_order_key_for_relative_path(

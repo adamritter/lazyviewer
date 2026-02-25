@@ -532,6 +532,76 @@ class AppRuntimeGitTestsPart1(unittest.TestCase):
             self.assertTrue(bool(snapshots["is_diff"]))
             self.assertIn("hunk-target-visible", str(snapshots["visible_text"]))
 
+    @unittest.skipIf(shutil.which("git") is None, "git is required for git modified navigation tests")
+    def test_n_jump_keeps_near_end_hunk_visible_in_short_viewport(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "tests@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Tests"], cwd=root, check=True)
+
+            file_path = root / "pyproject.toml"
+            original_lines = [f"line_{idx:03d} = {idx}\n" for idx in range(1, 61)]
+            original = "".join(original_lines)
+            file_path.write_text(original, encoding="utf-8")
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=root, check=True)
+
+            updated_lines = list(original_lines)
+            updated_lines[56] = "line_057 = 'near-end-hunk'\n"
+            updated = "".join(updated_lines)
+            file_path.write_text(updated, encoding="utf-8")
+            snapshots: dict[str, object] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_normal_key = _callback(kwargs, "handle_normal_key")
+                handle_normal_key("n", 120)
+                snapshots["path"] = state.current_path.resolve()
+                snapshots["start"] = state.start
+                snapshots["max_start"] = state.max_start
+                snapshots["is_diff"] = state.preview_is_git_diff
+                visible_rows = max(1, len(state.lines) - state.max_start)
+                window_start = max(0, min(state.start, state.max_start))
+                window_end = min(len(state.lines), window_start + visible_rows)
+                visible_text = "\n".join(
+                    ANSI_ESCAPE_RE.sub("", row)
+                    for row in state.lines[window_start:window_end]
+                )
+                snapshots["visible_text"] = visible_text
+
+            with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.runtime.app.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.source_pane.path.os.isatty", return_value=True
+            ), mock.patch(
+                "lazyviewer.runtime.app.shutil.get_terminal_size", return_value=os.terminal_size((120, 24))
+            ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
+                "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
+            ), mock.patch(
+                "lazyviewer.source_pane.path.sys.stdout.fileno", return_value=1
+            ), mock.patch("lazyviewer.runtime.app.load_show_hidden", return_value=False), mock.patch(
+                "lazyviewer.runtime.app.load_left_pane_percent", return_value=None
+            ), mock.patch(
+                "lazyviewer.runtime.app.GIT_STATUS_REFRESH_SECONDS", 0.0
+            ):
+                app_runtime.run_pager("", root, "monokai", False, False)
+
+            self.assertEqual(snapshots["path"], file_path.resolve())
+            self.assertTrue(bool(snapshots["is_diff"]))
+            self.assertEqual(int(snapshots["start"]), int(snapshots["max_start"]))
+            self.assertIn("near-end-hunk", str(snapshots["visible_text"]))
+
     @unittest.skipIf(shutil.which("git") is None, "git is required for same-file git hunk navigation tests")
     def test_n_shift_n_and_p_navigate_between_change_blocks_within_same_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -91,7 +91,7 @@ class AppRuntimeCoreTests(unittest.TestCase):
     def test_centered_scroll_start_clamps_and_interpolates(self) -> None:
         self.assertEqual(_centered_scroll_start(target_line=30, max_start=40, visible_rows=12), 26)
         self.assertEqual(_centered_scroll_start(target_line=1, max_start=40, visible_rows=12), 0)
-        self.assertEqual(_centered_scroll_start(target_line=120, max_start=40, visible_rows=12), 36)
+        self.assertEqual(_centered_scroll_start(target_line=120, max_start=40, visible_rows=12), 40)
 
     def test_tree_order_key_matches_dirs_first_tree_sort(self) -> None:
         relative_paths = [
