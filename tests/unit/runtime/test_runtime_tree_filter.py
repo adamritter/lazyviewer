@@ -100,6 +100,111 @@ class RuntimeTreeFilterTests(unittest.TestCase):
             self.assertEqual(state.tree_filter_match_count, 2)
             self.assertFalse(state.tree_filter_truncated)
 
+    def test_content_search_searches_all_workspace_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp).resolve()
+            root_a = (workspace / "root-a").resolve()
+            root_b = (workspace / "root-b").resolve()
+            root_a.mkdir()
+            root_b.mkdir()
+            file_a = root_a / "src" / "needle_a.py"
+            file_b = root_b / "pkg" / "needle_b.py"
+            file_a.parent.mkdir(parents=True)
+            file_b.parent.mkdir(parents=True)
+            file_a.write_text("needle\n", encoding="utf-8")
+            file_b.write_text("needle\n", encoding="utf-8")
+
+            state = _make_state(root_a)
+            state.tree_roots = [root_a, root_b]
+            state.workspace_expanded = [{root_a}, {root_b}]
+            state.expanded = {root_a, root_b}
+            state.tree_filter_active = True
+            state.tree_filter_mode = "content"
+
+            ops = TreeFilterController(
+                state=state,
+                visible_content_rows=lambda: 20,
+                rebuild_screen_lines=lambda **_kwargs: None,
+                preview_selected_entry=lambda **_kwargs: None,
+                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                record_jump_if_changed=lambda _origin: None,
+                jump_to_path=lambda _target: None,
+                jump_to_line=lambda _line: None,
+            )
+
+            matches_for_root = {
+                root_a: ContentMatch(path=file_a.resolve(), line=1, column=1, preview="needle"),
+                root_b: ContentMatch(path=file_b.resolve(), line=1, column=1, preview="needle"),
+            }
+
+            def fake_search_content(root, _query, _show_hidden, **kwargs):
+                match = matches_for_root[root.resolve()]
+                on_match = kwargs.get("on_match")
+                if on_match is not None:
+                    on_match(match.path, match, 1, 1)
+                return {match.path: [match]}, False, None
+
+            with mock.patch(
+                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg",
+                side_effect=fake_search_content,
+            ) as search_mock:
+                ops.apply_tree_filter_query("needle")
+                self._drain_content_search(ops)
+
+            self.assertEqual(search_mock.call_count, 2)
+            self.assertEqual(state.tree_filter_match_count, 2)
+            hit_rows = [entry for entry in state.tree_entries if entry.kind == "search_hit"]
+            self.assertEqual({entry.path.resolve() for entry in hit_rows}, {file_a.resolve(), file_b.resolve()})
+            section_by_path = {entry.path.resolve(): entry.workspace_section for entry in hit_rows}
+            self.assertEqual(section_by_path[file_a.resolve()], 0)
+            self.assertEqual(section_by_path[file_b.resolve()], 1)
+
+    def test_content_search_overlapping_roots_do_not_duplicate_same_hit_per_section(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            nested = (root / "nested").resolve()
+            nested.mkdir()
+            target_file = nested / "shared.py"
+            target_file.write_text("needle\n", encoding="utf-8")
+
+            state = _make_state(root)
+            state.tree_roots = [root, nested]
+            state.workspace_expanded = [{root, nested}, {nested}]
+            state.expanded = {root, nested}
+            state.tree_filter_active = True
+            state.tree_filter_mode = "content"
+
+            ops = TreeFilterController(
+                state=state,
+                visible_content_rows=lambda: 20,
+                rebuild_screen_lines=lambda **_kwargs: None,
+                preview_selected_entry=lambda **_kwargs: None,
+                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                record_jump_if_changed=lambda _origin: None,
+                jump_to_path=lambda _target: None,
+                jump_to_line=lambda _line: None,
+            )
+
+            shared_match = ContentMatch(path=target_file.resolve(), line=1, column=1, preview="needle")
+
+            def fake_search_content(_root, _query, _show_hidden, **kwargs):
+                on_match = kwargs.get("on_match")
+                if on_match is not None:
+                    on_match(shared_match.path, shared_match, 1, 1)
+                return {shared_match.path: [shared_match]}, False, None
+
+            with mock.patch(
+                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg",
+                side_effect=fake_search_content,
+            ):
+                ops.apply_tree_filter_query("needle")
+                self._drain_content_search(ops)
+
+            hit_rows = [entry for entry in state.tree_entries if entry.kind == "search_hit"]
+            self.assertEqual(len(hit_rows), 2)
+            self.assertEqual({entry.workspace_section for entry in hit_rows}, {0, 1})
+            self.assertEqual(state.tree_filter_match_count, 1)
+
     def test_content_search_reuses_cached_results_when_backspacing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()

@@ -172,7 +172,7 @@ class TreeFilterController:
 
     def _store_content_search_cache(
         self,
-        key: tuple[str, str, bool, bool, int, int],
+        key: tuple[tuple[str, ...], str, bool, bool, int, int],
         result: tuple[dict[Path, list[filter_matching.ContentMatch]], bool, str | None],
     ) -> None:
         """Insert content-search result into LRU cache and enforce max size."""
@@ -186,7 +186,7 @@ class TreeFilterController:
         *,
         query: str,
         max_matches: int,
-        cache_key: tuple[str, str, bool, bool, int, int],
+        cache_key: tuple[tuple[str, ...], str, bool, bool, int, int],
         preferred_path: Path | None,
         force_first_file: bool,
         preview_selection: bool,
@@ -209,7 +209,8 @@ class TreeFilterController:
         self.loading_until = float("inf")
         self.state.tree_filter_loading = True
 
-        root = self.state.tree_root
+        self.normalized_workspace_expanded()
+        roots = list(self.state.tree_roots)
         show_hidden = self.state.show_hidden
         skip_gitignored = skip_gitignored_for_hidden_mode(show_hidden)
 
@@ -224,13 +225,12 @@ class TreeFilterController:
             self._content_search_events.put(("match", generation, match_path, match))
 
         def run_worker() -> None:
-            result = filter_matching.search_project_content_rg(
-                root,
-                query,
-                show_hidden,
+            result = self.search_workspace_content_rg(
+                roots=roots,
+                query=query,
+                show_hidden=show_hidden,
                 skip_gitignored=skip_gitignored,
                 max_matches=max(1, max_matches),
-                max_files=CONTENT_SEARCH_FILE_LIMIT,
                 on_match=on_match,
                 should_cancel=cancel_event.is_set,
             )
@@ -248,7 +248,7 @@ class TreeFilterController:
         """Drain queued streaming-search events and refresh tree results incrementally."""
         processed = False
         final_result: tuple[
-            tuple[str, str, bool, bool, int, int],
+            tuple[tuple[str, ...], str, bool, bool, int, int],
             tuple[dict[Path, list[filter_matching.ContentMatch]], bool, str | None],
         ] | None = None
 
@@ -525,6 +525,178 @@ class TreeFilterController:
 
         return labels_by_section
 
+    def search_workspace_content_rg(
+        self,
+        roots: list[Path],
+        query: str,
+        show_hidden: bool,
+        *,
+        skip_gitignored: bool = False,
+        max_matches: int = 2_000,
+        on_match: Callable[[Path, filter_matching.ContentMatch, int, int], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> tuple[dict[Path, list[filter_matching.ContentMatch]], bool, str | None]:
+        """Search content across all workspace roots and merge deduplicated hits."""
+        normalized_roots = [root.resolve() for root in roots]
+        if not normalized_roots:
+            return {}, False, None
+
+        max_total_matches = max(1, max_matches)
+        seen_event_keys: set[tuple[str, int, int, str]] = set()
+        seen_event_files: set[str] = set()
+        seen_lock = threading.Lock()
+        stream_truncated = threading.Event()
+        local_cancel = threading.Event()
+        streamed_matches = 0
+
+        def cancelled() -> bool:
+            return local_cancel.is_set() or (should_cancel is not None and should_cancel())
+
+        def emit_unique_match(path: Path, match: filter_matching.ContentMatch) -> None:
+            nonlocal streamed_matches
+            match_path = path.resolve()
+            event_key = (str(match_path), match.line, match.column, match.preview)
+            with seen_lock:
+                if event_key in seen_event_keys:
+                    return
+                if streamed_matches >= max_total_matches:
+                    stream_truncated.set()
+                    local_cancel.set()
+                    return
+                file_key = str(match_path)
+                if file_key not in seen_event_files and len(seen_event_files) >= CONTENT_SEARCH_FILE_LIMIT:
+                    stream_truncated.set()
+                    local_cancel.set()
+                    return
+                seen_event_keys.add(event_key)
+                seen_event_files.add(file_key)
+                streamed_matches += 1
+                total_matches = streamed_matches
+                total_files = len(seen_event_files)
+            if on_match is not None:
+                try:
+                    on_match(match_path, match, total_matches, total_files)
+                except Exception:
+                    pass
+
+        def search_one_root(root: Path) -> tuple[dict[Path, list[filter_matching.ContentMatch]], bool, str | None]:
+            def root_on_match(
+                match_path: Path,
+                match: filter_matching.ContentMatch,
+                _total_matches: int,
+                _total_files: int,
+            ) -> None:
+                if cancelled():
+                    return
+                emit_unique_match(match_path, match)
+
+            return filter_matching.search_project_content_rg(
+                root,
+                query,
+                show_hidden,
+                skip_gitignored=skip_gitignored,
+                max_matches=max_total_matches,
+                max_files=CONTENT_SEARCH_FILE_LIMIT,
+                on_match=root_on_match,
+                should_cancel=cancelled,
+            )
+
+        if len(normalized_roots) == 1:
+            single_result = search_one_root(normalized_roots[0])
+            merged_matches, merged_truncated, merged_error = self._merge_workspace_content_search_results(
+                normalized_roots,
+                [single_result],
+                max_total_matches=max_total_matches,
+                stream_truncated=stream_truncated.is_set(),
+            )
+            return merged_matches, merged_truncated, merged_error
+
+        max_workers = min(8, len(normalized_roots))
+        root_results: list[tuple[dict[Path, list[filter_matching.ContentMatch]], bool, str | None]] = [
+            ({}, False, None) for _ in normalized_roots
+        ]
+        with ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="lazyviewer-content-search",
+        ) as executor:
+            futures = [executor.submit(search_one_root, root) for root in normalized_roots]
+            for section_idx, future in enumerate(futures):
+                try:
+                    root_results[section_idx] = future.result()
+                except Exception as exc:
+                    root_results[section_idx] = ({}, False, f"failed to run rg: {exc}")
+
+        return self._merge_workspace_content_search_results(
+            normalized_roots,
+            root_results,
+            max_total_matches=max_total_matches,
+            stream_truncated=stream_truncated.is_set(),
+        )
+
+    @staticmethod
+    def _merge_workspace_content_search_results(
+        roots: list[Path],
+        root_results: list[tuple[dict[Path, list[filter_matching.ContentMatch]], bool, str | None]],
+        *,
+        max_total_matches: int,
+        stream_truncated: bool,
+    ) -> tuple[dict[Path, list[filter_matching.ContentMatch]], bool, str | None]:
+        """Merge per-root content-search results with global dedupe and limits."""
+        merged_matches: dict[Path, list[filter_matching.ContentMatch]] = {}
+        seen_match_keys: set[tuple[str, int, int, str]] = set()
+        file_order: list[Path] = []
+        total_matches = 0
+        truncated = stream_truncated
+        errors: list[str] = []
+
+        for section_idx, result in enumerate(root_results):
+            matches_by_file, root_truncated, root_error = result
+            root = roots[section_idx] if section_idx < len(roots) else None
+            if root_error:
+                if root is not None:
+                    errors.append(f"{root}: {root_error}")
+                else:
+                    errors.append(root_error)
+            if root_truncated:
+                truncated = True
+
+            for match_path in sorted(matches_by_file, key=lambda item: str(item).casefold()):
+                resolved_path = match_path.resolve()
+                for match in matches_by_file[match_path]:
+                    match_key = (str(resolved_path), match.line, match.column, match.preview)
+                    if match_key in seen_match_keys:
+                        continue
+                    if total_matches >= max_total_matches:
+                        truncated = True
+                        break
+                    if resolved_path not in merged_matches and len(merged_matches) >= CONTENT_SEARCH_FILE_LIMIT:
+                        truncated = True
+                        break
+                    seen_match_keys.add(match_key)
+                    if resolved_path not in merged_matches:
+                        merged_matches[resolved_path] = []
+                        file_order.append(resolved_path)
+                    merged_matches[resolved_path].append(match)
+                    total_matches += 1
+                if truncated and total_matches >= max_total_matches:
+                    break
+                if truncated and resolved_path not in merged_matches and len(merged_matches) >= CONTENT_SEARCH_FILE_LIMIT:
+                    break
+
+        ordered_matches: dict[Path, list[filter_matching.ContentMatch]] = {}
+        for path in file_order:
+            ordered_items = sorted(
+                merged_matches[path],
+                key=lambda item: (item.line, item.column, item.preview),
+            )
+            ordered_matches[path] = ordered_items
+
+        if ordered_matches:
+            return ordered_matches, truncated, None
+        if errors:
+            return {}, truncated, errors[0]
+        return {}, truncated, None
+
     def refresh_tree_filter_file_index(self) -> None:
         """Refresh cached file-label index when roots/hidden-mode change."""
         roots, sections, flat_union = normalized_workspace_expanded_sections(
@@ -588,11 +760,13 @@ class TreeFilterController:
         """Return adaptive content-search match cap based on query length."""
         return content_search_match_limit_for_query(query)
 
-    def content_search_cache_key(self, query: str, max_matches: int) -> tuple[str, str, bool, bool, int, int]:
+    def content_search_cache_key(self, query: str, max_matches: int) -> tuple[tuple[str, ...], str, bool, bool, int, int]:
         """Build stable cache key for one content-search request."""
         skip_gitignored = skip_gitignored_for_hidden_mode(self.state.show_hidden)
+        self.normalized_workspace_expanded()
+        roots_signature = self._workspace_roots_signature(self.state.tree_roots)
         return (
-            str(self.state.tree_root.resolve()),
+            roots_signature,
             query,
             self.state.show_hidden,
             skip_gitignored,
@@ -605,20 +779,20 @@ class TreeFilterController:
         query: str,
         max_matches: int,
     ) -> tuple[dict[Path, list[filter_matching.ContentMatch]], bool, str | None]:
-        """Run content search with LRU caching by query/root/mode/limits."""
+        """Run content search with LRU caching by query/roots/mode/limits."""
         key = self.content_search_cache_key(query, max_matches)
         cached = self.content_search_cache.get(key)
         if cached is not None:
             self.content_search_cache.move_to_end(key)
             return cached
 
-        result = filter_matching.search_project_content_rg(
-            self.state.tree_root,
-            query,
-            self.state.show_hidden,
+        self.normalized_workspace_expanded()
+        result = self.search_workspace_content_rg(
+            roots=list(self.state.tree_roots),
+            query=query,
+            show_hidden=self.state.show_hidden,
             skip_gitignored=skip_gitignored_for_hidden_mode(self.state.show_hidden),
             max_matches=max(1, max_matches),
-            max_files=CONTENT_SEARCH_FILE_LIMIT,
         )
         self._store_content_search_cache(key, result)
         return result
@@ -688,12 +862,22 @@ class TreeFilterController:
                     )
                 self.state.tree_filter_match_count = sum(len(items) for items in matches_by_file.values())
                 self.state.tree_filter_truncated = truncated
-                self.state.tree_entries, self.state.tree_render_expanded = filter_tree_entries_for_content_matches(
-                    self.state.tree_root,
-                    self.state.expanded,
-                    matches_by_file,
-                    collapsed_dirs=self.state.tree_filter_collapsed_dirs,
-                )
+                workspace_expanded = self.normalized_workspace_expanded()
+                all_entries = []
+                render_expanded: set[Path] = set()
+                for section_idx, root in enumerate(self.state.tree_roots):
+                    section_entries, section_expanded = filter_tree_entries_for_content_matches(
+                        root,
+                        workspace_expanded[section_idx] if section_idx < len(workspace_expanded) else self.state.expanded,
+                        matches_by_file,
+                        collapsed_dirs=self.state.tree_filter_collapsed_dirs,
+                        workspace_root=root,
+                        workspace_section=section_idx,
+                    )
+                    all_entries.extend(section_entries)
+                    render_expanded.update(section_expanded)
+                self.state.tree_entries = all_entries
+                self.state.tree_render_expanded = render_expanded
             else:
                 self.refresh_tree_filter_file_index()
                 match_limit = min(len(self.state.picker_file_labels), self.tree_filter_match_limit(self.state.tree_filter_query))
@@ -781,6 +965,7 @@ class TreeFilterController:
                     previous_selected_hit_path,
                     preferred_line=previous_selected_hit_line,
                     preferred_column=previous_selected_hit_column,
+                    preferred_workspace_section=previous_selected_workspace_section,
                 )
                 if preserved_hit_idx is not None:
                     self.state.selected_idx = preserved_hit_idx
@@ -963,6 +1148,6 @@ class TreeFilterController:
     def init_content_search_cache(self) -> None:
         """Initialize search cache storage."""
         self.content_search_cache: OrderedDict[
-            tuple[str, str, bool, bool, int, int],
+            tuple[tuple[str, ...], str, bool, bool, int, int],
             tuple[dict[Path, list[filter_matching.ContentMatch]], bool, str | None],
         ] = OrderedDict()
