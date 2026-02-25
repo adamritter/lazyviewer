@@ -29,7 +29,8 @@ classifiers = [
 dependencies = [
   "Pygments>=2.15",
   "platformdirs>=4.2",
-  "tree-sitter-languages>=1.10",
+  "tree-sitter-languages>=1.10; python_version < '3.13'",
+  "tree-sitter-language-pack>=0.8; python_version >= '3.13'",
 ]
 
 [project.urls]

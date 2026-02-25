@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from lazyviewer.source_pane.rendering import sticky_symbol_headers_for_position
+from lazyviewer.source_pane.symbols import MISSING_PARSER_ERROR
 from lazyviewer.render import render_dual_page
 
 def _sticky_case(
@@ -58,7 +59,7 @@ class RenderStatusStickyTestsPart4(unittest.TestCase):
             with (
                 mock.patch(
                     "lazyviewer.source_pane.symbols._load_parser",
-                    return_value=(None, "Tree-sitter parser package not found. Install tree-sitter-languages."),
+                    return_value=(None, MISSING_PARSER_ERROR),
                 ),
                 mock.patch("lazyviewer.render.os.write", side_effect=capture),
             ):

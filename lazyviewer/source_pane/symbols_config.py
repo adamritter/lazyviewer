@@ -62,7 +62,9 @@ IDENTIFIER_NODE_TYPES = {
     "namespace_identifier",
 }
 
-MISSING_PARSER_ERROR = "Tree-sitter parser package not found. Install tree-sitter-languages."
+MISSING_PARSER_ERROR = (
+    "Tree-sitter parser package not found. Install tree-sitter-languages or tree-sitter-language-pack."
+)
 SYMBOL_CONTEXT_CACHE_MAX = 128
 
 FALLBACK_PATTERNS_BY_LANGUAGE: dict[str, tuple[tuple[str, re.Pattern[str]], ...]] = {
