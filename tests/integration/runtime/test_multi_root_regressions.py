@@ -9,7 +9,7 @@ from collections import Counter
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.render import build_dual_page_rows, render_dual_page
+from lazyviewer.render import render_dual_page
 from lazyviewer.render.ansi import ANSI_ESCAPE_RE
 from lazyviewer.runtime import app as app_runtime
 from lazyviewer.search.content import ContentMatch
@@ -79,59 +79,67 @@ def _render_full_frame_rows(state) -> tuple[tuple[str, ...], tuple[str, ...]]:
     width = max(1, int(state.left_width) + 1 + int(state.right_width))
     if not state.browser_visible:
         width = max(1, int(state.right_width))
-    rows = build_dual_page_rows(
-        text_lines=state.lines,
-        text_start=state.start,
-        tree_entries=state.tree_entries,
-        tree_start=state.tree_start,
-        tree_selected=state.selected_idx,
-        max_lines=max(1, int(state.usable)),
-        current_path=state.current_path,
-        tree_root=state.tree_root,
-        expanded=state.tree_render_expanded,
-        width=width,
-        left_width=state.left_width,
-        text_x=state.text_x,
-        wrap_text=state.wrap_text,
-        browser_visible=state.browser_visible,
-        show_hidden=state.show_hidden,
-        show_help=state.show_help,
-        show_tree_sizes=state.show_tree_sizes,
-        status_message=state.status_message,
-        tree_filter_active=state.tree_filter_active,
-        tree_filter_row_visible=state.tree_filter_prompt_row_visible,
-        tree_filter_mode=state.tree_filter_mode,
-        tree_filter_query=state.tree_filter_query,
-        tree_filter_editing=state.tree_filter_editing,
-        tree_filter_cursor_visible=False,
-        tree_filter_match_count=state.tree_filter_match_count,
-        tree_filter_truncated=state.tree_filter_truncated,
-        tree_filter_loading=state.tree_filter_loading,
-        tree_filter_spinner_frame=0,
-        tree_filter_prefix="p>",
-        tree_filter_placeholder="type to filter files",
-        picker_active=state.picker_active,
-        picker_mode=state.picker_mode,
-        picker_query=state.picker_query,
-        picker_items=state.picker_match_labels,
-        picker_selected=state.picker_selected,
-        picker_focus=state.picker_focus,
-        picker_list_start=state.picker_list_start,
-        picker_message=state.picker_message,
-        git_status_overlay=state.git_status_overlay,
-        tree_search_query="",
-        text_search_query="",
-        text_search_current_line=0,
-        text_search_current_column=0,
-        preview_is_git_diff=state.preview_is_git_diff,
-        source_selection_anchor=state.source_selection_anchor,
-        source_selection_focus=state.source_selection_focus,
-        tree_roots=state.tree_roots,
-        workspace_expanded=state.workspace_expanded,
-        theme=state.theme,
-    )
-    ansi_rows = tuple(rows)
-    plain_rows = tuple(ANSI_ESCAPE_RE.sub("", row) for row in rows)
+    writes: list[bytes] = []
+    with mock.patch(
+        "lazyviewer.render.os.write",
+        side_effect=lambda _fd, data: writes.append(data) or len(data),
+    ):
+        render_dual_page(
+            text_lines=state.lines,
+            text_start=state.start,
+            tree_entries=state.tree_entries,
+            tree_start=state.tree_start,
+            tree_selected=state.selected_idx,
+            max_lines=max(1, int(state.usable)),
+            current_path=state.current_path,
+            tree_root=state.tree_root,
+            tree_roots=state.tree_roots,
+            expanded=state.tree_render_expanded,
+            width=width,
+            left_width=state.left_width,
+            text_x=state.text_x,
+            wrap_text=state.wrap_text,
+            browser_visible=state.browser_visible,
+            show_hidden=state.show_hidden,
+            show_help=state.show_help,
+            show_tree_sizes=state.show_tree_sizes,
+            status_message=state.status_message,
+            tree_filter_active=state.tree_filter_active,
+            tree_filter_row_visible=state.tree_filter_prompt_row_visible,
+            tree_filter_mode=state.tree_filter_mode,
+            tree_filter_query=state.tree_filter_query,
+            tree_filter_editing=state.tree_filter_editing,
+            tree_filter_cursor_visible=False,
+            tree_filter_match_count=state.tree_filter_match_count,
+            tree_filter_truncated=state.tree_filter_truncated,
+            tree_filter_loading=state.tree_filter_loading,
+            tree_filter_spinner_frame=0,
+            tree_filter_prefix="p>",
+            tree_filter_placeholder="type to filter files",
+            picker_active=state.picker_active,
+            picker_mode=state.picker_mode,
+            picker_query=state.picker_query,
+            picker_items=state.picker_match_labels,
+            picker_selected=state.picker_selected,
+            picker_focus=state.picker_focus,
+            picker_list_start=state.picker_list_start,
+            picker_message=state.picker_message,
+            git_status_overlay=state.git_status_overlay,
+            tree_search_query="",
+            text_search_query="",
+            text_search_current_line=0,
+            text_search_current_column=0,
+            preview_is_git_diff=state.preview_is_git_diff,
+            source_selection_anchor=state.source_selection_anchor,
+            source_selection_focus=state.source_selection_focus,
+            workspace_expanded=state.workspace_expanded,
+            theme=state.theme,
+        )
+    frame = b"".join(writes).decode("utf-8", errors="replace")
+    if frame.startswith("\033[H\033[J"):
+        frame = frame[len("\033[H\033[J") :]
+    ansi_rows = tuple(frame.split("\r\n")) if frame else tuple()
+    plain_rows = tuple(ANSI_ESCAPE_RE.sub("", row) for row in ansi_rows)
     return ansi_rows, plain_rows
 
 
