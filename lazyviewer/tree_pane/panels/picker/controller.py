@@ -10,6 +10,7 @@ from pathlib import Path
 from ....runtime.config import save_show_hidden
 from ....runtime.state import AppState
 from ....search.fuzzy import fuzzy_match_labels
+from ...workspace_roots import normalized_workspace_expanded_sections
 from . import navigation as picker_navigation
 from .line_map import first_display_index_for_source_line, source_line_for_display_index
 from .panel import PickerPanel
@@ -178,42 +179,22 @@ class NavigationController:
         return self.apply_jump_location(target)
 
     def _normalize_tree_roots(self, *, include_active: bool = True) -> list[Path]:
-        """Normalize roots and synchronize per-root expansion state."""
-        normalized: list[Path] = []
-        seen: set[Path] = set()
-        for raw_root in self.state.tree_roots:
-            resolved = raw_root.resolve()
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-            normalized.append(resolved)
-
+        """Normalize roots and synchronize per-section expansion state."""
+        roots = [raw_root.resolve() for raw_root in self.state.tree_roots]
         active_root = self.state.tree_root.resolve()
-        if include_active and active_root not in seen:
-            normalized.append(active_root)
-
-        self.state.tree_roots = normalized
-        workspace_expanded: dict[Path, set[Path]] = {}
-        flat_union: set[Path] = set()
-        for root in normalized:
-            existing = self.state.workspace_expanded.get(root)
-            if existing is not None:
-                scoped = {
-                    candidate.resolve()
-                    for candidate in existing
-                    if candidate.resolve().is_relative_to(root)
-                }
-            else:
-                scoped = {
-                    candidate.resolve()
-                    for candidate in self.state.expanded
-                    if candidate.resolve().is_relative_to(root)
-                }
-            workspace_expanded[root] = scoped
-            flat_union.update(scoped)
-        self.state.workspace_expanded = workspace_expanded
+        if include_active and not any(root == active_root for root in roots):
+            roots.append(active_root)
+        normalized_roots, sections, flat_union = normalized_workspace_expanded_sections(
+            roots,
+            active_root,
+            self.state.workspace_expanded,
+            self.state.expanded,
+            include_active=include_active,
+        )
+        self.state.tree_roots = normalized_roots
+        self.state.workspace_expanded = sections
         self.state.expanded = flat_union
-        return normalized
+        return normalized_roots
 
     def _switch_active_tree_root(
         self,
@@ -236,7 +217,7 @@ class NavigationController:
             self.state.expanded = {target_root, old_root}
         else:
             self.state.expanded = {target_root}
-        self.state.workspace_expanded = {}
+        self.state.workspace_expanded = []
         self._normalize_tree_roots(include_active=include_previous_root)
 
         focused_path = target_root if preferred_path is None else preferred_path.resolve()
@@ -266,12 +247,32 @@ class NavigationController:
         target_root = selected_target if selected_target.is_dir() else selected_target.parent.resolve()
         return selected_target, target_root
 
+    def _selected_workspace_section(self) -> int | None:
+        """Return selected entry workspace section index when available."""
+        roots = self._normalize_tree_roots()
+        if not roots:
+            return None
+        if self.state.tree_entries and 0 <= self.state.selected_idx < len(self.state.tree_entries):
+            entry = self.state.tree_entries[self.state.selected_idx]
+            if entry.workspace_section is not None and 0 <= entry.workspace_section < len(roots):
+                return entry.workspace_section
+            if entry.workspace_root is not None:
+                resolved_root = entry.workspace_root.resolve()
+                return next((idx for idx, root in enumerate(roots) if root == resolved_root), None)
+        return None
+
     def reveal_path_in_tree(self, target: Path) -> None:
         """Expand ancestor directories and rebuild tree focused on ``target``."""
         target = target.resolve()
         roots = self._normalize_tree_roots()
-        scope_root = next((root for root in roots if target.is_relative_to(root)), self.state.tree_root.resolve())
-        scoped = set(self.state.workspace_expanded.get(scope_root, {scope_root}))
+        if not roots:
+            return
+        scope_section = next((idx for idx, root in enumerate(roots) if target.is_relative_to(root)), 0)
+        scope_root = roots[scope_section]
+        sections = list(self.state.workspace_expanded)
+        while len(sections) < len(roots):
+            sections.append(set())
+        scoped = set(sections[scope_section])
         scoped.add(scope_root)
         if target != scope_root:
             parent = target.parent
@@ -283,9 +284,15 @@ class NavigationController:
                 if resolved.parent == resolved:
                     break
                 parent = resolved.parent
-        self.state.workspace_expanded[scope_root] = scoped
-        self.state.expanded = set().union(*self.state.workspace_expanded.values())
-        self.rebuild_tree_entries(preferred_path=target, center_selection=True)
+        sections[scope_section] = scoped
+        self.state.workspace_expanded = sections
+        self.state.expanded = set().union(*sections)
+        self.rebuild_tree_entries(
+            preferred_path=target,
+            preferred_workspace_root=scope_root,
+            preferred_workspace_section=scope_section,
+            center_selection=True,
+        )
         self.mark_tree_watch_dirty()
 
     def jump_to_path(self, target: Path) -> None:
@@ -322,44 +329,126 @@ class NavigationController:
         return shutil.get_terminal_size((80, 24)).columns
 
     def reroot_to_parent(self) -> None:
-        """Move tree root to parent directory, preserving previous root expanded."""
-        old_root = self.state.tree_root.resolve()
-        parent_root = old_root.parent.resolve()
-        if parent_root == old_root:
+        """Replace selected workspace root with its parent directory."""
+        roots = self._normalize_tree_roots()
+        if not roots:
             return
-        self._switch_active_tree_root(
-            parent_root,
-            preferred_path=old_root,
-            preserve_old_root_expanded=True,
+        selected_section = self._selected_workspace_section()
+        if selected_section is None:
+            active_root = self.state.tree_root.resolve()
+            selected_section = next((idx for idx, root in enumerate(roots) if root == active_root), 0)
+        selected_section = max(0, min(selected_section, len(roots) - 1))
+        selected_scope = roots[selected_section]
+        parent_root = selected_scope.parent.resolve()
+        if parent_root == selected_scope:
+            return
+
+        normalized_roots = list(roots)
+        normalized_roots[selected_section] = parent_root
+        self.state.tree_roots = normalized_roots
+
+        old_sections = list(self.state.workspace_expanded)
+        while len(old_sections) < len(roots):
+            old_sections.append(set())
+        new_sections: list[set[Path]] = []
+        for idx, root in enumerate(normalized_roots):
+            scoped = {
+                path.resolve()
+                for path in old_sections[idx]
+                if path.resolve().is_relative_to(root)
+            }
+            if idx == selected_section:
+                # Keep the rerooted section expanded at its new root so the
+                # previous scope remains visible and selectable in-place.
+                scoped.add(parent_root)
+                scoped.add(selected_scope)
+            new_sections.append(scoped)
+        self.state.workspace_expanded = new_sections
+        self.state.expanded = set().union(*new_sections)
+
+        if self.state.tree_root.resolve() == selected_scope:
+            self.state.tree_root = parent_root
+
+        self.rebuild_tree_entries(
+            preferred_path=selected_scope,
+            preferred_workspace_root=parent_root,
+            preferred_workspace_section=selected_section,
+            center_selection=True,
         )
+        self.preview_selected_entry(force=True)
+        self.schedule_tree_filter_index_warmup()
+        self.mark_tree_watch_dirty()
+        self.reset_git_watch_context()
+        self.refresh_git_status_overlay(force=True)
+        self.state.dirty = True
 
     def reroot_to_selected_target(self) -> None:
-        """Reroot tree at selected entry (or current path fallback) directory."""
+        """Replace selected workspace section root with selected target directory."""
         selected_target, target_root = self._selected_target_and_root()
-        old_root = self.state.tree_root.resolve()
-        if target_root == old_root:
+        roots = self._normalize_tree_roots()
+        if not roots:
             return
-        self._switch_active_tree_root(
-            target_root,
+        selected_section = self._selected_workspace_section()
+        if selected_section is None:
+            active_root = self.state.tree_root.resolve()
+            selected_section = next((idx for idx, root in enumerate(roots) if root == active_root), 0)
+        selected_section = max(0, min(selected_section, len(roots) - 1))
+        selected_scope = roots[selected_section]
+        if target_root == selected_scope:
+            return
+
+        normalized_roots = list(roots)
+        normalized_roots[selected_section] = target_root
+        self.state.tree_roots = normalized_roots
+
+        old_sections = list(self.state.workspace_expanded)
+        while len(old_sections) < len(roots):
+            old_sections.append(set())
+        new_sections: list[set[Path]] = []
+        for idx, root in enumerate(normalized_roots):
+            scoped = {
+                path.resolve()
+                for path in old_sections[idx]
+                if path.resolve().is_relative_to(root)
+            }
+            if idx == selected_section:
+                scoped.add(target_root)
+            new_sections.append(scoped)
+        self.state.workspace_expanded = new_sections
+        self.state.expanded = set().union(*new_sections)
+
+        if self.state.tree_root.resolve() == selected_scope:
+            self.state.tree_root = target_root
+
+        self.rebuild_tree_entries(
             preferred_path=selected_target,
+            preferred_workspace_root=target_root,
+            preferred_workspace_section=selected_section,
+            center_selection=True,
         )
+        self.preview_selected_entry(force=True)
+        self.schedule_tree_filter_index_warmup()
+        self.mark_tree_watch_dirty()
+        self.reset_git_watch_context()
+        self.refresh_git_status_overlay(force=True)
+        self.state.dirty = True
 
     def add_workspace_root_from_selected_target(self) -> None:
         """Add selected directory as a workspace root without changing root priority."""
         selected_target, target_root = self._selected_target_and_root()
         roots = self._normalize_tree_roots()
-        if target_root not in roots:
-            roots.append(target_root)
+        roots.append(target_root)
         self.state.tree_roots = roots
-        self.state.expanded.add(target_root)
+        sections = list(self.state.workspace_expanded)
+        sections.append({target_root})
+        self.state.workspace_expanded = sections
+        self.state.expanded = set().union(*sections)
         self._normalize_tree_roots()
-        scoped = set(self.state.workspace_expanded.get(target_root, set()))
-        scoped.add(target_root)
-        self.state.workspace_expanded[target_root] = scoped
-        self.state.expanded = set().union(*self.state.workspace_expanded.values())
+        new_section = len(self.state.tree_roots) - 1
         self.rebuild_tree_entries(
             preferred_path=target_root,
             preferred_workspace_root=target_root,
+            preferred_workspace_section=new_section,
             center_selection=True,
         )
         self.preview_selected_entry(force=True)
@@ -378,37 +467,45 @@ class NavigationController:
             self.state.dirty = True
             return
 
-        selected_root: Path | None = None
+        selected_section: int | None = None
         if self.state.tree_entries and 0 <= self.state.selected_idx < len(self.state.tree_entries):
             selected_entry = self.state.tree_entries[self.state.selected_idx]
-            if selected_entry.is_dir and selected_entry.depth == 0:
+            if selected_entry.workspace_section is not None:
+                if 0 <= selected_entry.workspace_section < len(roots):
+                    selected_section = selected_entry.workspace_section
+            elif selected_entry.is_dir and selected_entry.depth == 0:
                 candidate = selected_entry.path.resolve()
-                if candidate in roots:
-                    selected_root = candidate
+                selected_section = next((idx for idx, root in enumerate(roots) if root == candidate), None)
 
-        if selected_root is None:
+        if selected_section is None:
             current_path = self.state.current_path.resolve()
-            selected_root = next(
+            selected_section = next(
                 (
-                    root
-                    for root in sorted(roots, key=lambda item: len(item.parts), reverse=True)
+                    idx
+                    for idx, root in sorted(enumerate(roots), key=lambda item: len(item[1].parts), reverse=True)
                     if current_path.is_relative_to(root)
                 ),
                 None,
             )
 
-        if selected_root is None:
-            selected_root = self.state.tree_root.resolve() if self.state.tree_root.resolve() in roots else roots[-1]
+        if selected_section is None:
+            active_root = self.state.tree_root.resolve()
+            selected_section = next((idx for idx, root in enumerate(roots) if root == active_root), len(roots) - 1)
 
-        roots = [root for root in roots if root != selected_root]
-        if not roots:
-            return
+        selected_section = max(0, min(selected_section, len(roots) - 1))
+        roots = list(roots)
+        sections = list(self.state.workspace_expanded)
+        while len(sections) < len(roots):
+            sections.append(set())
+        roots.pop(selected_section)
+        sections.pop(selected_section)
         self.state.tree_roots = roots
-        self.state.expanded.discard(selected_root)
-        self.state.workspace_expanded.pop(selected_root, None)
-        self._normalize_tree_roots()
+        self.state.workspace_expanded = sections
+        self.state.expanded = set().union(*sections)
+        # Do not implicitly re-add the previously active root after deletion.
+        roots = self._normalize_tree_roots(include_active=False)
 
-        if self.state.tree_root.resolve() == selected_root:
+        if not any(root == self.state.tree_root.resolve() for root in roots):
             self.state.tree_root = roots[0]
 
         preferred_path = self.state.current_path.resolve()

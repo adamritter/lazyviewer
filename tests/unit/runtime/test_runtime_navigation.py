@@ -248,6 +248,50 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
         self.assertEqual(state.tree_roots, [root])
         self.assertIn("cannot delete", state.status_message)
 
+    def test_reroot_to_parent_replaces_selected_workspace_root_in_place(self) -> None:
+        visible_rows = 8
+        width = 80
+        state = _make_state(wrap_text=False, rendered="first\n", visible_rows=visible_rows, width=width)
+        root = state.tree_root.resolve()
+        nested = root / "nested"
+        state.tree_roots = [root, nested]
+        state.tree_root = root
+        state.workspace_expanded = [{nested}, {nested}]
+        state.expanded = {nested}
+        state.tree_entries = [
+            TreeEntry(path=root, depth=0, is_dir=True, workspace_root=root),
+            TreeEntry(path=nested, depth=1, is_dir=True, workspace_root=root),
+            TreeEntry(path=nested, depth=0, is_dir=True, workspace_root=nested),
+        ]
+        state.selected_idx = 2
+        rebuild_calls: list[tuple[Path, Path | None]] = []
+
+        ops = NavigationController(
+            state=state,
+            command_palette_items=(),
+            rebuild_screen_lines=lambda **_kwargs: None,
+            rebuild_tree_entries=lambda **kwargs: rebuild_calls.append(
+                (
+                    kwargs["preferred_path"].resolve(),
+                    kwargs.get("preferred_workspace_root").resolve() if kwargs.get("preferred_workspace_root") else None,
+                )
+            ),
+            preview_selected_entry=lambda **_kwargs: None,
+            schedule_tree_filter_index_warmup=lambda: None,
+            mark_tree_watch_dirty=lambda: None,
+            reset_git_watch_context=lambda: None,
+            refresh_git_status_overlay=lambda **_kwargs: None,
+            visible_content_rows=lambda: visible_rows,
+            refresh_rendered_for_current_path=lambda **_kwargs: None,
+            open_tree_filter=lambda _mode: None,
+        )
+
+        ops.reroot_to_parent()
+
+        self.assertEqual(state.tree_roots, [root, root])
+        self.assertEqual(state.tree_root, root)
+        self.assertEqual(rebuild_calls[-1], (nested, root))
+
 
 if __name__ == "__main__":
     unittest.main()

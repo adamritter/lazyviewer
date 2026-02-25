@@ -49,6 +49,8 @@ class AppStateBootstrap:
             expanded,
             show_hidden,
             skip_gitignored=self.skip_gitignored_for_hidden_mode(show_hidden),
+            workspace_root=tree_root,
+            workspace_section=0,
         )
         selected_path = current_path if current_path.exists() else tree_root
         selected_idx = next(
@@ -96,7 +98,7 @@ class AppStateBootstrap:
             current_path=current_path,
             tree_root=tree_root,
             tree_roots=[tree_root],
-            workspace_expanded={tree_root: {tree_root}},
+            workspace_expanded=[{tree_root}],
             theme_name=self.theme_name,
             theme=resolve_theme(self.theme_name, no_color=no_color),
             expanded=expanded,

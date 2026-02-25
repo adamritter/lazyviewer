@@ -83,7 +83,7 @@ class TreePaneRenderer:
         tree_selected: int,
         tree_root: Path,
         tree_roots: list[Path] | None,
-        workspace_expanded: dict[Path, set[Path]] | None,
+        workspace_expanded: list[set[Path]] | None,
         expanded: set[Path],
         show_tree_sizes: bool,
         git_status_overlay: dict[Path, int] | None,
@@ -123,13 +123,10 @@ class TreePaneRenderer:
             tree_roots or [self.tree_root],
             self.tree_root,
         )
-        self.workspace_expanded = {
-            root.resolve(): {
-                path.resolve()
-                for path in paths
-            }
-            for root, paths in (workspace_expanded or {}).items()
-        }
+        self.workspace_expanded = [
+            {path.resolve() for path in paths}
+            for paths in (workspace_expanded or [])
+        ]
         self.expanded = expanded
         self.show_tree_sizes = show_tree_sizes
         self.git_status_overlay = git_status_overlay
@@ -259,21 +256,25 @@ class TreePaneRenderer:
         if tree_idx >= len(self.tree_entries):
             return ""
 
+        entry = self.tree_entries[tree_idx]
+        entry_root = (
+            entry.workspace_root.resolve()
+            if entry.workspace_root is not None
+            else self.tree_root
+        )
+        entry_section = entry.workspace_section
+        if (
+            entry_section is not None
+            and 0 <= entry_section < len(self.workspace_expanded)
+        ):
+            expanded_for_entry = self.workspace_expanded[entry_section]
+        else:
+            expanded_for_entry = self.expanded
+
         tree_text = format_tree_entry(
-            self.tree_entries[tree_idx],
-            (
-                self.tree_entries[tree_idx].workspace_root.resolve()
-                if self.tree_entries[tree_idx].workspace_root is not None
-                else self.tree_root
-            ),
-            (
-                self.workspace_expanded.get(
-                    self.tree_entries[tree_idx].workspace_root.resolve()
-                    if self.tree_entries[tree_idx].workspace_root is not None
-                    else self.tree_root,
-                    self.expanded,
-                )
-            ),
+            entry,
+            entry_root,
+            expanded_for_entry,
             git_status_overlay=self.git_status_overlay,
             search_query=self.tree_search_query,
             show_size_labels=self.show_tree_sizes,

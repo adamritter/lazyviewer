@@ -44,7 +44,7 @@ class RenderContext:
     browser_visible: bool
     show_hidden: bool
     tree_roots: list[Path] | None = None
-    workspace_expanded: dict[Path, set[Path]] | None = None
+    workspace_expanded: list[set[Path]] | None = None
     show_help: bool = False
     show_tree_sizes: bool = True
     status_message: str = ""
@@ -215,7 +215,7 @@ def render_dual_page(
     source_selection_anchor: tuple[int, int] | None = None,
     source_selection_focus: tuple[int, int] | None = None,
     tree_roots: list[Path] | None = None,
-    workspace_expanded: dict[Path, set[Path]] | None = None,
+    workspace_expanded: list[set[Path]] | None = None,
     theme: UITheme | None = None,
 ) -> None:
     """Render one full terminal frame for split or text-only mode."""

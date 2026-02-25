@@ -22,3 +22,4 @@ class TreeEntry:
     line: int | None = None
     column: int | None = None
     workspace_root: Path | None = None
+    workspace_section: int | None = None

@@ -14,7 +14,7 @@ from ..tree_model import (
     next_index_after_directory_subtree,
     next_opened_directory_entry_index,
 )
-from ..tree_pane.workspace_roots import normalized_workspace_roots
+from ..tree_pane.workspace_roots import normalized_workspace_expanded_sections
 from .key_common import default_max_horizontal_text_offset, effective_max_start
 from .key_registry import KeyComboBinding, KeyComboRegistry
 
@@ -178,55 +178,61 @@ def _handle_normal_key(
     max_horizontal_text_offset = source_pane.geometry.max_horizontal_text_offset
     key_lower = key.lower()
 
-    def normalized_workspace_expanded_map() -> dict[Path, set[Path]]:
-        """Return normalized per-root expansion map and sync flat expansion union."""
-        roots = normalized_workspace_roots(state.tree_roots, state.tree_root)
-        by_root: dict[Path, set[Path]] = {}
-        for root in roots:
-            existing = state.workspace_expanded.get(root)
-            if existing is not None:
-                normalized = {
-                    candidate.resolve()
-                    for candidate in existing
-                    if candidate.resolve().is_relative_to(root)
-                }
-            else:
-                normalized = {
-                    candidate.resolve()
-                    for candidate in state.expanded
-                    if candidate.resolve().is_relative_to(root)
-                }
-            by_root[root] = normalized
-        state.workspace_expanded = by_root
-        union: set[Path] = set()
-        for expanded_paths in by_root.values():
-            union.update(expanded_paths)
+    def normalized_workspace_expanded_state() -> tuple[list[Path], list[set[Path]]]:
+        """Return normalized roots + per-section expanded state."""
+        roots, sections, union = normalized_workspace_expanded_sections(
+            state.tree_roots,
+            state.tree_root,
+            state.workspace_expanded,
+            state.expanded,
+        )
+        state.tree_roots = roots
+        state.workspace_expanded = sections
         state.expanded = union
-        return by_root
+        return roots, sections
 
-    def entry_workspace_root(entry) -> Path:
-        """Resolve workspace root section for a rendered tree entry."""
+    def entry_workspace_scope(entry) -> tuple[int, Path]:
+        """Resolve workspace section index/root for a rendered tree entry."""
+        roots, _sections = normalized_workspace_expanded_state()
+        if not roots:
+            root = state.tree_root.resolve()
+            return 0, root
+        if entry.workspace_section is not None and 0 <= entry.workspace_section < len(roots):
+            idx = entry.workspace_section
+            return idx, roots[idx]
         if entry.workspace_root is not None:
-            return entry.workspace_root.resolve()
-        return state.tree_root.resolve()
+            resolved_root = entry.workspace_root.resolve()
+            idx = next((i for i, root in enumerate(roots) if root == resolved_root), 0)
+            return idx, roots[idx]
+        return 0, roots[0]
 
     def set_directory_expanded_state(
         resolved: Path,
         expanded: bool,
         *,
+        workspace_section: int | None = None,
         workspace_root: Path | None = None,
     ) -> None:
         """Toggle expansion for ``resolved`` in tree and content-filter overlays."""
-        by_root = normalized_workspace_expanded_map()
-        root_scope = (workspace_root or state.tree_root).resolve()
-        scoped_expanded = set(by_root.get(root_scope, set()))
+        roots, sections = normalized_workspace_expanded_state()
+        if not roots:
+            return
+        section_idx = (
+            workspace_section
+            if workspace_section is not None and 0 <= workspace_section < len(roots)
+            else None
+        )
+        if section_idx is None:
+            resolved_scope = (workspace_root or state.tree_root).resolve()
+            section_idx = next((i for i, root in enumerate(roots) if root == resolved_scope), 0)
+        scoped_expanded = set(sections[section_idx])
         if expanded:
             scoped_expanded.add(resolved)
         else:
             scoped_expanded.discard(resolved)
-        by_root[root_scope] = scoped_expanded
-        state.workspace_expanded = by_root
-        state.expanded = set().union(*by_root.values())
+        sections[section_idx] = scoped_expanded
+        state.workspace_expanded = sections
+        state.expanded = set().union(*sections)
 
         if state.tree_filter_active and state.tree_filter_mode == "content":
             if expanded:
@@ -506,10 +512,16 @@ def _handle_normal_key(
         entry = state.tree_entries[state.selected_idx]
         if entry.is_dir:
             resolved = entry.path.resolve()
-            scope = entry_workspace_root(entry)
-            expanded_for_scope = normalized_workspace_expanded_map().get(scope, set())
+            scope_section, scope_root = entry_workspace_scope(entry)
+            _roots, sections = normalized_workspace_expanded_state()
+            expanded_for_scope = sections[scope_section] if scope_section < len(sections) else set()
             if resolved not in expanded_for_scope:
-                set_directory_expanded_state(resolved, True, workspace_root=scope)
+                set_directory_expanded_state(
+                    resolved,
+                    True,
+                    workspace_section=scope_section,
+                    workspace_root=scope_root,
+                )
                 refresh_tree_after_directory_change(resolved)
             else:
                 next_idx = state.selected_idx + 1
@@ -528,14 +540,20 @@ def _handle_normal_key(
     def close_or_parent_tree_entry_action() -> bool:
         """Collapse selected directory or move selection to parent directory."""
         entry = state.tree_entries[state.selected_idx]
-        scope = entry_workspace_root(entry)
-        expanded_for_scope = normalized_workspace_expanded_map().get(scope, set())
+        scope_section, scope_root = entry_workspace_scope(entry)
+        _roots, sections = normalized_workspace_expanded_state()
+        expanded_for_scope = sections[scope_section] if scope_section < len(sections) else set()
         if (
             entry.is_dir
             and entry.path.resolve() in expanded_for_scope
         ):
             resolved = entry.path.resolve()
-            set_directory_expanded_state(resolved, False, workspace_root=scope)
+            set_directory_expanded_state(
+                resolved,
+                False,
+                workspace_section=scope_section,
+                workspace_root=scope_root,
+            )
             refresh_tree_after_directory_change(resolved)
         else:
             parent = entry.path.parent.resolve()
@@ -553,12 +571,23 @@ def _handle_normal_key(
         if not entry.is_dir:
             return None
         resolved = entry.path.resolve()
-        scope = entry_workspace_root(entry)
-        expanded_for_scope = normalized_workspace_expanded_map().get(scope, set())
+        scope_section, scope_root = entry_workspace_scope(entry)
+        _roots, sections = normalized_workspace_expanded_state()
+        expanded_for_scope = sections[scope_section] if scope_section < len(sections) else set()
         if resolved in expanded_for_scope:
-            set_directory_expanded_state(resolved, False, workspace_root=scope)
+            set_directory_expanded_state(
+                resolved,
+                False,
+                workspace_section=scope_section,
+                workspace_root=scope_root,
+            )
         else:
-            set_directory_expanded_state(resolved, True, workspace_root=scope)
+            set_directory_expanded_state(
+                resolved,
+                True,
+                workspace_section=scope_section,
+                workspace_root=scope_root,
+            )
         refresh_tree_after_directory_change(resolved)
         return False
 

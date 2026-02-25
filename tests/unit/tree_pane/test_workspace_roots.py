@@ -12,13 +12,13 @@ from lazyviewer.tree_pane.workspace_roots import (
 
 
 class WorkspaceRootHelpersTests(unittest.TestCase):
-    def test_normalized_workspace_roots_dedupes_and_keeps_active(self) -> None:
+    def test_normalized_workspace_roots_preserves_duplicates_and_keeps_active(self) -> None:
         root = Path("/tmp/project").resolve()
         nested = (root / "nested").resolve()
 
         roots = normalized_workspace_roots([root, root, nested], nested)
 
-        self.assertEqual(roots, [root, nested])
+        self.assertEqual(roots, [root, root, nested])
 
     def test_workspace_root_display_labels_show_common_parent_context(self) -> None:
         root = Path("/tmp/project").resolve()

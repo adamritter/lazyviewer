@@ -6,20 +6,39 @@ from pathlib import Path
 
 
 def normalized_workspace_roots(tree_roots: list[Path], active_root: Path) -> list[Path]:
-    """Return deduped workspace roots, ensuring active root is included."""
-    normalized: list[Path] = []
-    seen: set[Path] = set()
-    for raw_root in tree_roots:
-        resolved = raw_root.resolve()
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        normalized.append(resolved)
-
+    """Return resolved roots preserving order/duplicates; append active if missing."""
+    normalized = [raw_root.resolve() for raw_root in tree_roots]
     resolved_active = active_root.resolve()
-    if resolved_active not in seen:
+    if not any(root == resolved_active for root in normalized):
         normalized.append(resolved_active)
     return normalized
+
+
+def normalized_workspace_expanded_sections(
+    tree_roots: list[Path],
+    active_root: Path,
+    workspace_expanded: list[set[Path]],
+    expanded_fallback: set[Path],
+    *,
+    include_active: bool = True,
+) -> tuple[list[Path], list[set[Path]], set[Path]]:
+    """Normalize per-section expanded state aligned to workspace-root positions."""
+    if include_active:
+        roots = normalized_workspace_roots(tree_roots, active_root)
+    else:
+        roots = [raw_root.resolve() for raw_root in tree_roots]
+    sections: list[set[Path]] = []
+    union: set[Path] = set()
+    for idx, root in enumerate(roots):
+        source = workspace_expanded[idx] if idx < len(workspace_expanded) else expanded_fallback
+        normalized = {
+            candidate.resolve()
+            for candidate in source
+            if candidate.resolve().is_relative_to(root)
+        }
+        sections.append(normalized)
+        union.update(normalized)
+    return roots, sections, union
 
 
 def workspace_root_display_labels(tree_roots: list[Path], active_root: Path) -> list[str]:

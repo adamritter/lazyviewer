@@ -390,3 +390,79 @@ class AppRuntimeSessionTestsPart1(unittest.TestCase):
             self.assertEqual(snapshots["after_delete_last_root"], root.resolve())
             self.assertEqual(snapshots["after_delete_last_roots"], [root.resolve()])
             self.assertIn("cannot delete", str(snapshots["status_after_delete_last"]))
+
+    def test_workspace_root_reroot_parent_replaces_selected_root_instead_of_adding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            nested = root / "nested"
+            nested.mkdir()
+            (nested / "demo.py").write_text("print('nested')\n", encoding="utf-8")
+            snapshots: dict[str, object] = {}
+
+            class _FakeTerminalController:
+                def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
+                    self.stdin_fd = stdin_fd
+                    self.stdout_fd = stdout_fd
+
+                def supports_kitty_graphics(self) -> bool:
+                    return False
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                handle_normal_key = _callback(kwargs, "handle_normal_key")
+                root_resolved = root.resolve()
+                nested_resolved = nested.resolve()
+
+                nested_idx = next(
+                    idx
+                    for idx, entry in enumerate(state.tree_entries)
+                    if entry.path.resolve() == nested_resolved
+                )
+                state.selected_idx = nested_idx
+                handle_normal_key("a", 120)
+                snapshots["after_add_roots"] = list(state.tree_roots)
+
+                nested_root_idx = next(
+                    idx
+                    for idx, entry in enumerate(state.tree_entries)
+                    if entry.is_dir
+                    and entry.depth == 0
+                    and entry.path.resolve() == nested_resolved
+                    and entry.workspace_root is not None
+                    and entry.workspace_root.resolve() == nested_resolved
+                )
+                state.selected_idx = nested_root_idx
+                handle_normal_key("R", 120)
+
+                snapshots["after_reroot_parent_roots"] = list(state.tree_roots)
+                snapshots["after_reroot_parent_depth0_dirs"] = [
+                    entry.path.resolve()
+                    for entry in state.tree_entries
+                    if entry.is_dir and entry.depth == 0
+                ]
+                selected = state.tree_entries[state.selected_idx]
+                snapshots["after_reroot_parent_selected"] = selected.path.resolve()
+                snapshots["after_reroot_parent_selected_scope"] = (
+                    selected.workspace_root.resolve()
+                    if selected.workspace_root is not None
+                    else None
+                )
+
+                self.assertEqual(state.tree_root.resolve(), root_resolved)
+
+            with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
+                "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
+            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+                "lazyviewer.runtime.app.os.isatty", return_value=True
+            ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
+                "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
+            ), mock.patch("lazyviewer.runtime.app.load_show_hidden", return_value=False), mock.patch(
+                "lazyviewer.runtime.app.load_left_pane_percent", return_value=None
+            ):
+                app_runtime.run_pager("", root, "monokai", True, False)
+
+            self.assertEqual(snapshots["after_add_roots"], [root.resolve(), nested.resolve()])
+            self.assertEqual(snapshots["after_reroot_parent_roots"], [root.resolve(), root.resolve()])
+            self.assertEqual(snapshots["after_reroot_parent_depth0_dirs"], [root.resolve(), root.resolve()])
+            self.assertEqual(snapshots["after_reroot_parent_selected"], nested.resolve())
+            self.assertEqual(snapshots["after_reroot_parent_selected_scope"], root.resolve())
