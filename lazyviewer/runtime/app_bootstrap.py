@@ -13,6 +13,28 @@ from .state import AppState
 from ..ui_theme import resolve_theme
 
 
+def _normalize_workspace_roots(path: Path, workspace_paths: list[Path] | None) -> list[Path]:
+    """Resolve startup workspace roots from user-provided paths."""
+    candidates = list(workspace_paths) if workspace_paths else [path]
+    roots: list[Path] = []
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            continue
+        if not resolved.exists():
+            continue
+        root = resolved if resolved.is_dir() else resolved.parent
+        roots.append(root.resolve())
+
+    if roots:
+        return roots
+
+    resolved_path = path.resolve()
+    fallback_root = resolved_path if resolved_path.is_dir() else resolved_path.parent
+    return [fallback_root.resolve()]
+
+
 @dataclass(frozen=True)
 class AppStateBootstrap:
     """State bootstrap object that builds initial application state."""
@@ -35,31 +57,50 @@ class AppStateBootstrap:
         path: Path,
         style: str,
         no_color: bool,
+        workspace_paths: list[Path] | None = None,
     ) -> AppState:
         """Create initial ``AppState`` from path and persisted preferences."""
         initial_path = path.resolve()
         current_path = initial_path
-        tree_root = initial_path if initial_path.is_dir() else initial_path.parent
-        expanded: set[Path] = {tree_root.resolve()}
+        tree_roots = _normalize_workspace_roots(initial_path, workspace_paths)
+        tree_root = tree_roots[0]
+        workspace_expanded = [{root} for root in tree_roots]
+        expanded: set[Path] = {candidate for section in workspace_expanded for candidate in section}
         show_hidden = self.load_show_hidden()
         named_marks = self.load_named_marks()
 
-        tree_entries = self.build_tree_entries(
-            tree_root,
-            expanded,
-            show_hidden,
-            skip_gitignored=self.skip_gitignored_for_hidden_mode(show_hidden),
-            workspace_root=tree_root,
-            workspace_section=0,
-        )
+        tree_entries = []
+        for section_idx, section_root in enumerate(tree_roots):
+            tree_entries.extend(
+                self.build_tree_entries(
+                    section_root,
+                    workspace_expanded[section_idx],
+                    show_hidden,
+                    skip_gitignored=self.skip_gitignored_for_hidden_mode(show_hidden),
+                    workspace_root=section_root,
+                    workspace_section=section_idx,
+                )
+            )
         selected_path = current_path if current_path.exists() else tree_root
-        selected_idx = next(
+        preferred_selected_idx = next(
             (
                 idx
                 for idx, entry in enumerate(tree_entries)
-                if entry.path.resolve() == selected_path.resolve()
+                if entry.path.resolve() == selected_path.resolve() and entry.workspace_section == 0
             ),
-            0,
+            None,
+        )
+        selected_idx = (
+            preferred_selected_idx
+            if preferred_selected_idx is not None
+            else next(
+                (
+                    idx
+                    for idx, entry in enumerate(tree_entries)
+                    if entry.path.resolve() == selected_path.resolve()
+                ),
+                0,
+            )
         )
 
         term = shutil.get_terminal_size((80, 24))
@@ -97,8 +138,8 @@ class AppStateBootstrap:
         return AppState(
             current_path=current_path,
             tree_root=tree_root,
-            tree_roots=[tree_root],
-            workspace_expanded=[{tree_root}],
+            tree_roots=tree_roots,
+            workspace_expanded=workspace_expanded,
             theme_name=self.theme_name,
             theme=resolve_theme(self.theme_name, no_color=no_color),
             expanded=expanded,

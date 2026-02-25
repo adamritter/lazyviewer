@@ -81,7 +81,12 @@ def main(default_path: Path | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Print file contents in a terminal pager with syntax highlighting."
     )
-    parser.add_argument("path", nargs="?", default=None, help="Path to file. Defaults to current directory.")
+    parser.add_argument(
+        "paths",
+        nargs="*",
+        default=None,
+        help="Path(s) to file or directory. Defaults to current directory.",
+    )
     parser.add_argument("--style", default="monokai", help="Pygments style name (for pygments rendering).")
     parser.add_argument(
         "--theme",
@@ -100,7 +105,7 @@ def main(default_path: Path | None = None) -> None:
     args = parser.parse_args()
 
     if args.render is not None:
-        if args.path is not None:
+        if args.paths:
             raise SystemExit("Cannot combine positional path with --render.")
         render_path = Path(args.render)
         if not render_path.exists():
@@ -111,12 +116,22 @@ def main(default_path: Path | None = None) -> None:
 
     if default_path is None:
         default_path = Path.cwd()
-    path = Path(args.path or default_path)
-    if not path.exists():
-        raise SystemExit(f"Path not found: {path}")
+    raw_paths = [Path(raw_path) for raw_path in (args.paths or [str(default_path)])]
+    for candidate in raw_paths:
+        if not candidate.exists():
+            raise SystemExit(f"Path not found: {candidate}")
 
+    path = raw_paths[0]
     source = "" if path.is_dir() else read_text(path)
-    run_pager(source, path, args.style, args.no_color, args.nopager, args.theme)
+    run_pager(
+        source,
+        path,
+        args.style,
+        args.no_color,
+        args.nopager,
+        args.theme,
+        workspace_paths=raw_paths,
+    )
 
 
 if __name__ == "__main__":

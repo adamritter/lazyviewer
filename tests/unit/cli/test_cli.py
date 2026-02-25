@@ -37,6 +37,8 @@ class CliDefaultPathTests(unittest.TestCase):
             self.assertFalse(no_color)
             self.assertFalse(nopager)
             self.assertIsNone(theme)
+            workspace_paths = run_pager.call_args.kwargs["workspace_paths"]
+            self.assertEqual([item.resolve() for item in workspace_paths], [root])
 
     def test_main_uses_explicit_path_argument_over_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -51,6 +53,30 @@ class CliDefaultPathTests(unittest.TestCase):
             source, path, *_rest = run_pager.call_args.args
             self.assertEqual(source, "hello\n")
             self.assertEqual(path.resolve(), target.resolve())
+            workspace_paths = run_pager.call_args.kwargs["workspace_paths"]
+            self.assertEqual([item.resolve() for item in workspace_paths], [target.resolve()])
+
+    def test_main_passes_multiple_positional_paths_as_workspace_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            first = root / "one"
+            second = root / "two"
+            first.mkdir()
+            second.mkdir()
+
+            with mock.patch.object(
+                sys,
+                "argv",
+                ["lv", str(first), str(second)],
+            ), mock.patch("lazyviewer.cli.run_pager") as run_pager:
+                cli.main()
+
+            run_pager.assert_called_once()
+            source, path, *_rest = run_pager.call_args.args
+            self.assertEqual(source, "")
+            self.assertEqual(path.resolve(), first.resolve())
+            workspace_paths = run_pager.call_args.kwargs["workspace_paths"]
+            self.assertEqual([item.resolve() for item in workspace_paths], [first.resolve(), second.resolve()])
 
     def test_render_mode_prints_source_view_and_skips_runtime_pager(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

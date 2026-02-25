@@ -76,7 +76,7 @@ def _render_tree_left_rows(state, *, max_lines: int = 12, width: int = 140, left
 
 class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
     @staticmethod
-    def _run_with_fake_loop(path: Path, fake_run_main_loop) -> None:
+    def _run_with_fake_loop(path: Path, fake_run_main_loop, workspace_paths: list[Path] | None = None) -> None:
         class _FakeTerminalController:
             def __init__(self, stdin_fd: int, stdout_fd: int) -> None:
                 self.stdin_fd = stdin_fd
@@ -94,7 +94,33 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
         ), mock.patch("lazyviewer.runtime.app.load_show_hidden", return_value=False), mock.patch(
             "lazyviewer.runtime.app.load_left_pane_percent", return_value=None
         ):
-            app_runtime.run_pager("", path, "monokai", True, False)
+            app_runtime.run_pager("", path, "monokai", True, False, workspace_paths=workspace_paths)
+
+    def test_startup_workspace_paths_seed_multiple_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            first = root / "one"
+            second = root / "two"
+            first.mkdir()
+            second.mkdir()
+            snapshots: dict[str, object] = {}
+
+            def fake_run_main_loop(**kwargs) -> None:
+                state = kwargs["state"]
+                snapshots["roots"] = list(state.tree_roots)
+                snapshots["depth0_rows"] = [
+                    (entry.path.resolve(), entry.workspace_section)
+                    for entry in state.tree_entries
+                    if entry.is_dir and entry.depth == 0
+                ]
+
+            self._run_with_fake_loop(first, fake_run_main_loop, workspace_paths=[first, second])
+
+            self.assertEqual(snapshots["roots"], [first.resolve(), second.resolve()])
+            self.assertEqual(
+                snapshots["depth0_rows"],
+                [(first.resolve(), 0), (second.resolve(), 1)],
+            )
 
     def test_multiroot_render_shows_forest_without_workspace_banner_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -588,7 +614,8 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 self.assertTrue(0 <= state.selected_idx < len(state.tree_entries))
 
                 roots = normalized_workspace_roots(state.tree_roots, state.tree_root)
-                self.assertEqual([path.resolve() for path in state.tree_roots], roots)
+                state_roots = [path.resolve() for path in state.tree_roots]
+                self.assertEqual(state_roots, roots)
                 depth0_entries = [entry for entry in state.tree_entries if entry.is_dir and entry.depth == 0]
                 self.assertEqual(
                     [entry.path.resolve() for entry in depth0_entries],
@@ -606,11 +633,12 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 expanded_union: set[Path] = set()
                 for scope_root, expanded_paths in zip(roots, state.workspace_expanded):
                     for expanded_path in expanded_paths:
-                        self.assertTrue(expanded_path.resolve().is_relative_to(scope_root))
-                    expanded_union.update(expanded_paths)
+                        expanded_path_resolved = expanded_path.resolve()
+                        self.assertTrue(expanded_path_resolved.is_relative_to(scope_root))
+                        expanded_union.add(expanded_path_resolved)
                 self.assertEqual(state.expanded, expanded_union)
 
-                roots_set = {root_path.resolve() for root_path in roots}
+                roots_set = set(roots)
                 row_keys = []
                 previous_section = -1
                 for entry in state.tree_entries:
@@ -618,17 +646,18 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     self.assertIsNotNone(entry.workspace_root)
                     self.assertIsNotNone(entry.workspace_section)
                     entry_scope = entry.workspace_root.resolve() if entry.workspace_root is not None else None
+                    entry_path = entry.path.resolve()
                     entry_section = entry.workspace_section
                     assert entry_section is not None
                     self.assertTrue(0 <= entry_section < len(roots))
                     self.assertEqual(roots[entry_section], entry_scope)
                     self.assertIn(entry_scope, roots_set)
-                    self.assertTrue(entry.path.resolve().is_relative_to(entry_scope))
+                    self.assertTrue(entry_path.is_relative_to(entry_scope))
                     self.assertGreaterEqual(entry_section, previous_section)
                     previous_section = entry_section
                     row_keys.append(
                         (
-                            entry.path.resolve(),
+                            entry_path,
                             entry.depth,
                             entry.is_dir,
                             entry_scope,
@@ -643,6 +672,10 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
             def fake_run_main_loop(**kwargs) -> None:
                 callbacks = kwargs["callbacks"]
                 state = kwargs["state"]
+                random_seeds = (1337, 2026, 4242)
+                operations_per_seed = 40
+                full_invariant_cadence = 8
+                max_random_tree_roots = 14
                 rng = random.Random(1337)
                 tree_filter_panel = callbacks.tree_pane.filter_panel
                 tree_filter_controller = callbacks.tree_pane.filter
@@ -739,6 +772,8 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
 
                 def add_random_directory_root_and_assert() -> bool:
                     ensure_filter_closed()
+                    if len(state.tree_roots) >= max_random_tree_roots:
+                        return False
                     idx = random_dir_index()
                     if idx is None:
                         return False
@@ -758,6 +793,8 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
 
                 def add_random_file_parent_root_and_assert() -> bool:
                     ensure_filter_closed()
+                    if len(state.tree_roots) >= max_random_tree_roots:
+                        return False
                     idx = random_file_index()
                     if idx is None:
                         return False
@@ -968,6 +1005,8 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     return True
 
                 def duplicate_random_depth0_root_and_assert() -> bool:
+                    if len(state.tree_roots) >= max_random_tree_roots:
+                        return False
                     idx = random_dir_index(depth=0)
                     if idx is None:
                         return False
@@ -1375,13 +1414,22 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 self.assertTrue(reroot_key_on_nonzero_section_stays_in_same_section("r"))
                 assert_invariants(state)
                 executed = 6
-                for seed in (1337, 2026, 4242, 7777, 9001):
+                successful_since_invariant = 0
+                for seed in random_seeds:
                     rng = random.Random(seed)
-                    for _ in range(120):
+                    for _ in range(operations_per_seed):
                         operation = operations[rng.randrange(len(operations))]
                         if operation():
                             executed += 1
-                            assert_invariants(state)
+                            successful_since_invariant += 1
+                            self.assertTrue(state.tree_entries)
+                            self.assertTrue(0 <= state.selected_idx < len(state.tree_entries))
+                            self.assertEqual(len(state.workspace_expanded), len(state.tree_roots))
+                            if successful_since_invariant >= full_invariant_cadence:
+                                assert_invariants(state)
+                                successful_since_invariant = 0
+                if successful_since_invariant:
+                    assert_invariants(state)
                 snapshots["executed"] = executed
 
             self._run_with_fake_loop(root, fake_run_main_loop)

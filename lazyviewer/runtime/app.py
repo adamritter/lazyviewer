@@ -81,6 +81,7 @@ def run_pager(
     no_color: bool,
     nopager: bool,
     theme_name: str | None = None,
+    workspace_paths: list[Path] | None = None,
 ) -> None:
     """Initialize pager runtime state, wire subsystems, and run event loop."""
     if nopager or not os.isatty(sys.stdin.fileno()):
@@ -105,7 +106,12 @@ def run_pager(
         dir_preview_initial_max_entries=SourcePane.DIR_PREVIEW_INITIAL_MAX_ENTRIES,
         theme_name=selected_theme_name,
     )
-    state = state_bootstrap.build_state(path=path, style=style, no_color=no_color)
+    state = state_bootstrap.build_state(
+        path=path,
+        style=style,
+        no_color=no_color,
+        workspace_paths=workspace_paths,
+    )
 
     stdin_fd = sys.stdin.fileno()
     stdout_fd = sys.stdout.fileno()
