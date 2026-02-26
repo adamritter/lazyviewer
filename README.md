@@ -20,15 +20,6 @@ It has syntax highlighting, shows the function headers, is able to browse multip
 respects .gitignore and hidden files (but can be turned off), git overlay is on by default,
 but it can be turned off, and it's quite interactive (ripgrep for a syntax with a mouse click for example).
 
-
-There are lots of ways I'm tempted to improve it (inline editor support?), but at the same time
-I'm trying to keep it minimal and focus on the smooth interaction of the features that isn't available using other tools that treat them as separate features of a more complex program.
-
-The code base is really ugly, far from how I'd like it to be, but it's partly because I started
-working on it with codex before this program existed :)
-
-I'm having fun using/developing it though, hopefully it will be fun/useful for others as well.
-
 Tip: add `alias lv='lazyviewer'` to your shell config.
 
 Install
