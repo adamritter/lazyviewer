@@ -1,7 +1,7 @@
 LazyViewer
 ==========
 
-A TUI source code viewer I vibe coded to browse full source code with git diff previews inline with
+A TUI source code viewer to browse full source code with git diff previews inline with
 easy keyboard navigation of both the source code and the file tree.
 
 ![LazyViewer Demo](./lazyviewer-demo.gif)
