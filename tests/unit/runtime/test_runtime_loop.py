@@ -164,6 +164,55 @@ def _loop_callbacks(
 
 
 class RuntimeLoopBehaviorTests(unittest.TestCase):
+    def test_buffered_input_skips_intermediate_poll_and_render(self) -> None:
+        state = _make_state()
+        terminal = _FakeTerminal()
+        keys = iter(["MOUSE_WHEEL_DOWN:5:5", "q"])
+        render_calls = {"count": 0}
+        poll_calls = {"count": 0}
+
+        def fake_render(_context) -> Frame:
+            render_calls["count"] += 1
+            return Frame("")
+
+        with mock.patch(
+            "lazyviewer.runtime.loop.has_pending_input",
+            side_effect=[True, False],
+        ), mock.patch(
+            "lazyviewer.runtime.loop.coalesce_mouse_wheel_events",
+            side_effect=lambda _fd, key: (
+                "MOUSE_WHEEL_DOWN:5:5:40"
+                if key.startswith("MOUSE_WHEEL_DOWN:")
+                else key
+            ),
+        ), mock.patch(
+            "lazyviewer.runtime.loop.shutil.get_terminal_size",
+            return_value=mock.Mock(columns=120, lines=40),
+        ), mock.patch(
+            "lazyviewer.runtime.loop.read_key",
+            side_effect=lambda *_args, **_kwargs: next(keys),
+        ), mock.patch(
+            "lazyviewer.runtime.loop.render_dual_page_context",
+            side_effect=fake_render,
+        ):
+            run_main_loop(
+                state=state,
+                terminal=terminal,  # type: ignore[arg-type]
+                stdin_fd=0,
+                timing=_loop_timing(),
+                callbacks=_loop_callbacks(
+                    handle_normal_key=lambda key, _columns: key == "q",
+                    maybe_poll_directory_preview_results=lambda: poll_calls.__setitem__(
+                        "count",
+                        poll_calls["count"] + 1,
+                    )
+                    or False,
+                ),
+            )
+
+        self.assertEqual(render_calls["count"], 1)
+        self.assertEqual(poll_calls["count"], 1)
+
     def test_runtime_loop_requests_mouse_reporting_enabled(self) -> None:
         state = _make_state()
         terminal = _FakeTerminal()

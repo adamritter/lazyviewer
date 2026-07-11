@@ -17,6 +17,7 @@ from ..ports import (
     RefreshPreview,
     RequestDirectoryPreview,
 )
+from ..tree_model import TreeEntry
 
 
 @dataclass
@@ -33,6 +34,23 @@ class PreviewSelection:
         """Attach jump callback once navigation wiring is available."""
         self.jump_to_line = jump_to_line
 
+    def reveal_entry_line(self, entry: TreeEntry) -> None:
+        """Reveal a committed content-search hit after its preview is applied."""
+        if entry.kind == "search_hit" and entry.line is not None and self.jump_to_line is not None:
+            self.jump_to_line(max(0, entry.line - 1))
+
+    def _commit_entry(self, entry: TreeEntry) -> None:
+        state = self.state
+        state.workspace.current_path = entry.path.resolve()
+        if entry.kind == "search_hit":
+            state.preview.search_current_line = entry.line or 0
+            state.preview.search_current_column = entry.column or 0
+        else:
+            state.preview.search_current_line = 0
+            state.preview.search_current_column = 0
+        if self.clear_source_selection():
+            state.interface.dirty = True
+
     def preview_selected_entry(
         self,
         force: bool = False,
@@ -40,21 +58,20 @@ class PreviewSelection:
         """Update current preview target from selected tree entry."""
         state = self.state
         if not state.workspace.entries:
+            state.preview.search_current_line = 0
+            state.preview.search_current_column = 0
             return
         entry = state.workspace.entries[state.workspace.selected]
         selected_target = entry.path.resolve()
-        if self.clear_source_selection():
-            state.interface.dirty = True
+        previous_target = state.workspace.current_path.resolve()
+        self._commit_entry(entry)
         if entry.kind == "search_hit":
-            if force or selected_target != state.workspace.current_path.resolve():
-                state.workspace.current_path = selected_target
+            if force or selected_target != previous_target:
                 self.refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
-            if entry.line is not None and self.jump_to_line is not None:
-                self.jump_to_line(max(0, entry.line - 1))
+            self.reveal_entry_line(entry)
             return
-        if not force and selected_target == state.workspace.current_path.resolve():
+        if not force and selected_target == previous_target:
             return
-        state.workspace.current_path = selected_target
         if (
             not force
             and entry.is_dir

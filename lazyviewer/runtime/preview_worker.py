@@ -5,21 +5,33 @@ from __future__ import annotations
 from dataclasses import dataclass
 from queue import Empty, Queue
 import threading
+from typing import Protocol
 
-from ..preview import PreviewDocument, PreviewRequest, PreviewService
+from ..preview import PreviewDocument, PreviewRequest, PreviewService, RenderedPreview
+
+
+class PreparePreview(Protocol):
+    def __call__(self, document: PreviewDocument) -> RenderedPreview: ...
 
 
 @dataclass(frozen=True, slots=True)
 class PreviewLoaded:
     request: PreviewRequest
     document: PreviewDocument
+    rendered: RenderedPreview | None = None
 
 
 class PreviewWorker:
     """Single-threaded latest-request-wins semantic preview loader."""
 
-    def __init__(self, service: PreviewService) -> None:
+    def __init__(
+        self,
+        service: PreviewService,
+        *,
+        prepare: PreparePreview | None = None,
+    ) -> None:
         self._service = service
+        self._prepare = prepare
         self._lock = threading.Lock()
         self._pending: PreviewRequest | None = None
         self._running = False
@@ -35,9 +47,10 @@ class PreviewWorker:
                     return
             try:
                 document = self._service.load(request)
+                rendered = self._prepare(document) if self._prepare is not None else None
             except Exception:
                 continue
-            self._results.put(PreviewLoaded(request, document))
+            self._results.put(PreviewLoaded(request, document, rendered))
 
     def schedule(self, request: PreviewRequest) -> None:
         with self._lock:
@@ -60,4 +73,4 @@ class PreviewWorker:
                 return tuple(results)
 
 
-__all__ = ["PreviewLoaded", "PreviewWorker"]
+__all__ = ["PreparePreview", "PreviewLoaded", "PreviewWorker"]

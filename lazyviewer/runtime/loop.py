@@ -12,7 +12,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from ..input import AdjustPaneWidth, DispatchKey, IgnoreInput, map_input, read_key
+from ..input import (
+    AdjustPaneWidth,
+    DispatchKey,
+    IgnoreInput,
+    coalesce_mouse_wheel_events,
+    has_pending_input,
+    map_input,
+    read_key,
+)
 from ..render import Frame, RenderContext, render_dual_page_context
 from ..session import (
     ClockTicked,
@@ -127,7 +135,8 @@ def run_main_loop(
     with terminal.raw_mode():
         while True:
             tick_tree_filter_search(0.0)
-            if maybe_poll_directory_preview_results():
+            input_backlogged = has_pending_input(stdin_fd)
+            if not input_backlogged and maybe_poll_directory_preview_results():
                 state.interface.dirty = True
             term = shutil.get_terminal_size((80, 24))
             now = time.monotonic()
@@ -193,7 +202,7 @@ def run_main_loop(
                     tree_filter_spinner_frame = next_spinner_frame
                     state.interface.dirty = True
 
-            if state.interface.dirty:
+            if state.interface.dirty and not input_backlogged:
                 preview_image_path = current_preview_image_path()
                 render_lines = [""] if preview_image_path is not None else state.preview.lines
                 render_start = 0 if preview_image_path is not None else state.preview.scroll
@@ -250,27 +259,17 @@ def run_main_loop(
                         else ""
                     ),
                     text_search_current_line=(
-                        state.workspace.entries[state.workspace.selected].line or 0
-                        if (
-                            state.filter.active
-                            and state.filter.mode == "content"
-                            and state.filter.query
-                            and 0 <= state.workspace.selected < len(state.workspace.entries)
-                            and state.workspace.entries[state.workspace.selected].kind == "search_hit"
-                            and state.workspace.entries[state.workspace.selected].line is not None
-                        )
+                        state.preview.search_current_line
+                        if state.filter.active
+                        and state.filter.mode == "content"
+                        and state.filter.query
                         else 0
                     ),
                     text_search_current_column=(
-                        state.workspace.entries[state.workspace.selected].column or 0
-                        if (
-                            state.filter.active
-                            and state.filter.mode == "content"
-                            and state.filter.query
-                            and 0 <= state.workspace.selected < len(state.workspace.entries)
-                            and state.workspace.entries[state.workspace.selected].kind == "search_hit"
-                            and state.workspace.entries[state.workspace.selected].column is not None
-                        )
+                        state.preview.search_current_column
+                        if state.filter.active
+                        and state.filter.mode == "content"
+                        and state.filter.query
                         else 0
                     ),
                     preview_is_git_diff=state.preview.is_git_diff,
@@ -331,6 +330,7 @@ def run_main_loop(
                     if maybe_prefetch_directory_preview():
                         state.interface.dirty = True
                 continue
+            key = coalesce_mouse_wheel_events(stdin_fd, key)
             last_input_at = time.monotonic()
             command = map_input(key, state)
             if isinstance(command, IgnoreInput):

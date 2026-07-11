@@ -43,7 +43,7 @@ from ..source_pane.preview_controller import PreviewController
 from ..source_pane.syntax import colorize_source
 from .application import App, ApplicationComponents, ApplicationOperations
 from .preview_worker import PreviewLoaded, PreviewWorker
-from ..session import PreviewCompleted, WorkspaceObserved
+from ..session import WorkspaceObserved
 from .layout import PagerLayout
 from .config import (
     load_content_search_left_pane_percent,
@@ -249,7 +249,10 @@ def run_pager(
     preview_selected_entry: PreviewSelectedEntry
 
     maybe_grow_directory_preview = preview_controller.maybe_grow
-    preview_worker = PreviewWorker(preview_service)
+    preview_worker = PreviewWorker(
+        preview_service,
+        prepare=preview_presenter.present,
+    )
     prefetch_requested_context: tuple[Path, str, bool, bool, bool] | None = None
     prefetch_requested_entries = 0
     pending_async_preview_context: tuple[Path, str, bool, bool, bool] | None = None
@@ -311,7 +314,7 @@ def run_pager(
         )
 
     def maybe_poll_directory_preview_results() -> bool:
-        """Apply completed directory-preview background jobs for current context."""
+        """Apply ready directory previews or prefetches opportunistically."""
         nonlocal prefetch_requested_context
         nonlocal prefetch_requested_entries
         nonlocal pending_async_preview_context
@@ -329,11 +332,9 @@ def run_pager(
             prefetch_requested_context = context
             prefetch_requested_entries = state.preview.directory_max_entries
 
-        best_result: PreviewLoaded | None = None
+        best_directory_result: PreviewLoaded | None = None
         for result in preview_worker.drain():
             request = result.request
-            if request.target != resolved_target:
-                continue
             if request.workspace_revision != preview_controller.workspace_revision:
                 continue
             if request.show_hidden != state.workspace.show_hidden:
@@ -342,35 +343,43 @@ def run_pager(
                 continue
             if request.show_size_labels != state.workspace.show_sizes:
                 continue
-            if request.directory_max_entries < state.preview.directory_max_entries:
+            if request.target != resolved_target:
                 continue
             if not isinstance(result.document, DirectoryDocument):
                 continue
+            if request.directory_max_entries < state.preview.directory_max_entries:
+                continue
             if (
-                best_result is None
+                best_directory_result is None
                 or request.directory_max_entries
-                >= best_result.request.directory_max_entries
+                >= best_directory_result.request.directory_max_entries
             ):
-                best_result = result
+                best_directory_result = result
 
-        if best_result is not None:
-            state.preview.directory_max_entries = best_result.request.directory_max_entries
+        if best_directory_result is not None:
+            state.preview.directory_max_entries = (
+                best_directory_result.request.directory_max_entries
+            )
             apply_reset_scroll = False
             if pending_async_preview_context == context:
                 apply_reset_scroll = pending_async_preview_reset_scroll
                 pending_async_preview_context = None
                 pending_async_preview_reset_scroll = False
-            effects = session_coordinator.dispatch(
-                PreviewCompleted(
-                    best_result.request,
-                    best_result.document,
-                    apply_reset_scroll,
-                )
+            rendered = best_directory_result.rendered or preview_presenter.present(
+                best_directory_result.document
             )
-            changed = bool(effects)
+            changed = (
+                preview_controller.apply(
+                    best_directory_result.request,
+                    best_directory_result.document,
+                    rendered,
+                    reset_scroll=apply_reset_scroll,
+                )
+                or changed
+            )
             prefetch_requested_entries = max(
                 prefetch_requested_entries,
-                best_result.request.directory_max_entries,
+                best_directory_result.request.directory_max_entries,
             )
 
         return changed

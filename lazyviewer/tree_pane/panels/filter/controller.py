@@ -382,24 +382,39 @@ class TreeFilterController:
 
         return self.nearest_tree_filter_result_entry_index(idx)
 
-    def move_tree_selection(self, direction: int) -> bool:
+    def move_tree_selection(
+        self,
+        direction: int,
+        *,
+        preview_selection: bool = True,
+    ) -> bool:
         """Move tree selection, honoring filter-result-only navigation when active."""
         if not self.state.workspace.entries or direction == 0:
             return False
 
         if self.state.filter.active and self.state.filter.query:
-            target_idx = self.next_tree_filter_result_entry_index(self.state.workspace.selected, direction)
-            if target_idx is None:
-                return False
-        else:
+            target_idx = self.state.workspace.selected
             step = 1 if direction > 0 else -1
-            target_idx = max(0, min(len(self.state.workspace.entries) - 1, self.state.workspace.selected + step))
+            for _ in range(abs(direction)):
+                next_idx = self.next_tree_filter_result_entry_index(target_idx, step)
+                if next_idx is None:
+                    break
+                target_idx = next_idx
+        else:
+            target_idx = max(
+                0,
+                min(
+                    len(self.state.workspace.entries) - 1,
+                    self.state.workspace.selected + direction,
+                ),
+            )
 
         if target_idx == self.state.workspace.selected:
             return False
 
         self.state.workspace.selected = target_idx
-        self.preview_selected_entry()
+        if preview_selection:
+            self.preview_selected_entry()
         return True
 
     def jump_to_next_content_hit(self, direction: int) -> bool:

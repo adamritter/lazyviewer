@@ -51,6 +51,9 @@ class PreviewController:
             and self.state.filter.mode == "content"
             and bool(self.state.filter.query)
         )
+        include_git_status = self.state.git.enabled and (
+            prefer_git_diff or target.is_dir()
+        )
         return PreviewRequest.create(
             target,
             workspace_revision=self.workspace_revision,
@@ -60,7 +63,7 @@ class PreviewController:
             directory_max_entries=(
                 self.state.preview.directory_max_entries if max_entries is None else max_entries
             ),
-            git_status=(self.state.git.status if self.state.git.enabled else None),
+            git_status=(self.state.git.status if include_git_status else None),
             show_size_labels=self.state.workspace.show_sizes,
         )
 

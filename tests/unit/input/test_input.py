@@ -14,9 +14,26 @@ from lazyviewer import input as input_mod
 class ReadKeyRegressionTests(unittest.TestCase):
     def setUp(self) -> None:
         input_mod._PENDING_BYTES.clear()
+        input_mod._PENDING_KEYS.clear()
 
     def tearDown(self) -> None:
         input_mod._PENDING_BYTES.clear()
+        input_mod._PENDING_KEYS.clear()
+
+    def test_ready_mouse_wheel_burst_coalesces_without_swallowing_next_key(self) -> None:
+        read_fd, write_fd = os.pipe()
+        try:
+            wheel = b"\x1b[<65;5;10M"
+            os.write(write_fd, (wheel * 80) + b"x")
+            first = input_mod.read_key(read_fd, timeout_ms=20)
+            coalesced = input_mod.coalesce_mouse_wheel_events(read_fd, first)
+            following = input_mod.read_key(read_fd, timeout_ms=20)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+        self.assertEqual(coalesced, "MOUSE_WHEEL_DOWN:5:10:80")
+        self.assertEqual(following, "x")
 
     def test_single_escape_returns_esc_without_second_keypress(self) -> None:
         read_fd, write_fd = os.pipe()

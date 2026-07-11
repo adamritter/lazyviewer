@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 
 from ..session import SessionState
-from ..ports import ApplyTreeFilterQuery
+from ..ports import ApplyTreeFilterQuery, MoveTreeSelection
 from .interaction.geometry import SourcePaneGeometry
 from .interaction.mouse import SourcePaneClickResult, SourcePaneMouseHandlers
 
@@ -21,7 +21,7 @@ class SourcePane:
         *,
         state: SessionState,
         visible_content_rows: Callable[[], int],
-        move_tree_selection: Callable[[int], bool],
+        move_tree_selection: MoveTreeSelection,
         maybe_grow_directory_preview: Callable[[], bool],
         clear_source_selection: Callable[[], bool],
         copy_selected_source_range: Callable[[tuple[int, int], tuple[int, int]], bool],
@@ -64,6 +64,16 @@ class SourcePane:
         except ValueError:
             return None, None
 
+    @staticmethod
+    def _parse_mouse_count(mouse_key: str) -> int:
+        parts = mouse_key.split(":")
+        if len(parts) < 4:
+            return 1
+        try:
+            return max(1, int(parts[3]))
+        except ValueError:
+            return 1
+
     def handle_tree_mouse_wheel(self, mouse_key: str) -> bool:
         is_vertical = mouse_key.startswith("MOUSE_WHEEL_UP:") or mouse_key.startswith("MOUSE_WHEEL_DOWN:")
         is_horizontal = mouse_key.startswith("MOUSE_WHEEL_LEFT:") or mouse_key.startswith("MOUSE_WHEEL_RIGHT:")
@@ -71,6 +81,7 @@ class SourcePane:
             return False
 
         col, _row = self._parse_mouse_col_row(mouse_key)
+        event_count = self._parse_mouse_count(mouse_key)
         in_tree_pane = self.state.layout.browser_visible and col is not None and col <= self.state.layout.left_width
 
         if is_horizontal:
@@ -78,11 +89,14 @@ class SourcePane:
                 return True
             previous = self.state.preview.horizontal_scroll
             if mouse_key.startswith("MOUSE_WHEEL_LEFT:"):
-                self.state.preview.horizontal_scroll = max(0, self.state.preview.horizontal_scroll - 4)
+                self.state.preview.horizontal_scroll = max(
+                    0,
+                    self.state.preview.horizontal_scroll - (4 * event_count),
+                )
             else:
                 self.state.preview.horizontal_scroll = min(
                     self.geometry.max_horizontal_text_offset(),
-                    self.state.preview.horizontal_scroll + 4,
+                    self.state.preview.horizontal_scroll + (4 * event_count),
                 )
             if self.state.preview.horizontal_scroll != previous:
                 self.state.interface.dirty = True
@@ -90,14 +104,17 @@ class SourcePane:
 
         direction = -1 if mouse_key.startswith("MOUSE_WHEEL_UP:") else 1
         if in_tree_pane:
-            if self._move_tree_selection(direction):
+            if self._move_tree_selection(direction * event_count):
                 self.state.interface.dirty = True
             return True
 
         previous = self.state.preview.scroll
         self.state.preview.scroll = max(
             0,
-            min(self.state.preview.scroll + direction * 3, self.state.preview.max_scroll),
+            min(
+                self.state.preview.scroll + (direction * 3 * event_count),
+                self.state.preview.max_scroll,
+            ),
         )
         grew = direction > 0 and self._maybe_grow_directory_preview()
         if self.state.preview.scroll != previous or grew:

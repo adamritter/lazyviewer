@@ -11,6 +11,14 @@ import select
 
 ESC_SEQUENCE_TIMEOUT_MS = 25
 _PENDING_BYTES: list[bytes] = []
+_PENDING_KEYS: list[str] = []
+
+_WHEEL_KINDS = {
+    "MOUSE_WHEEL_UP",
+    "MOUSE_WHEEL_DOWN",
+    "MOUSE_WHEEL_LEFT",
+    "MOUSE_WHEEL_RIGHT",
+}
 
 
 def _read_ready_byte(fd: int, timeout_ms: int) -> bytes | None:
@@ -40,6 +48,8 @@ def read_key(fd: int, timeout_ms: int | None = None) -> str:
     Bytes that arrive after a lone ``ESC`` and are not part of ``ESC [`` are
     pushed into ``_PENDING_BYTES`` so the next ``read_key`` call receives them.
     """
+    if _PENDING_KEYS:
+        return _PENDING_KEYS.pop(0)
     if _PENDING_BYTES:
         ch = _PENDING_BYTES.pop(0)
     else:
@@ -155,3 +165,67 @@ def read_key(fd: int, timeout_ms: int | None = None) -> str:
                 return "ALT_LEFT"
         return "ESC"
     return "ESC"
+
+
+def _wheel_token_parts(key: str) -> tuple[str, int, int, int] | None:
+    parts = key.split(":")
+    if len(parts) < 3 or parts[0] not in _WHEEL_KINDS:
+        return None
+    try:
+        count = int(parts[3]) if len(parts) >= 4 else 1
+        return parts[0], int(parts[1]), int(parts[2]), max(1, count)
+    except ValueError:
+        return None
+
+
+def coalesce_mouse_wheel_events(
+    fd: int,
+    first_key: str,
+    *,
+    max_events: int = 256,
+) -> str:
+    """Collapse an already-buffered same-direction wheel burst into one token.
+
+    The next different decoded key is retained for the following ``read_key``
+    call, so draining a gesture never swallows keyboard or click input.
+    """
+    first = _wheel_token_parts(first_key)
+    if first is None:
+        return first_key
+    kind, col, row, count = first
+    limit = max(1, max_events)
+    while count < limit:
+        next_key = read_key(fd, timeout_ms=0)
+        if not next_key:
+            break
+        next_wheel = _wheel_token_parts(next_key)
+        if next_wheel is None:
+            _PENDING_KEYS.append(next_key)
+            break
+        next_kind, next_col, next_row, next_count = next_wheel
+        if next_kind != kind or next_col != col:
+            _PENDING_KEYS.append(next_key)
+            break
+        row = next_row
+        count = min(limit, count + next_count)
+    return f"{kind}:{col}:{row}:{count}"
+
+
+def has_pending_input(fd: int) -> bool:
+    """Return whether decoded or operating-system input is ready immediately."""
+    if _PENDING_KEYS or _PENDING_BYTES:
+        return True
+    if not os.isatty(fd):
+        return False
+    ready, _, _ = select.select([fd], [], [], 0.0)
+    return bool(ready)
+
+
+__all__ = [
+    "ESC_SEQUENCE_TIMEOUT_MS",
+    "_PENDING_BYTES",
+    "_PENDING_KEYS",
+    "coalesce_mouse_wheel_events",
+    "has_pending_input",
+    "read_key",
+]

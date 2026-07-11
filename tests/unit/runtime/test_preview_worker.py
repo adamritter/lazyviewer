@@ -8,7 +8,7 @@ import time
 import unittest
 from pathlib import Path
 
-from lazyviewer.preview import PreviewRequest, TextDocument
+from lazyviewer.preview import PreviewRequest, RenderedPreview, TextDocument
 from lazyviewer.runtime.preview_worker import PreviewWorker
 
 
@@ -46,6 +46,24 @@ class _RecordingService:
 
 
 class PreviewWorkerTests(unittest.TestCase):
+    def test_prepares_rendered_preview_off_the_calling_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "a.py"
+            path.write_text("a", encoding="utf-8")
+            service = _RecordingService()
+            prepare_threads: list[int] = []
+
+            def prepare(document: TextDocument) -> RenderedPreview:
+                prepare_threads.append(threading.get_ident())
+                return RenderedPreview(document, f"rendered {document.text}")
+
+            worker = PreviewWorker(service, prepare=prepare)  # type: ignore[arg-type]
+            worker.schedule(_request(path, "r1"))
+            results = _await_results(worker, 1)
+
+            self.assertEqual(results[0].rendered.text, "rendered r1")
+            self.assertNotEqual(prepare_threads, [threading.get_ident()])
+
     def test_loads_typed_request_and_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "a.py"

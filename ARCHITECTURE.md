@@ -96,6 +96,8 @@ Current root-level actions cover clock ticks, terminal resize, pane-width change
 
 `SourcePane` owns only source geometry and mouse behavior. `PreviewController` owns request/apply and directory-budget behavior. `PreviewPresenter` owns terminal formatting.
 
+Buffered tree-pane wheel events are coalesced into one counted movement, so large search gestures update selection and viewport in one state transition. Search results synchronously refresh the final selected preview once per coalesced gesture, while directory previews and prefetches remain background work. Input-backlog suppression avoids intermediate frames, and `PreviewViewState` owns the currently presented content-search line/column.
+
 Shared callback shapes live as small protocols in `lazyviewer.ports`; dynamic `getattr`, `SimpleNamespace`, and `Callable[..., ...]` adapters are intentionally absent.
 
 ### Rendering and terminal I/O

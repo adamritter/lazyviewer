@@ -43,6 +43,8 @@ class PreviewViewState:
     image_format: str | None = None
     is_git_diff: bool = False
     document: PreviewDocument | None = None
+    search_current_line: int = 0
+    search_current_column: int = 0
     selection_anchor: tuple[int, int] | None = None
     selection_focus: tuple[int, int] | None = None
 

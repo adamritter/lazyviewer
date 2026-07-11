@@ -22,6 +22,15 @@ class PreviewSelectedEntry(Protocol):
     def __call__(self, force: bool = False) -> None: ...
 
 
+class MoveTreeSelection(Protocol):
+    def __call__(
+        self,
+        direction: int,
+        *,
+        preview_selection: bool = True,
+    ) -> bool: ...
+
+
 class RefreshPreview(Protocol):
     def __call__(
         self,
@@ -114,6 +123,7 @@ __all__ = [
     "BuildScreenLines",
     "BuildTreeEntries",
     "HelpPanelRowCount",
+    "MoveTreeSelection",
     "PreviewSelectedEntry",
     "RebuildScreenLines",
     "RebuildTreeEntries",
