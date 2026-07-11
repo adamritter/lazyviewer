@@ -6,9 +6,6 @@ These tests ensure runtime callbacks and state orchestration stay coherent.
 
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 import unittest
@@ -16,15 +13,8 @@ from unittest import mock
 
 from lazyviewer.runtime import app as app_runtime
 from lazyviewer.render.ansi import ANSI_ESCAPE_RE
-from lazyviewer.runtime.screen import (
-    _centered_scroll_start,
-    _first_git_change_screen_line,
-    _tree_order_key_for_relative_path,
-)
-from lazyviewer.git_status import GIT_STATUS_CHANGED
-from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.render import help_panel_row_count, render_dual_page
-from lazyviewer.search.content import ContentMatch
+from lazyviewer.session.navigation import JumpLocation
+from tests.render_capture import render_dual_page
 
 
 def _callback(kwargs: dict[str, object], name: str):
@@ -81,16 +71,16 @@ class AppRuntimeSessionTestsPart1(unittest.TestCase):
                 state = kwargs["state"]
                 set_named_mark = _callback(kwargs, "set_named_mark")
                 if run_count == 1:
-                    state.start = 9
-                    state.text_x = 4
+                    state.preview.scroll = 9
+                    state.preview.horizontal_scroll = 4
                     self.assertTrue(set_named_mark("a"))
                     return
-                snapshots["named_marks"] = dict(state.named_marks)
+                snapshots["named_marks"] = dict(state.navigation.marks)
 
             with mock.patch("lazyviewer.runtime.config.CONFIG_PATH", config_path), mock.patch(
                 "lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop
             ), mock.patch("lazyviewer.runtime.app.TerminalController", _FakeTerminalController), mock.patch(
-                "lazyviewer.runtime.app.collect_project_file_labels", return_value=[]
+                "lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None
             ), mock.patch("lazyviewer.runtime.app.os.isatty", return_value=True), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
             ), mock.patch(
@@ -129,57 +119,57 @@ class AppRuntimeSessionTestsPart1(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                state.browser_visible = False
-                state.start = 4
+                state.layout.browser_visible = False
+                state.preview.scroll = 4
 
-                with mock.patch("lazyviewer.render.os.write", side_effect=lambda _fd, data: writes.append(data) or len(data)):
+                with mock.patch("tests.render_capture.os.write", side_effect=lambda _fd, data: writes.append(data) or len(data)):
                     render_dual_page(
-                        text_lines=state.lines,
-                        text_start=state.start,
-                        tree_entries=state.tree_entries,
-                        tree_start=state.tree_start,
-                        tree_selected=state.selected_idx,
+                        text_lines=state.preview.lines,
+                        text_start=state.preview.scroll,
+                        tree_entries=state.workspace.entries,
+                        tree_start=state.workspace.scroll,
+                        tree_selected=state.workspace.selected,
                         max_lines=6,
-                        current_path=state.current_path,
-                        tree_root=state.tree_root,
-                        expanded=state.tree_render_expanded,
+                        current_path=state.workspace.current_path,
+                        tree_root=state.workspace.active_root,
+                        expanded=state.workspace.render_expanded,
                         width=120,
-                        left_width=state.left_width,
-                        text_x=state.text_x,
-                        wrap_text=state.wrap_text,
-                        browser_visible=state.browser_visible,
-                        show_hidden=state.show_hidden,
-                        show_help=state.show_help,
-                        tree_filter_active=state.tree_filter_active,
-                        tree_filter_mode=state.tree_filter_mode,
-                        tree_filter_query=state.tree_filter_query,
-                        tree_filter_editing=state.tree_filter_editing,
+                        left_width=state.layout.left_width,
+                        text_x=state.preview.horizontal_scroll,
+                        wrap_text=state.preview.wrap,
+                        browser_visible=state.layout.browser_visible,
+                        show_hidden=state.workspace.show_hidden,
+                        show_help=state.layout.show_help,
+                        tree_filter_active=state.filter.active,
+                        tree_filter_mode=state.filter.mode,
+                        tree_filter_query=state.filter.query,
+                        tree_filter_editing=state.filter.editing,
                         tree_filter_cursor_visible=False,
-                        tree_filter_match_count=state.tree_filter_match_count,
-                        tree_filter_truncated=state.tree_filter_truncated,
-                        tree_filter_loading=state.tree_filter_loading,
+                        tree_filter_match_count=state.filter.match_count,
+                        tree_filter_truncated=state.filter.truncated,
+                        tree_filter_loading=state.filter.loading,
                         tree_filter_spinner_frame=0,
                         tree_filter_prefix="p>",
                         tree_filter_placeholder="type to filter files",
-                        picker_active=state.picker_active,
-                        picker_mode=state.picker_mode,
-                        picker_query=state.picker_query,
-                        picker_items=state.picker_match_labels,
-                        picker_selected=state.picker_selected,
-                        picker_focus=state.picker_focus,
-                        picker_list_start=state.picker_list_start,
-                        picker_message=state.picker_message,
-                        git_status_overlay=state.git_status_overlay,
+                        picker_active=state.picker.active,
+                        picker_mode=state.picker.mode,
+                        picker_query=state.picker.query,
+                        picker_items=state.picker.match_labels,
+                        picker_selected=state.picker.selected,
+                        picker_focus=state.picker.focus,
+                        picker_list_start=state.picker.list_start,
+                        picker_message=state.picker.message,
+                        git_status_overlay=state.git.status,
                         tree_search_query="",
                         text_search_query="",
                         text_search_current_line=0,
                         text_search_current_column=0,
-                        preview_is_git_diff=state.preview_is_git_diff,
+                        preview_is_git_diff=state.preview.is_git_diff,
                     )
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
                 "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
@@ -223,51 +213,51 @@ class AppRuntimeSessionTestsPart1(unittest.TestCase):
             def render_content_rows(state) -> list[str]:
                 writes: list[bytes] = []
                 with mock.patch(
-                    "lazyviewer.render.os.write",
+                    "tests.render_capture.os.write",
                     side_effect=lambda _fd, data: writes.append(data) or len(data),
                 ):
                     render_dual_page(
-                        text_lines=state.lines,
-                        text_start=state.start,
-                        tree_entries=state.tree_entries,
-                        tree_start=state.tree_start,
-                        tree_selected=state.selected_idx,
+                        text_lines=state.preview.lines,
+                        text_start=state.preview.scroll,
+                        tree_entries=state.workspace.entries,
+                        tree_start=state.workspace.scroll,
+                        tree_selected=state.workspace.selected,
                         max_lines=3,
-                        current_path=state.current_path,
-                        tree_root=state.tree_root,
-                        expanded=state.tree_render_expanded,
+                        current_path=state.workspace.current_path,
+                        tree_root=state.workspace.active_root,
+                        expanded=state.workspace.render_expanded,
                         width=120,
-                        left_width=state.left_width,
-                        text_x=state.text_x,
-                        wrap_text=state.wrap_text,
-                        browser_visible=state.browser_visible,
-                        show_hidden=state.show_hidden,
-                        show_help=state.show_help,
-                        tree_filter_active=state.tree_filter_active,
-                        tree_filter_mode=state.tree_filter_mode,
-                        tree_filter_query=state.tree_filter_query,
-                        tree_filter_editing=state.tree_filter_editing,
+                        left_width=state.layout.left_width,
+                        text_x=state.preview.horizontal_scroll,
+                        wrap_text=state.preview.wrap,
+                        browser_visible=state.layout.browser_visible,
+                        show_hidden=state.workspace.show_hidden,
+                        show_help=state.layout.show_help,
+                        tree_filter_active=state.filter.active,
+                        tree_filter_mode=state.filter.mode,
+                        tree_filter_query=state.filter.query,
+                        tree_filter_editing=state.filter.editing,
                         tree_filter_cursor_visible=False,
-                        tree_filter_match_count=state.tree_filter_match_count,
-                        tree_filter_truncated=state.tree_filter_truncated,
-                        tree_filter_loading=state.tree_filter_loading,
+                        tree_filter_match_count=state.filter.match_count,
+                        tree_filter_truncated=state.filter.truncated,
+                        tree_filter_loading=state.filter.loading,
                         tree_filter_spinner_frame=0,
                         tree_filter_prefix="p>",
                         tree_filter_placeholder="type to filter files",
-                        picker_active=state.picker_active,
-                        picker_mode=state.picker_mode,
-                        picker_query=state.picker_query,
-                        picker_items=state.picker_match_labels,
-                        picker_selected=state.picker_selected,
-                        picker_focus=state.picker_focus,
-                        picker_list_start=state.picker_list_start,
-                        picker_message=state.picker_message,
-                        git_status_overlay=state.git_status_overlay,
+                        picker_active=state.picker.active,
+                        picker_mode=state.picker.mode,
+                        picker_query=state.picker.query,
+                        picker_items=state.picker.match_labels,
+                        picker_selected=state.picker.selected,
+                        picker_focus=state.picker.focus,
+                        picker_list_start=state.picker.list_start,
+                        picker_message=state.picker.message,
+                        git_status_overlay=state.git.status,
                         tree_search_query="",
                         text_search_query="",
                         text_search_current_line=0,
                         text_search_current_column=0,
-                        preview_is_git_diff=state.preview_is_git_diff,
+                        preview_is_git_diff=state.preview.is_git_diff,
                     )
                 rendered = b"".join(writes).decode("utf-8", errors="replace")
                 plain = ANSI_ESCAPE_RE.sub("", rendered)
@@ -278,20 +268,20 @@ class AppRuntimeSessionTestsPart1(unittest.TestCase):
                 state = kwargs["state"]
                 handle_normal_key = _callback(kwargs, "handle_normal_key")
                 rebuild_screen_lines = _callback(kwargs, "rebuild_screen_lines")
-                state.browser_visible = False
-                state.usable = 3
+                state.layout.browser_visible = False
+                state.layout.usable_rows = 3
                 rebuild_screen_lines(columns=120, preserve_scroll=True)
-                state.start = 0
+                state.preview.scroll = 0
                 before_rows = render_content_rows(state)
                 handle_normal_key("DOWN", 120)
                 after_rows = render_content_rows(state)
                 snapshots["before_rows"] = before_rows
                 snapshots["after_rows"] = after_rows
-                snapshots["start_after_down"] = state.start
+                snapshots["start_after_down"] = state.preview.scroll
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
                 "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
@@ -332,20 +322,20 @@ class AppRuntimeSessionTestsPart1(unittest.TestCase):
 
                 nested_idx = next(
                     idx
-                    for idx, entry in enumerate(state.tree_entries)
+                    for idx, entry in enumerate(state.workspace.entries)
                     if entry.path.resolve() == nested_resolved
                 )
-                state.selected_idx = nested_idx
+                state.workspace.selected = nested_idx
                 handle_normal_key("a", 120)
 
-                snapshots["after_add_root"] = state.tree_root.resolve()
-                snapshots["after_add_roots"] = list(state.tree_roots)
+                snapshots["after_add_root"] = state.workspace.active_root.resolve()
+                snapshots["after_add_roots"] = list(state.workspace.roots)
                 snapshots["after_add_depth0_dirs"] = [
                     entry.path.resolve()
-                    for entry in state.tree_entries
+                    for entry in state.workspace.entries
                     if entry.is_dir and entry.depth == 0
                 ]
-                selected_after_add = state.tree_entries[state.selected_idx]
+                selected_after_add = state.workspace.entries[state.workspace.selected]
                 snapshots["after_add_selected"] = selected_after_add.path.resolve()
                 snapshots["after_add_selected_depth"] = selected_after_add.depth
                 snapshots["after_add_selected_scope"] = (
@@ -355,19 +345,19 @@ class AppRuntimeSessionTestsPart1(unittest.TestCase):
                 )
 
                 handle_normal_key("d", 120)
-                snapshots["after_delete_root"] = state.tree_root.resolve()
-                snapshots["after_delete_roots"] = list(state.tree_roots)
+                snapshots["after_delete_root"] = state.workspace.active_root.resolve()
+                snapshots["after_delete_roots"] = list(state.workspace.roots)
 
                 handle_normal_key("d", 120)
-                snapshots["after_delete_last_root"] = state.tree_root.resolve()
-                snapshots["after_delete_last_roots"] = list(state.tree_roots)
-                snapshots["status_after_delete_last"] = state.status_message
+                snapshots["after_delete_last_root"] = state.workspace.active_root.resolve()
+                snapshots["after_delete_last_roots"] = list(state.workspace.roots)
+                snapshots["status_after_delete_last"] = state.interface.status_message
 
-                self.assertEqual(state.tree_root.resolve(), root_resolved)
+                self.assertEqual(state.workspace.active_root.resolve(), root_resolved)
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
                 "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
@@ -415,32 +405,32 @@ class AppRuntimeSessionTestsPart1(unittest.TestCase):
 
                 nested_idx = next(
                     idx
-                    for idx, entry in enumerate(state.tree_entries)
+                    for idx, entry in enumerate(state.workspace.entries)
                     if entry.path.resolve() == nested_resolved
                 )
-                state.selected_idx = nested_idx
+                state.workspace.selected = nested_idx
                 handle_normal_key("a", 120)
-                snapshots["after_add_roots"] = list(state.tree_roots)
+                snapshots["after_add_roots"] = list(state.workspace.roots)
 
                 nested_root_idx = next(
                     idx
-                    for idx, entry in enumerate(state.tree_entries)
+                    for idx, entry in enumerate(state.workspace.entries)
                     if entry.is_dir
                     and entry.depth == 0
                     and entry.path.resolve() == nested_resolved
                     and entry.workspace_root is not None
                     and entry.workspace_root.resolve() == nested_resolved
                 )
-                state.selected_idx = nested_root_idx
+                state.workspace.selected = nested_root_idx
                 handle_normal_key("R", 120)
 
-                snapshots["after_reroot_parent_roots"] = list(state.tree_roots)
+                snapshots["after_reroot_parent_roots"] = list(state.workspace.roots)
                 snapshots["after_reroot_parent_depth0_dirs"] = [
                     entry.path.resolve()
-                    for entry in state.tree_entries
+                    for entry in state.workspace.entries
                     if entry.is_dir and entry.depth == 0
                 ]
-                selected = state.tree_entries[state.selected_idx]
+                selected = state.workspace.entries[state.workspace.selected]
                 snapshots["after_reroot_parent_selected"] = selected.path.resolve()
                 snapshots["after_reroot_parent_selected_scope"] = (
                     selected.workspace_root.resolve()
@@ -448,11 +438,11 @@ class AppRuntimeSessionTestsPart1(unittest.TestCase):
                     else None
                 )
 
-                self.assertEqual(state.tree_root.resolve(), root_resolved)
+                self.assertEqual(state.workspace.active_root.resolve(), root_resolved)
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
                 "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1

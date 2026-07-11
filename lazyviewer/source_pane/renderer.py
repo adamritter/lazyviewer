@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import rendering as preview_rendering
+from .highlighting import normalized_selection_range, rendered_preview_row
+from .source import status_line_range
+from .sticky import formatted_sticky_headers, sticky_symbol_headers_for_position
+from .text import scroll_percent
 
 
 class SourcePaneRenderer:
@@ -43,11 +46,11 @@ class SourcePaneRenderer:
         self.preview_is_git_diff = preview_is_git_diff
 
         self._has_current_text_hit = text_search_current_line > 0 and text_search_current_column > 0
-        self._selection_range = preview_rendering.normalized_selection_range(
+        self._selection_range = normalized_selection_range(
             source_selection_anchor,
             source_selection_focus,
         )
-        sticky_symbols = preview_rendering.sticky_symbol_headers_for_position(
+        sticky_symbols = sticky_symbol_headers_for_position(
             text_lines=text_lines,
             text_start=text_start,
             content_rows=content_rows,
@@ -55,7 +58,7 @@ class SourcePaneRenderer:
             wrap_text=wrap_text,
             preview_is_git_diff=preview_is_git_diff,
         )
-        self.sticky_headers = preview_rendering.formatted_sticky_headers(
+        self.sticky_headers = formatted_sticky_headers(
             text_lines,
             sticky_symbols,
             line_width,
@@ -65,8 +68,8 @@ class SourcePaneRenderer:
         )
         self.sticky_header_rows = len(self.sticky_headers)
         self.text_content_rows = max(1, content_rows - self.sticky_header_rows)
-        self.text_percent = preview_rendering.scroll_percent(text_start, len(text_lines), self.text_content_rows)
-        self.status_start, self.status_end, self.status_total = preview_rendering.status_line_range(
+        self.text_percent = scroll_percent(text_start, len(text_lines), self.text_content_rows)
+        self.status_start, self.status_end, self.status_total = status_line_range(
             text_lines,
             text_start,
             self.text_content_rows,
@@ -81,7 +84,7 @@ class SourcePaneRenderer:
         text_idx = self.text_start + row
         if text_idx >= len(self.text_lines):
             return ""
-        return preview_rendering.rendered_preview_row(
+        return rendered_preview_row(
             self.text_lines,
             text_idx,
             self.line_width,

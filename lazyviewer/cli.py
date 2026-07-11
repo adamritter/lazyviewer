@@ -12,11 +12,13 @@ import sys
 from pathlib import Path
 
 from .render.ansi import build_screen_lines
-from .runtime import run_pager
-from .source_pane import SourcePane
+from .preview import DiffDocument, PreviewRequest, PreviewService
+from .runtime.app import run_pager
 from .source_pane.highlighting import rendered_preview_row
-from .source_pane.syntax import read_text
-from .ui_theme import available_theme_names
+from .source_pane.presenter import PreviewPresenter
+from .preview.text import read_text
+from .ui_theme import available_theme_names, resolve_theme
+from .workspace import WorkspaceQuery, WorkspaceService
 
 
 def _positive_int(value: str) -> int:
@@ -39,15 +41,31 @@ def _default_render_width() -> int:
 def render_source_view(path: Path, style: str, no_color: bool, max_cols: int) -> str:
     """Render source-pane rows for ``path`` using UI rendering code paths."""
     target = path.resolve()
-    rendered_for_path = SourcePane.build_rendered_for_path(
-        target,
-        show_hidden=False,
-        style=style,
-        no_color=no_color,
-        dir_skip_gitignored=True,
-        prefer_git_diff=True,
-        dir_show_size_labels=True,
+    root = target if target.is_dir() else target.parent
+    workspace = WorkspaceService()
+    snapshot = workspace.snapshot(
+        WorkspaceQuery.create(
+            [root],
+            [{root}],
+            show_hidden=False,
+            skip_gitignored=True,
+        )
     )
+    request = PreviewRequest.create(
+        target,
+        workspace_revision=snapshot.revision.value,
+        show_hidden=False,
+        skip_gitignored=True,
+        prefer_git_diff=True,
+        git_status=snapshot.merged_git_status(),
+        show_size_labels=True,
+    )
+    document = PreviewService().load(request)
+    rendered_for_path = PreviewPresenter(
+        style=style,
+        color=not no_color and sys.stdout.isatty(),
+        theme=resolve_theme(None, no_color=no_color),
+    ).present(document)
     text_lines = build_screen_lines(rendered_for_path.text, max_cols, wrap=False)
     out: list[str] = []
     for text_idx in range(len(text_lines)):
@@ -62,7 +80,7 @@ def render_source_view(path: Path, style: str, no_color: bool, max_cols: int) ->
             text_search_current_column=0,
             has_current_text_hit=False,
             selection_range=None,
-            preview_is_git_diff=rendered_for_path.is_git_diff_preview,
+            preview_is_git_diff=isinstance(document, DiffDocument),
         )
         out.append(row)
         if "\033" in row:

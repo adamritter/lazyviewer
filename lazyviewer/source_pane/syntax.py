@@ -1,15 +1,8 @@
-"""Source loading, sanitization, and syntax highlighting.
-
-Tries Pygments first, then a lightweight tokenizer fallback.
-Also neutralizes terminal control bytes to avoid unsafe preview side effects.
-"""
+"""Syntax highlighting presentation with a lightweight fallback."""
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
-
-_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
 _PYGMENTS_READY = False
 _PYGMENTS_AVAILABLE = False
@@ -21,39 +14,6 @@ _PYGMENTS_GET_STYLE_BY_NAME = None
 _PYGMENTS_FORMATTERS: dict[str, object] = {}
 _PYGMENTS_VALID_STYLES: set[str] = set()
 _PYGMENTS_INVALID_STYLES: set[str] = set()
-
-
-def read_text(path: Path) -> str:
-    """Read text using tolerant encoding fallback order.
-
-    Attempts UTF-8, UTF-8 with BOM, then latin-1; as a final fallback decodes
-    raw bytes with UTF-8 replacement semantics.
-    """
-    for encoding in ("utf-8", "utf-8-sig", "latin-1"):
-        try:
-            return path.read_text(encoding=encoding)
-        except UnicodeDecodeError:
-            continue
-    return path.read_bytes().decode("utf-8", errors="replace")
-
-
-def sanitize_terminal_text(source: str) -> str:
-    """Escape terminal control bytes to avoid side effects (bell, cursor moves, etc.)."""
-    if _CONTROL_RE.search(source) is None:
-        return source
-
-    out: list[str] = []
-    for ch in source:
-        code = ord(ch)
-        if ch in {"\n", "\r", "\t"}:
-            out.append(ch)
-            continue
-        # C0 controls + DEL + C1 controls.
-        if code < 32 or code == 127 or 0x80 <= code <= 0x9F:
-            out.append(f"\\x{code:02x}")
-            continue
-        out.append(ch)
-    return "".join(out)
 
 
 def fallback_highlight(source: str) -> str:

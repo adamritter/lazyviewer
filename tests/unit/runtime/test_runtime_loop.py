@@ -8,32 +8,22 @@ import time
 import unittest
 from unittest import mock
 
-from lazyviewer.runtime import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
-from lazyviewer.runtime.state import AppState
+from lazyviewer.runtime.loop import RuntimeLoopCallbacks, RuntimeLoopTiming, run_main_loop
+from lazyviewer.render import Frame
+from lazyviewer.session import LayoutState, PreviewViewState, SessionState, WorkspaceViewState
 from lazyviewer.runtime.terminal import TerminalController
 from lazyviewer.tree_model import TreeEntry
 
 
-def _make_state() -> AppState:
+def _make_state() -> SessionState:
     root = Path("/tmp").resolve()
-    return AppState(
-        current_path=root,
-        tree_root=root,
-        expanded={root},
-        show_hidden=False,
-        tree_entries=[TreeEntry(path=root, depth=0, is_dir=True)],
-        selected_idx=0,
-        rendered="",
-        lines=[],
-        start=0,
-        tree_start=0,
-        text_x=0,
-        wrap_text=False,
-        left_width=24,
-        right_width=80,
-        usable=24,
-        max_start=0,
-        last_right_width=80,
+    return SessionState(
+        workspace=WorkspaceViewState(
+            current_path=root, active_root=root, expanded={root}, show_hidden=False,
+            entries=[TreeEntry(path=root, depth=0, is_dir=True)], selected=0,
+        ),
+        preview=PreviewViewState(rendered="", lines=[]),
+        layout=LayoutState(left_width=24, right_width=80, usable_rows=24, last_right_width=80),
     )
 
 
@@ -47,6 +37,9 @@ class _FakeTerminal:
 
     def set_mouse_reporting(self, enabled: bool) -> None:
         self.mouse_reporting_calls.append(bool(enabled))
+
+    def write_frame(self, _frame) -> None:
+        pass
 
     def kitty_clear_images(self) -> None:
         pass
@@ -156,12 +149,14 @@ def _loop_callbacks(
         refresh_git_status_overlay=lambda **_kwargs: None,
         handle_normal_key=handle_normal_key,
         save_left_pane_width=lambda _total, _left: None,
-        handle_tree_mouse_wheel=None,
-        handle_tree_mouse_click=None,
-        handle_picker_key=None,
-        handle_tree_filter_key=None,
-        tick_source_selection_drag=None,
-        maybe_prefetch_directory_preview=None,
+        handle_tree_mouse_wheel=lambda _key: False,
+        handle_tree_mouse_click=lambda _key: False,
+        handle_picker_key=lambda _key, _seconds: (False, False),
+        handle_tree_filter_key=lambda _key: False,
+        tick_source_selection_drag=lambda: None,
+        tick_tree_filter_search=lambda _timeout: False,
+        maybe_poll_directory_preview_results=lambda: False,
+        maybe_prefetch_directory_preview=lambda: False,
     )
     if not overrides:
         return base
@@ -182,7 +177,7 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
             side_effect=lambda *_args, **_kwargs: next(keys),
         ), mock.patch(
             "lazyviewer.runtime.loop.render_dual_page_context",
-            return_value=None,
+            return_value=Frame(""),
         ):
             run_main_loop(
                 state=state,
@@ -213,7 +208,7 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
             side_effect=lambda *_args, **_kwargs: next(keys),
         ), mock.patch(
             "lazyviewer.runtime.loop.render_dual_page_context",
-            return_value=None,
+            return_value=Frame(""),
         ):
             terminal = TerminalController(stdin_fd=0, stdout_fd=1)
             run_main_loop(
@@ -241,7 +236,7 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
             side_effect=lambda *_args, **_kwargs: next(keys),
         ), mock.patch(
             "lazyviewer.runtime.loop.render_dual_page_context",
-            return_value=None,
+            return_value=Frame(""),
         ):
             run_main_loop(
                 state=state,
@@ -275,7 +270,7 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
             side_effect=_read_key,
         ), mock.patch(
             "lazyviewer.runtime.loop.render_dual_page_context",
-            return_value=None,
+            return_value=Frame(""),
         ):
             run_main_loop(
                 state=state,
@@ -351,7 +346,7 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
             side_effect=lambda *_args, **_kwargs: next(keys),
         ), mock.patch(
             "lazyviewer.runtime.loop.render_dual_page_context",
-            return_value=None,
+            return_value=Frame(""),
         ):
             run_main_loop(
                 state=state,
@@ -380,7 +375,7 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
 
     def test_directory_preview_result_poll_marks_state_dirty_without_idle_wait(self) -> None:
         state = _make_state()
-        state.dirty = False
+        state.interface.dirty = False
         terminal = _FakeTerminal()
         keys = iter(["q"])
         render_calls = {"count": 0}
@@ -438,7 +433,7 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
             side_effect=lambda *_args, **_kwargs: next(keys),
         ), mock.patch(
             "lazyviewer.runtime.loop.render_dual_page_context",
-            return_value=None,
+            return_value=Frame(""),
         ):
             run_main_loop(
                 state=state,
@@ -531,7 +526,7 @@ class RuntimeLoopBehaviorTests(unittest.TestCase):
             )
 
         self.assertEqual(render_calls["count"], 2)
-        self.assertEqual(state.usable, 51)
+        self.assertEqual(state.layout.usable_rows, 51)
 
 
 if __name__ == "__main__":

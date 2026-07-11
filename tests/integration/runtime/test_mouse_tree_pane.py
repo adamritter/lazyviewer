@@ -6,25 +6,12 @@ These tests ensure runtime callbacks and state orchestration stay coherent.
 
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 import unittest
 from unittest import mock
 
 from lazyviewer.runtime import app as app_runtime
-from lazyviewer.render.ansi import ANSI_ESCAPE_RE
-from lazyviewer.runtime.screen import (
-    _centered_scroll_start,
-    _first_git_change_screen_line,
-    _tree_order_key_for_relative_path,
-)
-from lazyviewer.git_status import GIT_STATUS_CHANGED
-from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.render import help_panel_row_count, render_dual_page
-from lazyviewer.search.content import ContentMatch
 
 
 def _callback(kwargs: dict[str, object], name: str):
@@ -77,10 +64,10 @@ class AppRuntimeMouseTestsPart1(unittest.TestCase):
                 handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
                 target_idx = next(
                     idx
-                    for idx, entry in enumerate(state.tree_entries)
+                    for idx, entry in enumerate(state.workspace.entries)
                     if entry.path.resolve() == file_path.resolve()
                 )
-                row = (target_idx - state.tree_start) + 1
+                row = (target_idx - state.workspace.scroll) + 1
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:1:{row}")
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:1:{row}")
 
@@ -91,7 +78,7 @@ class AppRuntimeMouseTestsPart1(unittest.TestCase):
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app_helpers.sys.platform", "darwin"
             ), mock.patch(
                 "lazyviewer.runtime.app_helpers.shutil.which", side_effect=fake_which
@@ -147,35 +134,35 @@ class AppRuntimeMouseTestsPart1(unittest.TestCase):
                 def find_docs_index() -> int:
                     return next(
                         idx
-                        for idx, entry in enumerate(state.tree_entries)
+                        for idx, entry in enumerate(state.workspace.entries)
                         if entry.path.resolve() == docs_dir.resolve()
                     )
 
                 docs_idx = find_docs_index()
-                docs_entry = state.tree_entries[docs_idx]
-                docs_row = (docs_idx - state.tree_start) + 1
+                docs_entry = state.workspace.entries[docs_idx]
+                docs_row = (docs_idx - state.workspace.scroll) + 1
                 arrow_col = 1 + (docs_entry.depth * 2)
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{arrow_col}:{docs_row}")
 
-                snapshots["opened"] = docs_dir.resolve() in state.expanded
+                snapshots["opened"] = docs_dir.resolve() in state.workspace.expanded
                 snapshots["child_visible_after_open"] = any(
-                    entry.path.resolve() == nested_file.resolve() for entry in state.tree_entries
+                    entry.path.resolve() == nested_file.resolve() for entry in state.workspace.entries
                 )
 
                 docs_idx = find_docs_index()
-                docs_entry = state.tree_entries[docs_idx]
-                docs_row = (docs_idx - state.tree_start) + 1
+                docs_entry = state.workspace.entries[docs_idx]
+                docs_row = (docs_idx - state.workspace.scroll) + 1
                 arrow_col = 1 + (docs_entry.depth * 2)
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{arrow_col}:{docs_row}")
 
-                snapshots["closed"] = docs_dir.resolve() not in state.expanded
+                snapshots["closed"] = docs_dir.resolve() not in state.workspace.expanded
                 snapshots["child_hidden_after_close"] = not any(
-                    entry.path.resolve() == nested_file.resolve() for entry in state.tree_entries
+                    entry.path.resolve() == nested_file.resolve() for entry in state.workspace.entries
                 )
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
                 "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
@@ -210,19 +197,19 @@ class AppRuntimeMouseTestsPart1(unittest.TestCase):
                 handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
                 docs_idx = next(
                     idx
-                    for idx, entry in enumerate(state.tree_entries)
+                    for idx, entry in enumerate(state.workspace.entries)
                     if entry.path.resolve() == docs_dir.resolve()
                 )
-                docs_entry = state.tree_entries[docs_idx]
-                docs_row = (docs_idx - state.tree_start) + 1
+                docs_entry = state.workspace.entries[docs_idx]
+                docs_row = (docs_idx - state.workspace.scroll) + 1
                 # Click name area, not the arrow marker.
                 name_col = (1 + (docs_entry.depth * 2)) + 2
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{name_col}:{docs_row}")
-                snapshots["still_collapsed"] = docs_dir.resolve() not in state.expanded
+                snapshots["still_collapsed"] = docs_dir.resolve() not in state.workspace.expanded
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
                 "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
@@ -259,23 +246,23 @@ class AppRuntimeMouseTestsPart1(unittest.TestCase):
                 def row_for_path(target: Path) -> int:
                     idx = next(
                         index
-                        for index, entry in enumerate(state.tree_entries)
+                        for index, entry in enumerate(state.workspace.entries)
                         if entry.path.resolve() == target.resolve()
                     )
-                    return (idx - state.tree_start) + 1
+                    return (idx - state.workspace.scroll) + 1
 
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:1:{row_for_path(first_file)}")
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:1:{row_for_path(second_file)}")
 
-                snapshots["current_before_back"] = state.current_path.resolve()
+                snapshots["current_before_back"] = state.workspace.current_path.resolve()
                 snapshots["back_moved"] = navigation.jump_back_in_history()
-                snapshots["current_after_back"] = state.current_path.resolve()
+                snapshots["current_after_back"] = state.workspace.current_path.resolve()
                 snapshots["forward_moved"] = navigation.jump_forward_in_history()
-                snapshots["current_after_forward"] = state.current_path.resolve()
+                snapshots["current_after_forward"] = state.workspace.current_path.resolve()
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
                 "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1

@@ -24,8 +24,9 @@ but it can be turned off, and it's quite interactive (ripgrep for a syntax with 
 There are lots of ways I'm tempted to improve it (inline editor support?), but at the same time
 I'm trying to keep it minimal and focus on the smooth interaction of the features that isn't available using other tools that treat them as separate features of a more complex program.
 
-The code base is really ugly, far from how I'd like it to be, but it's partly because I started
-working on it with codex before this program existed :)
+The implementation is split into revisioned workspace, typed search and preview services,
+feature-owned session state, and pure frame rendering. See [ARCHITECTURE.md](./ARCHITECTURE.md)
+for the component APIs and dependency rules.
 
 I'm having fun using/developing it though, hopefully it will be fun/useful for others as well.
 

@@ -169,11 +169,8 @@ class TreePaneRenderer:
         """Render one logical row without right-padding."""
         if self.picker_overlay_active:
             return self._render_picker_row(row)
-        prompt_row_offset = 0
         if self.tree_filter_row_visible and row == 0:
             return self._render_filter_row()
-        if self.tree_filter_row_visible:
-            prompt_row_offset = 1
         return self._render_tree_row(row)
 
     def padded_row_text(self, row: int) -> str:

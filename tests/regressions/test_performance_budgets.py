@@ -13,38 +13,27 @@ from pathlib import Path
 from unittest import mock
 
 from lazyviewer.source_pane.diff import _ADDED_BG_SGR, _REMOVED_BG_SGR, _apply_line_background
-from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.render import render_dual_page
+from lazyviewer.session.navigation import JumpLocation
+from tests.render_capture import render_dual_page
 from lazyviewer.tree_pane.panels.filter import TreeFilterController
-from lazyviewer.search.fuzzy import (
-    clear_project_files_cache,
-    collect_project_file_labels,
-    fuzzy_match_label_index,
-)
-from lazyviewer.runtime.state import AppState
+from lazyviewer.search.fuzzy import fuzzy_match_label_index
+from lazyviewer.search import SearchService
+import lazyviewer.search.service as search_runtime
+from lazyviewer.session import LayoutState, PreviewViewState, SessionState, WorkspaceViewState
 from lazyviewer.tree_model import TreeEntry, build_tree_entries
+from lazyviewer.workspace import WorkspaceQuery, WorkspaceService, collect_root_file_labels
 
 
-def _make_state(root: Path) -> AppState:
+def _make_state(root: Path) -> SessionState:
     resolved_root = root.resolve()
-    return AppState(
-        current_path=resolved_root,
-        tree_root=resolved_root,
-        expanded={resolved_root},
-        show_hidden=False,
-        tree_entries=[TreeEntry(path=resolved_root, depth=0, is_dir=True)],
-        selected_idx=0,
-        rendered="",
-        lines=[""],
-        start=0,
-        tree_start=0,
-        text_x=0,
-        wrap_text=False,
-        left_width=24,
-        right_width=80,
-        usable=24,
-        max_start=0,
-        last_right_width=80,
+    return SessionState(
+        workspace=WorkspaceViewState(
+            current_path=resolved_root, active_root=resolved_root,
+            expanded={resolved_root}, show_hidden=False,
+            entries=[TreeEntry(path=resolved_root, depth=0, is_dir=True)], selected=0,
+        ),
+        preview=PreviewViewState(rendered="", lines=[""]),
+        layout=LayoutState(left_width=24, right_width=80, usable_rows=24, last_right_width=80),
     )
 
 
@@ -62,8 +51,7 @@ class PerformanceBudgetTests(unittest.TestCase):
                     (subdir / f"file_{f_idx:03d}.py").write_text("x = 1\n", encoding="utf-8")
                     file_count += 1
 
-            clear_project_files_cache()
-            with mock.patch("lazyviewer.search.fuzzy.shutil.which", return_value=None):
+            with mock.patch("lazyviewer.workspace.index.shutil.which", return_value=None):
                 start = time.perf_counter()
                 entries = build_tree_entries(
                     root=root,
@@ -71,7 +59,7 @@ class PerformanceBudgetTests(unittest.TestCase):
                     show_hidden=False,
                     skip_gitignored=False,
                 )
-                labels = collect_project_file_labels(
+                labels = collect_root_file_labels(
                     root,
                     show_hidden=False,
                     skip_gitignored=False,
@@ -101,7 +89,7 @@ class PerformanceBudgetTests(unittest.TestCase):
             path = Path(tmp) / "demo.py"
             path.write_text("".join(source_lines), encoding="utf-8")
             writes: list[bytes] = []
-            with mock.patch("lazyviewer.render.os.write", side_effect=lambda _fd, data: writes.append(data) or len(data)):
+            with mock.patch("tests.render_capture.os.write", side_effect=lambda _fd, data: writes.append(data) or len(data)):
                 start = time.perf_counter()
                 render_dual_page(
                     text_lines=diff_lines,
@@ -140,15 +128,26 @@ class PerformanceBudgetTests(unittest.TestCase):
             root = Path(tmp).resolve()
             (root / "demo.py").write_text("alpha beta gamma\n", encoding="utf-8")
             state = _make_state(root)
-            state.tree_filter_active = True
-            state.tree_filter_mode = "content"
+            state.filter.active = True
+            state.filter.mode = "content"
+
+            workspace = WorkspaceService()
+            state.workspace.snapshot = workspace.snapshot(
+                WorkspaceQuery.create(
+                    [root], [{root}], show_hidden=False, skip_gitignored=True
+                )
+            )
+
+            def content_backend(*args, **kwargs):
+                return search_runtime.search_project_content_rg(*args, **kwargs)
 
             ops = TreeFilterController(
                 state=state,
+                search_service=SearchService(workspace, content_backend=content_backend),
                 visible_content_rows=lambda: 20,
                 rebuild_screen_lines=lambda **_kwargs: None,
                 preview_selected_entry=lambda **_kwargs: None,
-                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                current_jump_location=lambda: JumpLocation(path=state.workspace.current_path, start=state.preview.scroll, text_x=state.preview.horizontal_scroll),
                 record_jump_if_changed=lambda _origin: None,
                 jump_to_path=lambda _target: None,
                 jump_to_line=lambda _line: None,
@@ -162,11 +161,11 @@ class PerformanceBudgetTests(unittest.TestCase):
                 deadline = time.perf_counter() + timeout_seconds
                 while time.perf_counter() < deadline:
                     ops.poll_content_search_updates(timeout_seconds=0.01)
-                    if not state.tree_filter_loading:
+                    if not state.filter.loading:
                         return
                 self.fail("timed out waiting for background content search")
 
-            with mock.patch("lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=slow_search):
+            with mock.patch("lazyviewer.search.service.search_project_content_rg", side_effect=slow_search):
                 cold_start = time.perf_counter()
                 ops.apply_tree_filter_query("alpha")
                 cold_elapsed = time.perf_counter() - cold_start

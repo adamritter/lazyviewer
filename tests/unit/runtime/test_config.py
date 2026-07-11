@@ -12,10 +12,23 @@ from pathlib import Path
 from unittest import mock
 
 from lazyviewer.runtime import config
-from lazyviewer.runtime.navigation import JumpLocation
+from lazyviewer.session.navigation import JumpLocation
 
 
 class ConfigBehaviorTests(unittest.TestCase):
+    def test_resolve_default_config_path_falls_back_without_platformdirs(self) -> None:
+        with mock.patch("lazyviewer.runtime.config.importlib.import_module", side_effect=ModuleNotFoundError):
+            resolved = config._resolve_default_config_path()
+        self.assertEqual(resolved, Path.home() / ".config" / "lazyviewer" / "config.json")
+
+    def test_resolve_default_config_path_uses_platformdirs_when_available(self) -> None:
+        fake_platformdirs = mock.Mock()
+        fake_platformdirs.user_config_dir.return_value = "/tmp/native/lazyviewer"
+        with mock.patch("lazyviewer.runtime.config.importlib.import_module", return_value=fake_platformdirs):
+            resolved = config._resolve_default_config_path()
+        self.assertEqual(resolved, Path("/tmp/native/lazyviewer") / "config.json")
+        fake_platformdirs.user_config_dir.assert_called_once_with("lazyviewer", appauthor=False)
+
     def test_content_search_left_pane_percent_uses_distinct_config_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "lazyviewer.json"

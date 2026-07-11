@@ -14,38 +14,27 @@ from lazyviewer.input import (
     NormalKeyContext,
     handle_normal_key,
 )
-from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.runtime.state import AppState
+from lazyviewer.session.navigation import JumpLocation
+from lazyviewer.session import LayoutState, PreviewViewState, SessionState, WorkspaceViewState
 from lazyviewer.tree_model import TreeEntry
 
 
-def _make_state() -> AppState:
+def _make_state() -> SessionState:
     root = Path("/tmp").resolve()
-    return AppState(
-        current_path=root,
-        tree_root=root,
-        expanded={root},
-        show_hidden=False,
-        tree_entries=[TreeEntry(path=root, depth=0, is_dir=True)],
-        selected_idx=0,
-        rendered="",
-        lines=[],
-        start=0,
-        tree_start=0,
-        text_x=0,
-        wrap_text=False,
-        left_width=24,
-        right_width=80,
-        usable=24,
-        max_start=0,
-        last_right_width=80,
+    return SessionState(
+        workspace=WorkspaceViewState(
+            current_path=root, active_root=root, expanded={root}, show_hidden=False,
+            entries=[TreeEntry(path=root, depth=0, is_dir=True)], selected=0,
+        ),
+        preview=PreviewViewState(rendered="", lines=[]),
+        layout=LayoutState(left_width=24, right_width=80, usable_rows=24, last_right_width=80),
     )
 
 class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
     def _invoke(
         self,
         *,
-        state: AppState,
+        state: SessionState,
         key: str,
         toggle_git_features,
         jump_to_next_git_modified,
@@ -57,10 +46,11 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
         visible_rows: int = 20,
     ) -> bool:
         if launch_editor_for_path is None:
-            launch_editor_for_path = lambda _path: None
+            def launch_editor_for_path(_path):
+                return None
         context = NormalKeyContext(
             state=state,
-            current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+            current_jump_location=lambda: JumpLocation(path=state.workspace.current_path, start=state.preview.scroll, text_x=state.preview.horizontal_scroll),
             record_jump_if_changed=lambda _origin: None,
             open_symbol_picker=open_symbol_picker,
             reroot_to_parent=lambda: None,
@@ -91,8 +81,8 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
 
     def test_e_launches_current_directory_when_browser_hidden(self) -> None:
         state = _make_state()
-        state.browser_visible = False
-        state.current_path = Path("/tmp").resolve()
+        state.layout.browser_visible = False
+        state.workspace.current_path = Path("/tmp").resolve()
         launched: list[Path] = []
 
         should_quit = self._invoke(
@@ -105,11 +95,11 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
 
         self.assertFalse(should_quit)
         self.assertEqual(launched, [Path("/tmp").resolve()])
-        self.assertEqual(state.current_path, Path("/tmp").resolve())
+        self.assertEqual(state.workspace.current_path, Path("/tmp").resolve())
 
     def test_enter_and_down_move_one_line_the_same(self) -> None:
         state = _make_state()
-        state.browser_visible = False
+        state.layout.browser_visible = False
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sample.py"
@@ -120,9 +110,9 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
                 "    third = 3\n"
             )
             path.write_text(source, encoding="utf-8")
-            state.current_path = path
-            state.lines = source.splitlines(keepends=True)
-            state.max_start = len(state.lines) - 1
+            state.workspace.current_path = path
+            state.preview.lines = source.splitlines(keepends=True)
+            state.preview.max_scroll = len(state.preview.lines) - 1
             should_quit = self._invoke(
                 state=state,
                 key="ENTER",
@@ -131,9 +121,9 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
                 visible_rows=2,
             )
             self.assertFalse(should_quit)
-            self.assertEqual(state.start, 1)
+            self.assertEqual(state.preview.scroll, 1)
 
-            state.start = 0
+            state.preview.scroll = 0
             should_quit = self._invoke(
                 state=state,
                 key="DOWN",
@@ -143,11 +133,11 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
             )
 
         self.assertFalse(should_quit)
-        self.assertEqual(state.start, 1)
+        self.assertEqual(state.preview.scroll, 1)
 
     def test_enter_count_keeps_explicit_step_size(self) -> None:
         state = _make_state()
-        state.browser_visible = False
+        state.layout.browser_visible = False
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sample.py"
@@ -159,10 +149,10 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
                 "    fourth = 4\n"
             )
             path.write_text(source, encoding="utf-8")
-            state.current_path = path
-            state.lines = source.splitlines(keepends=True)
-            state.max_start = len(state.lines) - 1
-            state.count_buffer = "3"
+            state.workspace.current_path = path
+            state.preview.lines = source.splitlines(keepends=True)
+            state.preview.max_scroll = len(state.preview.lines) - 1
+            state.interface.count_buffer = "3"
             should_quit = self._invoke(
                 state=state,
                 key="ENTER",
@@ -172,11 +162,11 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
             )
 
         self.assertFalse(should_quit)
-        self.assertEqual(state.start, 3)
+        self.assertEqual(state.preview.scroll, 3)
 
     def test_G_reaches_end_when_sticky_header_reduces_text_rows(self) -> None:
         state = _make_state()
-        state.browser_visible = False
+        state.layout.browser_visible = False
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sample.py"
@@ -188,10 +178,10 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
                 "    four = 4\n"
             )
             path.write_text(source, encoding="utf-8")
-            state.current_path = path
-            state.lines = source.splitlines(keepends=True)
+            state.workspace.current_path = path
+            state.preview.lines = source.splitlines(keepends=True)
             visible_rows = 3
-            state.max_start = max(0, len(state.lines) - visible_rows)
+            state.preview.max_scroll = max(0, len(state.preview.lines) - visible_rows)
 
             should_quit = self._invoke(
                 state=state,
@@ -202,11 +192,11 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
             )
 
         self.assertFalse(should_quit)
-        self.assertEqual(state.start, 2)
+        self.assertEqual(state.preview.scroll, 2)
 
     def test_space_reaches_end_when_sticky_header_reduces_text_rows(self) -> None:
         state = _make_state()
-        state.browser_visible = False
+        state.layout.browser_visible = False
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sample.py"
@@ -218,10 +208,10 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
                 "    four = 4\n"
             )
             path.write_text(source, encoding="utf-8")
-            state.current_path = path
-            state.lines = source.splitlines(keepends=True)
+            state.workspace.current_path = path
+            state.preview.lines = source.splitlines(keepends=True)
             visible_rows = 3
-            state.max_start = max(0, len(state.lines) - visible_rows)
+            state.preview.max_scroll = max(0, len(state.preview.lines) - visible_rows)
 
             should_quit = self._invoke(
                 state=state,
@@ -232,14 +222,14 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
             )
 
         self.assertFalse(should_quit)
-        self.assertEqual(state.start, 2)
+        self.assertEqual(state.preview.scroll, 2)
 
     def test_d_scrolls_half_page_when_browser_hidden(self) -> None:
         state = _make_state()
-        state.browser_visible = False
-        state.lines = [f"line {idx}\n" for idx in range(40)]
+        state.layout.browser_visible = False
+        state.preview.lines = [f"line {idx}\n" for idx in range(40)]
         visible_rows = 10
-        state.max_start = max(0, len(state.lines) - visible_rows)
+        state.preview.max_scroll = max(0, len(state.preview.lines) - visible_rows)
 
         should_quit = self._invoke(
             state=state,
@@ -250,13 +240,13 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
         )
 
         self.assertFalse(should_quit)
-        self.assertEqual(state.start, 5)
+        self.assertEqual(state.preview.scroll, 5)
 
     def test_right_scroll_clamps_to_max_horizontal_offset(self) -> None:
         state = _make_state()
-        state.browser_visible = False
-        state.wrap_text = False
-        state.text_x = 10_000
+        state.layout.browser_visible = False
+        state.preview.wrap = False
+        state.preview.horizontal_scroll = 10_000
 
         should_quit = self._invoke(
             state=state,
@@ -267,17 +257,17 @@ class KeyHandlersBehaviorTestsPart3(unittest.TestCase):
         )
 
         self.assertFalse(should_quit)
-        self.assertEqual(state.text_x, 120)
+        self.assertEqual(state.preview.horizontal_scroll, 120)
 
     def test_e_forces_preview_rebuild_after_successful_edit(self) -> None:
         state = _make_state()
-        state.browser_visible = False
-        state.current_path = Path("/tmp").resolve()
+        state.layout.browser_visible = False
+        state.workspace.current_path = Path("/tmp").resolve()
         refresh_calls: list[dict[str, object]] = []
 
         context = NormalKeyContext(
             state=state,
-            current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+            current_jump_location=lambda: JumpLocation(path=state.workspace.current_path, start=state.preview.scroll, text_x=state.preview.horizontal_scroll),
             record_jump_if_changed=lambda _origin: None,
             open_symbol_picker=lambda: None,
             reroot_to_parent=lambda: None,

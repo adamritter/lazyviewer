@@ -6,25 +6,12 @@ These tests ensure runtime callbacks and state orchestration stay coherent.
 
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 import unittest
 from unittest import mock
 
 from lazyviewer.runtime import app as app_runtime
-from lazyviewer.render.ansi import ANSI_ESCAPE_RE
-from lazyviewer.runtime.screen import (
-    _centered_scroll_start,
-    _first_git_change_screen_line,
-    _tree_order_key_for_relative_path,
-)
-from lazyviewer.git_status import GIT_STATUS_CHANGED
-from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.render import help_panel_row_count, render_dual_page
-from lazyviewer.search.content import ContentMatch
 
 
 def _callback(kwargs: dict[str, object], name: str):
@@ -80,18 +67,18 @@ class AppRuntimeMouseTestsPart3(unittest.TestCase):
                 state = kwargs["state"]
                 handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
                 tick_source_selection_drag = _callback(kwargs, "tick_source_selection_drag")
-                right_start_col = state.left_width + 2
-                right_edge_col = right_start_col + state.right_width - 1
+                right_start_col = state.layout.left_width + 2
+                right_edge_col = right_start_col + state.layout.right_width - 1
                 row = 2
 
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 2}:{row}")
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_edge_col}:{row}")
-                snapshots["text_x_after_drag"] = state.text_x
-                snapshots["focus_after_drag"] = state.source_selection_focus
+                snapshots["text_x_after_drag"] = state.preview.horizontal_scroll
+                snapshots["focus_after_drag"] = state.preview.selection_focus
                 for _ in range(6):
                     tick_source_selection_drag()
-                snapshots["text_x_after_wait"] = state.text_x
-                snapshots["focus_after_wait"] = state.source_selection_focus
+                snapshots["text_x_after_wait"] = state.preview.horizontal_scroll
+                snapshots["focus_after_wait"] = state.preview.selection_focus
                 handle_tree_mouse_click(f"MOUSE_LEFT_UP:{right_edge_col}:{row}")
 
             def fake_which(cmd: str) -> str | None:
@@ -101,9 +88,9 @@ class AppRuntimeMouseTestsPart3(unittest.TestCase):
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.shutil.which", side_effect=fake_which
-            ), mock.patch("lazyviewer.runtime.app.subprocess.run"), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app_helpers.subprocess.run"), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
@@ -145,24 +132,24 @@ class AppRuntimeMouseTestsPart3(unittest.TestCase):
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
                 handle_tree_mouse_wheel = _callback(kwargs, "handle_tree_mouse_wheel")
-                right_col = state.left_width + 2
+                right_col = state.layout.left_width + 2
                 row = 1
 
-                snapshots["expected_max"] = max(0, 220 - state.right_width)
-                snapshots["initial_text_x"] = state.text_x
+                snapshots["expected_max"] = max(0, 220 - state.layout.right_width)
+                snapshots["initial_text_x"] = state.preview.horizontal_scroll
                 snapshots["handled_first"] = handle_tree_mouse_wheel(f"MOUSE_WHEEL_RIGHT:{right_col}:{row}")
-                snapshots["after_first"] = state.text_x
+                snapshots["after_first"] = state.preview.horizontal_scroll
                 for _ in range(300):
                     handle_tree_mouse_wheel(f"MOUSE_WHEEL_RIGHT:{right_col}:{row}")
-                snapshots["after_many"] = state.text_x
+                snapshots["after_many"] = state.preview.horizontal_scroll
                 snapshots["handled_at_max"] = handle_tree_mouse_wheel(f"MOUSE_WHEEL_RIGHT:{right_col}:{row}")
-                snapshots["after_extra"] = state.text_x
+                snapshots["after_extra"] = state.preview.horizontal_scroll
                 handle_tree_mouse_wheel(f"MOUSE_WHEEL_LEFT:{right_col}:{row}")
-                snapshots["after_left"] = state.text_x
+                snapshots["after_left"] = state.preview.horizontal_scroll
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
@@ -206,15 +193,15 @@ class AppRuntimeMouseTestsPart3(unittest.TestCase):
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
                 handle_tree_mouse_wheel = _callback(kwargs, "handle_tree_mouse_wheel")
-                right_col = state.left_width + 2
+                right_col = state.layout.left_width + 2
                 row = 1
-                snapshots["before"] = state.text_x
+                snapshots["before"] = state.preview.horizontal_scroll
                 snapshots["handled"] = handle_tree_mouse_wheel(f"MOUSE_WHEEL_RIGHT:{right_col}:{row}")
-                snapshots["after"] = state.text_x
+                snapshots["after"] = state.preview.horizontal_scroll
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0

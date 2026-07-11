@@ -5,37 +5,27 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from lazyviewer.runtime.state import AppState
+from lazyviewer.session import LayoutState, PreviewViewState, SessionState, WorkspaceViewState
 from lazyviewer.tree_model import TreeEntry
 from lazyviewer.tree_pane.events import TreePaneMouseHandlers
 
 
-def _make_state() -> AppState:
+def _make_state() -> SessionState:
     root = Path("/tmp").resolve()
     nested = (root / "nested").resolve()
     child_file = nested / "demo.py"
-    return AppState(
-        current_path=child_file,
-        tree_root=nested,
-        tree_roots=[root, nested],
-        expanded={nested},
-        show_hidden=False,
-        tree_entries=[
-            TreeEntry(path=nested, depth=0, is_dir=True),
-            TreeEntry(path=child_file, depth=1, is_dir=False),
-        ],
-        selected_idx=0,
-        rendered="",
-        lines=[""],
-        start=0,
-        tree_start=0,
-        text_x=0,
-        wrap_text=False,
-        left_width=40,
-        right_width=80,
-        usable=20,
-        max_start=0,
-        last_right_width=80,
+    return SessionState(
+        workspace=WorkspaceViewState(
+            current_path=child_file, active_root=nested, roots=[root, nested],
+            expanded={nested}, show_hidden=False,
+            entries=[
+                TreeEntry(path=nested, depth=0, is_dir=True),
+                TreeEntry(path=child_file, depth=1, is_dir=False),
+            ],
+            selected=0,
+        ),
+        preview=PreviewViewState(rendered="", lines=[""]),
+        layout=LayoutState(left_width=40, right_width=80, usable_rows=20, last_right_width=80),
     )
 
 
@@ -49,7 +39,7 @@ class TreeMouseWorkspaceRootRowsTests(unittest.TestCase):
             rebuild_tree_entries=lambda **_kwargs: None,
             mark_tree_watch_dirty=lambda: None,
             coerce_tree_filter_result_index=lambda idx: idx,
-            preview_selected_entry=lambda **_kwargs: previews.append(state.selected_idx),
+            preview_selected_entry=lambda **_kwargs: previews.append(state.workspace.selected),
             activate_tree_filter_selection=lambda: None,
             copy_text_to_clipboard=lambda _text: True,
             double_click_seconds=0.3,
@@ -59,7 +49,7 @@ class TreeMouseWorkspaceRootRowsTests(unittest.TestCase):
         handled = handler.handle_click(col=4, row=1, is_left_down=True)
 
         self.assertTrue(handled)
-        self.assertEqual(state.selected_idx, 0)
+        self.assertEqual(state.workspace.selected, 0)
         self.assertEqual(previews, [0])
 
     def test_click_on_second_tree_row_selects_second_entry(self) -> None:
@@ -71,7 +61,7 @@ class TreeMouseWorkspaceRootRowsTests(unittest.TestCase):
             rebuild_tree_entries=lambda **_kwargs: None,
             mark_tree_watch_dirty=lambda: None,
             coerce_tree_filter_result_index=lambda idx: idx,
-            preview_selected_entry=lambda **_kwargs: previews.append(state.selected_idx),
+            preview_selected_entry=lambda **_kwargs: previews.append(state.workspace.selected),
             activate_tree_filter_selection=lambda: None,
             copy_text_to_clipboard=lambda _text: True,
             double_click_seconds=0.3,
@@ -80,5 +70,5 @@ class TreeMouseWorkspaceRootRowsTests(unittest.TestCase):
         handled = handler.handle_click(col=3, row=2, is_left_down=True)
 
         self.assertTrue(handled)
-        self.assertEqual(state.selected_idx, 1)
+        self.assertEqual(state.workspace.selected, 1)
         self.assertEqual(previews[-1], 1)

@@ -7,31 +7,46 @@ import unittest
 from pathlib import Path
 
 from lazyviewer.source_pane.interaction.events import directory_preview_target_for_display_line
-from lazyviewer.runtime.state import AppState
+from lazyviewer.preview import DirectoryDocument, DirectoryRow
+from lazyviewer.session import LayoutState, PreviewViewState, SessionState, WorkspaceViewState
 from lazyviewer.tree_model import TreeEntry
 
 
-def _build_state_for_rendered_directory(root: Path, rendered: str) -> AppState:
+def _build_state_for_rendered_directory(root: Path, rendered: str) -> SessionState:
     resolved_root = root.resolve()
-    return AppState(
-        current_path=resolved_root,
-        tree_root=resolved_root,
-        expanded={resolved_root},
-        show_hidden=False,
-        tree_entries=[TreeEntry(path=resolved_root, depth=0, is_dir=True)],
-        selected_idx=0,
-        rendered=rendered,
-        lines=rendered.splitlines(),
-        start=0,
-        tree_start=0,
-        text_x=0,
-        wrap_text=False,
-        left_width=24,
-        right_width=80,
-        usable=24,
-        max_start=0,
-        last_right_width=80,
-        dir_preview_path=resolved_root,
+    document = DirectoryDocument(
+        path=resolved_root,
+        rows=(
+            DirectoryRow(
+                path=(resolved_root / "src").resolve(),
+                depth=1,
+                is_dir=True,
+                is_last=True,
+                ancestor_last=(),
+            ),
+            DirectoryRow(
+                path=(resolved_root / "src" / "main.py").resolve(),
+                depth=2,
+                is_dir=False,
+                is_last=True,
+                ancestor_last=(True,),
+                file_size=10 * 1024,
+            ),
+        ),
+        truncated=False,
+        max_entries=100,
+    )
+    return SessionState(
+        workspace=WorkspaceViewState(
+            current_path=resolved_root, active_root=resolved_root,
+            expanded={resolved_root}, show_hidden=False,
+            entries=[TreeEntry(path=resolved_root, depth=0, is_dir=True)], selected=0,
+        ),
+        preview=PreviewViewState(
+            rendered=rendered, lines=rendered.splitlines(),
+            directory_path=resolved_root, document=document,
+        ),
+        layout=LayoutState(left_width=24, right_width=80, usable_rows=24, last_right_width=80),
     )
 
 

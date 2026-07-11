@@ -6,9 +6,6 @@ These tests ensure runtime callbacks and state orchestration stay coherent.
 
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 import unittest
@@ -16,14 +13,7 @@ from unittest import mock
 
 from lazyviewer.runtime import app as app_runtime
 from lazyviewer.render.ansi import ANSI_ESCAPE_RE
-from lazyviewer.runtime.screen import (
-    _centered_scroll_start,
-    _first_git_change_screen_line,
-    _tree_order_key_for_relative_path,
-)
-from lazyviewer.git_status import GIT_STATUS_CHANGED
-from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.render import help_panel_row_count, render_dual_page
+from lazyviewer.render import help_panel_row_count
 from lazyviewer.search.content import ContentMatch
 
 
@@ -106,12 +96,12 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
                 handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
-                right_start_col = state.left_width + 2
+                right_start_col = state.layout.left_width + 2
                 target_row: int | None = None
                 target_col: int | None = None
 
-                for idx, line in enumerate(state.lines):
-                    plain = app_runtime.ANSI_ESCAPE_RE.sub("", line).rstrip("\r\n")
+                for idx, line in enumerate(state.preview.lines):
+                    plain = ANSI_ESCAPE_RE.sub("", line).rstrip("\r\n")
                     token_start = plain.rfind("alpha_beta_name")
                     if token_start >= 0 and plain.lstrip().startswith("foo"):
                         target_row = idx + 1
@@ -126,14 +116,14 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{target_col}:{target_row}")
                 handle_tree_mouse_click(f"MOUSE_LEFT_UP:{target_col}:{target_row}")
 
-                snapshots["tree_filter_active"] = state.tree_filter_active
-                snapshots["tree_filter_mode"] = state.tree_filter_mode
-                snapshots["tree_filter_query"] = state.tree_filter_query
-                snapshots["tree_filter_editing"] = state.tree_filter_editing
-                snapshots["tree_filter_prompt_row_visible"] = state.tree_filter_prompt_row_visible
-                snapshots["source_selection_anchor"] = state.source_selection_anchor
-                snapshots["source_selection_focus"] = state.source_selection_focus
-                entry = state.tree_entries[state.selected_idx]
+                snapshots["tree_filter_active"] = state.filter.active
+                snapshots["tree_filter_mode"] = state.filter.mode
+                snapshots["tree_filter_query"] = state.filter.query
+                snapshots["tree_filter_editing"] = state.filter.editing
+                snapshots["tree_filter_prompt_row_visible"] = state.filter.prompt_row_visible
+                snapshots["source_selection_anchor"] = state.preview.selection_anchor
+                snapshots["source_selection_focus"] = state.preview.selection_focus
+                entry = state.workspace.entries[state.workspace.selected]
                 snapshots["selected_kind"] = entry.kind
                 snapshots["selected_path"] = entry.path.resolve()
                 snapshots["selected_line"] = entry.line
@@ -142,9 +132,9 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
             ), mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=fake_search_content
+                "lazyviewer.search.service.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch(
-                "lazyviewer.runtime.app.collect_project_file_labels", return_value=[]
+                "lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None
             ), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(
@@ -210,44 +200,44 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
                 handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
-                state.start = 74
+                state.preview.scroll = 74
 
-                right_start_col = state.left_width + 2
+                right_start_col = state.layout.left_width + 2
                 target_idx = target_line - 1
-                plain = app_runtime.ANSI_ESCAPE_RE.sub("", state.lines[target_idx]).rstrip("\r\n")
+                plain = ANSI_ESCAPE_RE.sub("", state.preview.lines[target_idx]).rstrip("\r\n")
                 token_start = plain.find("alpha_beta_name")
                 self.assertGreaterEqual(token_start, 0)
-                target_row = target_idx - state.start + 1
+                target_row = target_idx - state.preview.scroll + 1
                 self.assertGreaterEqual(target_row, 1)
-                self.assertLessEqual(target_row, max(1, state.usable))
+                self.assertLessEqual(target_row, max(1, state.layout.usable_rows))
                 target_col = right_start_col + token_start + len("alpha")
 
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{target_col}:{target_row}")
                 handle_tree_mouse_click(f"MOUSE_LEFT_UP:{target_col}:{target_row}")
 
-                entry = state.tree_entries[state.selected_idx]
+                entry = state.workspace.entries[state.workspace.selected]
                 snapshots["selected_kind"] = entry.kind
                 snapshots["selected_path"] = entry.path.resolve()
                 snapshots["selected_line"] = entry.line
                 snapshots["selected_column"] = entry.column
-                snapshots["selected_idx"] = state.selected_idx
-                snapshots["tree_start"] = state.tree_start
-                snapshots["tree_entries_len"] = len(state.tree_entries)
-                snapshots["usable"] = state.usable
-                snapshots["show_help"] = state.show_help
-                snapshots["browser_visible"] = state.browser_visible
-                snapshots["tree_filter_active"] = state.tree_filter_active
-                snapshots["tree_filter_mode"] = state.tree_filter_mode
-                snapshots["tree_filter_editing"] = state.tree_filter_editing
-                snapshots["tree_filter_prompt_row_visible"] = state.tree_filter_prompt_row_visible
-                snapshots["picker_active"] = state.picker_active
+                snapshots["selected_idx"] = state.workspace.selected
+                snapshots["tree_start"] = state.workspace.scroll
+                snapshots["tree_entries_len"] = len(state.workspace.entries)
+                snapshots["usable"] = state.layout.usable_rows
+                snapshots["show_help"] = state.layout.show_help
+                snapshots["browser_visible"] = state.layout.browser_visible
+                snapshots["tree_filter_active"] = state.filter.active
+                snapshots["tree_filter_mode"] = state.filter.mode
+                snapshots["tree_filter_editing"] = state.filter.editing
+                snapshots["tree_filter_prompt_row_visible"] = state.filter.prompt_row_visible
+                snapshots["picker_active"] = state.picker.active
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
             ), mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=fake_search_content
+                "lazyviewer.search.service.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch(
-                "lazyviewer.runtime.app.collect_project_file_labels", return_value=[]
+                "lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None
             ), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(
@@ -319,12 +309,12 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
                 handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
-                right_start_col = state.left_width + 2
+                right_start_col = state.layout.left_width + 2
                 target_row: int | None = None
                 target_col: int | None = None
 
-                for idx, line in enumerate(state.lines):
-                    plain = app_runtime.ANSI_ESCAPE_RE.sub("", line).rstrip("\r\n")
+                for idx, line in enumerate(state.preview.lines):
+                    plain = ANSI_ESCAPE_RE.sub("", line).rstrip("\r\n")
                     token_start = plain.find("mouse")
                     if token_start >= 0 and plain.lstrip().startswith("from .mouse import"):
                         target_row = idx + 1
@@ -339,16 +329,16 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{target_col}:{target_row}")
                 handle_tree_mouse_click(f"MOUSE_LEFT_UP:{target_col}:{target_row}")
 
-                snapshots["current_path"] = state.current_path.resolve()
-                snapshots["selected_path"] = state.tree_entries[state.selected_idx].path.resolve()
-                snapshots["tree_filter_active"] = state.tree_filter_active
+                snapshots["current_path"] = state.workspace.current_path.resolve()
+                snapshots["selected_path"] = state.workspace.entries[state.workspace.selected].path.resolve()
+                snapshots["tree_filter_active"] = state.filter.active
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
             ), mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=fake_search_content
+                "lazyviewer.search.service.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch(
-                "lazyviewer.runtime.app.collect_project_file_labels", return_value=[]
+                "lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None
             ), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(
@@ -387,11 +377,11 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
                 handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
-                right_start_col = state.left_width + 2
+                right_start_col = state.layout.left_width + 2
 
                 target_row = None
-                for idx, line in enumerate(state.lines):
-                    plain = app_runtime.ANSI_ESCAPE_RE.sub("", line)
+                for idx, line in enumerate(state.preview.lines):
+                    plain = ANSI_ESCAPE_RE.sub("", line)
                     if "docs/" in plain:
                         target_row = idx + 1
                         break
@@ -401,12 +391,12 @@ class AppRuntimePreviewClickTestsPart1(unittest.TestCase):
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 3}:{target_row}")
                 handle_tree_mouse_click(f"MOUSE_LEFT_UP:{right_start_col + 3}:{target_row}")
 
-                snapshots["current_path"] = state.current_path.resolve()
-                snapshots["selected_path"] = state.tree_entries[state.selected_idx].path.resolve()
+                snapshots["current_path"] = state.workspace.current_path.resolve()
+                snapshots["selected_path"] = state.workspace.entries[state.workspace.selected].path.resolve()
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0

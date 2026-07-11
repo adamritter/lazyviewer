@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,6 +16,63 @@ from pathlib import Path
 from unittest import mock
 
 from lazyviewer import cli
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+REPOSITORY_LAUNCHER = PROJECT_ROOT / "lazyviewer.py"
+
+
+class RepositoryLauncherTests(unittest.TestCase):
+    def test_unsupported_system_python_is_rejected_before_package_import(self) -> None:
+        """Catch aliases that accidentally bypass the project virtualenv."""
+        system_python = Path("/usr/bin/python3")
+        if not system_python.is_file():
+            self.skipTest("system Python is unavailable on this platform")
+
+        version = subprocess.run(
+            [
+                str(system_python),
+                "-c",
+                "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)",
+            ],
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        if version.returncode == 0:
+            self.skipTest("system Python is already supported")
+
+        result = subprocess.run(
+            [str(system_python), str(REPOSITORY_LAUNCHER), "--help"],
+            cwd=PROJECT_ROOT,
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires Python 3.10 or newer", result.stderr)
+        self.assertIn(".venv/bin/lazyviewer", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_project_console_entrypoint_runs(self) -> None:
+        launcher = PROJECT_ROOT / ".venv" / "bin" / "lazyviewer"
+        if not launcher.is_file():
+            self.skipTest("project console entry point has not been installed")
+
+        result = subprocess.run(
+            [str(launcher), "--help"],
+            cwd=PROJECT_ROOT,
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("usage:", result.stdout.lower())
 
 
 class CliDefaultPathTests(unittest.TestCase):

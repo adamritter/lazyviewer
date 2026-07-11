@@ -6,8 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.render import render_dual_page, render_help_page
-
+from tests.render_capture import render_dual_page, render_help_page
 
 class RenderStatusHelpTests(unittest.TestCase):
     def test_bottom_help_panel_splits_tree_and_text_sections_when_browser_visible(self) -> None:
@@ -17,7 +16,7 @@ class RenderStatusHelpTests(unittest.TestCase):
             writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=["line 1", "line 2"],
                 text_start=0,
@@ -50,7 +49,7 @@ class RenderStatusHelpTests(unittest.TestCase):
             writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_help_page(width=120, height=32)
 
         rendered = b"".join(writes).decode("utf-8", errors="replace")
@@ -65,4 +64,3 @@ class RenderStatusHelpTests(unittest.TestCase):
         self.assertIn("Ctrl+D", rendered)
         self.assertIn("tree root -> parent directory", rendered)
         self.assertIn("tree root -> selected directory", rendered)
-

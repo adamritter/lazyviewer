@@ -7,16 +7,20 @@ This is the highest-level module where rendering, navigation, search, and git me
 from __future__ import annotations
 
 import os
-import subprocess
 import shutil
 import sys
 import time
-from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
-from ..render.ansi import ANSI_ESCAPE_RE, build_screen_lines
-from .app_bootstrap import AppStateBootstrap
+from ..render.ansi import build_screen_lines
+from ..preview import (
+    DIRECTORY_INITIAL_MAX_ENTRIES,
+    DirectoryDocument,
+    PreviewService,
+)
+from ..ports import PreviewSelectedEntry, SynchronizeTree
+from .bootstrap import SessionBootstrap
 from .app_helpers import (
     clear_source_selection as _clear_source_selection,
     clear_status_message as _clear_status_message,
@@ -27,16 +31,19 @@ from .app_helpers import (
     toggle_git_features as _toggle_git_features,
 )
 from .command_palette import COMMAND_PALETTE_ITEMS
+from .coordinator import SessionCoordinator, SessionEffectHandlers
 from .git_jumps import (
     GitModifiedJumpNavigator,
 )
 from ..source_pane import SourcePane
-from .application import App
-from .directory_prefetch import (
-    DirectoryPreviewPrefetchResult,
-    DirectoryPreviewPrefetchScheduler,
-)
-from .index_warmup import TreeFilterIndexWarmupScheduler
+from ..source_pane.interaction.events import directory_preview_target_for_display_line
+from ..source_pane.interaction.geometry import copy_selected_source_range
+from ..source_pane.presenter import PreviewPresenter
+from ..source_pane.preview_controller import PreviewController
+from ..source_pane.syntax import colorize_source
+from .application import App, ApplicationComponents, ApplicationOperations
+from .preview_worker import PreviewLoaded, PreviewWorker
+from ..session import PreviewCompleted, WorkspaceObserved
 from .layout import PagerLayout
 from .config import (
     load_content_search_left_pane_percent,
@@ -48,26 +55,31 @@ from .config import (
     load_show_hidden,
 )
 from .editor import launch_editor
-from ..git_status import collect_git_status_overlay
 from ..render import help_panel_row_count
+from ..search import SearchService
 from .loop import RuntimeLoopTiming, run_main_loop
 from ..tree_pane.pane import TreePane
-from ..search.fuzzy import collect_project_file_labels
+from ..tree_pane.sync import PreviewSelection, TreeRefreshSync
 from .terminal import TerminalController
 from ..tree_model import (
     build_tree_entries,
     clamp_left_width,
     compute_left_width,
 )
-from ..file_tree_model.watch import build_git_watch_signature, build_tree_watch_signature, resolve_git_paths
-from ..ui_theme import normalize_theme_name
+from ..ui_theme import normalize_theme_name, resolve_theme
+from ..workspace import (
+    WorkspaceDelta,
+    WorkspaceIndexWarmup,
+    WorkspaceQuery,
+    WorkspaceService,
+    WorkspaceWatcher,
+)
 
 DOUBLE_CLICK_SECONDS = 0.35
 FILTER_CURSOR_BLINK_SECONDS = 0.5
 TREE_FILTER_SPINNER_FRAME_SECONDS = 0.12
 GIT_STATUS_REFRESH_SECONDS = 2.0
 TREE_WATCH_POLL_SECONDS = 0.5
-GIT_WATCH_POLL_SECONDS = 0.5
 GIT_FEATURES_DEFAULT_ENABLED = True
 TREE_SIZE_LABELS_DEFAULT_ENABLED = True
 CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT = 50.0
@@ -87,12 +99,20 @@ def run_pager(
     if nopager or not os.isatty(sys.stdin.fileno()):
         rendered = content
         if not no_color and os.isatty(sys.stdout.fileno()):
-            rendered = SourcePane.colorize_source(content, path, style)
+            rendered = colorize_source(content, path, style)
         sys.stdout.write(content if no_color else rendered)
         return
 
     selected_theme_name = normalize_theme_name(theme_name or load_theme_name())
-    state_bootstrap = AppStateBootstrap(
+    selected_theme = resolve_theme(selected_theme_name, no_color=no_color)
+    workspace_service = WorkspaceService()
+    preview_service = PreviewService()
+    preview_presenter = PreviewPresenter(
+        style=style,
+        color=not no_color,
+        theme=selected_theme,
+    )
+    session_bootstrap = SessionBootstrap(
         skip_gitignored_for_hidden_mode=_skip_gitignored_for_hidden_mode,
         load_show_hidden=load_show_hidden,
         load_named_marks=load_named_marks,
@@ -100,28 +120,56 @@ def run_pager(
         compute_left_width=compute_left_width,
         clamp_left_width=clamp_left_width,
         build_tree_entries=build_tree_entries,
-        build_rendered_for_path=SourcePane.build_rendered_for_path,
+        workspace_service=workspace_service,
+        preview_service=preview_service,
+        preview_presenter=preview_presenter,
         git_features_default_enabled=GIT_FEATURES_DEFAULT_ENABLED,
         tree_size_labels_default_enabled=TREE_SIZE_LABELS_DEFAULT_ENABLED,
-        dir_preview_initial_max_entries=SourcePane.DIR_PREVIEW_INITIAL_MAX_ENTRIES,
+        dir_preview_initial_max_entries=DIRECTORY_INITIAL_MAX_ENTRIES,
         theme_name=selected_theme_name,
     )
-    state = state_bootstrap.build_state(
+    state = session_bootstrap.build_state(
         path=path,
-        style=style,
         no_color=no_color,
         workspace_paths=workspace_paths,
     )
+    search_service = SearchService(workspace_service)
+
+    def workspace_query() -> WorkspaceQuery:
+        roots = list(state.workspace.roots) or [state.workspace.active_root]
+        expanded_by_root = list(state.workspace.expanded_by_root)
+        return WorkspaceQuery.create(
+            roots,
+            expanded_by_root,
+            show_hidden=state.workspace.show_hidden,
+            skip_gitignored=_skip_gitignored_for_hidden_mode(state.workspace.show_hidden),
+        )
+
+    initial_workspace_snapshot = state.workspace.snapshot
+    if initial_workspace_snapshot is None:  # Defensive: bootstrap always publishes one.
+        initial_workspace_snapshot = workspace_service.snapshot(workspace_query())
+        state.workspace.snapshot = initial_workspace_snapshot
 
     stdin_fd = sys.stdin.fileno()
     stdout_fd = sys.stdout.fileno()
     terminal = TerminalController(stdin_fd, stdout_fd)
     kitty_graphics_supported = terminal.supports_kitty_graphics()
-    index_warmup_scheduler = TreeFilterIndexWarmupScheduler(
-        collect_project_file_labels=collect_project_file_labels,
-        skip_gitignored_for_hidden_mode=_skip_gitignored_for_hidden_mode,
-    )
-    schedule_tree_filter_index_warmup = partial(index_warmup_scheduler.schedule_for_state, state)
+    index_warmup_scheduler = WorkspaceIndexWarmup(workspace_service.file_index)
+
+    def current_workspace_snapshot():
+        snapshot = state.workspace.snapshot
+        query = workspace_query()
+        if snapshot is None:
+            snapshot = workspace_service.snapshot(query)
+        elif snapshot.query != query:
+            delta = workspace_service.refresh(snapshot, query)
+            workspace_watcher.snapshot = delta.snapshot
+            session_coordinator.dispatch(WorkspaceObserved(delta))
+            snapshot = delta.snapshot
+        return snapshot
+
+    def schedule_tree_filter_index_warmup() -> None:
+        index_warmup_scheduler.schedule(current_workspace_snapshot())
     layout = PagerLayout(
         state,
         kitty_graphics_supported,
@@ -142,40 +190,53 @@ def run_pager(
     save_left_pane_width_for_mode = layout.save_left_pane_width_for_mode
     rebuild_screen_lines = layout.rebuild_screen_lines
     show_inline_error = layout.show_inline_error
-    watch_refresh = TreePane.WatchRefreshContext()
-    mark_tree_watch_dirty = watch_refresh.mark_tree_dirty
-    refresh_rendered_for_current_path = partial(
-        SourcePane.refresh_rendered_for_current_path,
-        state,
-        style,
-        no_color,
-        rebuild_screen_lines,
-        visible_content_rows,
+    workspace_watcher = WorkspaceWatcher(
+        service=workspace_service,
+        snapshot=initial_workspace_snapshot,
+        tree_poll_seconds=TREE_WATCH_POLL_SECONDS,
+        git_poll_seconds=GIT_STATUS_REFRESH_SECONDS,
     )
+    mark_tree_watch_dirty = workspace_watcher.mark_tree_dirty
+    preview_controller = PreviewController(
+        state=state,
+        service=preview_service,
+        presenter=preview_presenter,
+        rebuild_screen_lines=rebuild_screen_lines,
+        visible_content_rows=visible_content_rows,
+    )
+    refresh_rendered_for_current_path = preview_controller.refresh
 
-    refresh_git_status_overlay = partial(
-        TreePane.refresh_git_status_overlay,
-        state,
-        refresh_rendered_for_current_path,
-        collect_git_status_overlay=collect_git_status_overlay,
-        monotonic=time.monotonic,
-        status_refresh_seconds=GIT_STATUS_REFRESH_SECONDS,
-    )
-    reset_git_watch_context = partial(
-        watch_refresh.reset_git_context,
-        state,
-        resolve_git_paths=resolve_git_paths,
-    )
-    maybe_refresh_tree_watch: Callable[[], None]
-    maybe_refresh_git_watch = partial(
-        watch_refresh.maybe_refresh_git,
-        state,
-        refresh_git_status_overlay,
-        refresh_rendered_for_current_path,
-        build_git_watch_signature=build_git_watch_signature,
-        monotonic=time.monotonic,
-        git_watch_poll_seconds=GIT_WATCH_POLL_SECONDS,
-    )
+    sync_selected_target_after_tree_refresh: SynchronizeTree
+
+    session_coordinator: SessionCoordinator
+
+    def apply_workspace_delta(delta: WorkspaceDelta) -> None:
+        session_coordinator.dispatch(WorkspaceObserved(delta))
+
+    def refresh_git_status_overlay(force: bool = False) -> None:
+        if not state.git.enabled:
+            if state.git.status:
+                state.git.status = {}
+                state.interface.dirty = True
+            state.git.last_refresh = time.monotonic()
+            return
+        now = time.monotonic()
+        delta = workspace_watcher.poll_git(workspace_query(), now, force=force)
+        if delta is None:
+            return
+        state.git.last_refresh = now
+        apply_workspace_delta(delta)
+
+    def reset_git_watch_context() -> None:
+        workspace_watcher.mark_git_dirty()
+
+    def maybe_refresh_tree_watch() -> None:
+        delta = workspace_watcher.poll_tree(workspace_query(), time.monotonic())
+        if delta is not None:
+            apply_workspace_delta(delta)
+
+    def maybe_refresh_git_watch() -> None:
+        refresh_git_status_overlay()
 
     clear_source_selection = partial(_clear_source_selection, state)
     toggle_git_features = partial(
@@ -184,25 +245,14 @@ def run_pager(
         refresh_git_status_overlay,
         refresh_rendered_for_current_path,
     )
-    toggle_tree_size_labels = partial(
-        SourcePane.toggle_tree_size_labels,
-        state,
-        refresh_rendered_for_current_path,
-    )
-    preview_selected_entry: Callable[..., None]
+    toggle_tree_size_labels = preview_controller.toggle_size_labels
+    preview_selected_entry: PreviewSelectedEntry
 
-    maybe_grow_directory_preview = partial(
-        SourcePane.maybe_grow_directory_preview,
-        state,
-        visible_content_rows,
-        refresh_rendered_for_current_path,
-    )
-    directory_prefetch_scheduler = DirectoryPreviewPrefetchScheduler(
-        build_rendered_for_path=SourcePane.build_rendered_for_path,
-    )
-    prefetch_requested_context: tuple[Path, bool, bool, bool] | None = None
+    maybe_grow_directory_preview = preview_controller.maybe_grow
+    preview_worker = PreviewWorker(preview_service)
+    prefetch_requested_context: tuple[Path, str, bool, bool, bool] | None = None
     prefetch_requested_entries = 0
-    pending_async_preview_context: tuple[Path, bool, bool, bool] | None = None
+    pending_async_preview_context: tuple[Path, str, bool, bool, bool] | None = None
     pending_async_preview_reset_scroll = False
 
     def schedule_directory_preview_request(
@@ -215,28 +265,16 @@ def run_pager(
         resolved_target = target.resolve()
         context = (
             resolved_target,
-            state.show_hidden,
-            state.show_tree_sizes,
-            state.git_features_enabled,
+            preview_controller.workspace_revision,
+            state.workspace.show_hidden,
+            state.workspace.show_sizes,
+            state.git.enabled,
         )
         if context != prefetch_requested_context:
             prefetch_requested_context = context
-            prefetch_requested_entries = state.dir_preview_max_entries
-        prefer_git_diff = state.git_features_enabled and not (
-            state.tree_filter_active
-            and state.tree_filter_mode == "content"
-            and bool(state.tree_filter_query)
-        )
-        directory_prefetch_scheduler.schedule(
-            target=resolved_target,
-            show_hidden=state.show_hidden,
-            style=style,
-            no_color=no_color,
-            dir_max_entries=dir_max_entries,
-            dir_skip_gitignored=not state.show_hidden,
-            prefer_git_diff=prefer_git_diff,
-            dir_git_status_overlay=(state.git_status_overlay if state.git_features_enabled else None),
-            dir_show_size_labels=state.show_tree_sizes,
+            prefetch_requested_entries = state.preview.directory_max_entries
+        preview_worker.schedule(
+            preview_controller.request(resolved_target, max_entries=dir_max_entries)
         )
         prefetch_requested_entries = max(prefetch_requested_entries, dir_max_entries)
 
@@ -252,23 +290,24 @@ def run_pager(
         resolved_target = target.resolve()
         if not resolved_target.is_dir():
             return
-        if reset_dir_budget or state.dir_preview_path != resolved_target:
-            state.dir_preview_max_entries = SourcePane.initial_directory_preview_max_entries(
+        if reset_dir_budget or state.preview.directory_path != resolved_target:
+            state.preview.directory_max_entries = PreviewController.initial_max_entries(
                 visible_content_rows()
             )
         pending_async_preview_context = (
             resolved_target,
-            state.show_hidden,
-            state.show_tree_sizes,
-            state.git_features_enabled,
+            preview_controller.workspace_revision,
+            state.workspace.show_hidden,
+            state.workspace.show_sizes,
+            state.git.enabled,
         )
         pending_async_preview_reset_scroll = bool(reset_scroll)
         if reset_scroll:
-            state.start = 0
-            state.text_x = 0
+            state.preview.scroll = 0
+            state.preview.horizontal_scroll = 0
         schedule_directory_preview_request(
             resolved_target,
-            state.dir_preview_max_entries,
+            state.preview.directory_max_entries,
         )
 
     def maybe_poll_directory_preview_results() -> bool:
@@ -278,85 +317,90 @@ def run_pager(
         nonlocal pending_async_preview_context
         nonlocal pending_async_preview_reset_scroll
         changed = False
-        resolved_target = state.current_path.resolve()
+        resolved_target = state.workspace.current_path.resolve()
         context = (
             resolved_target,
-            state.show_hidden,
-            state.show_tree_sizes,
-            state.git_features_enabled,
+            preview_controller.workspace_revision,
+            state.workspace.show_hidden,
+            state.workspace.show_sizes,
+            state.git.enabled,
         )
         if context != prefetch_requested_context:
             prefetch_requested_context = context
-            prefetch_requested_entries = state.dir_preview_max_entries
+            prefetch_requested_entries = state.preview.directory_max_entries
 
-        best_result: DirectoryPreviewPrefetchResult | None = None
-        for result in directory_prefetch_scheduler.drain_results():
+        best_result: PreviewLoaded | None = None
+        for result in preview_worker.drain():
             request = result.request
             if request.target != resolved_target:
                 continue
-            if request.show_hidden != state.show_hidden:
+            if request.workspace_revision != preview_controller.workspace_revision:
                 continue
-            if request.dir_skip_gitignored != (not state.show_hidden):
+            if request.show_hidden != state.workspace.show_hidden:
                 continue
-            if request.dir_show_size_labels != state.show_tree_sizes:
+            if request.skip_gitignored != (not state.workspace.show_hidden):
                 continue
-            if request.dir_max_entries < state.dir_preview_max_entries:
+            if request.show_size_labels != state.workspace.show_sizes:
                 continue
-            if not getattr(result.rendered_for_path, "is_directory", False):
+            if request.directory_max_entries < state.preview.directory_max_entries:
                 continue
-            if best_result is None or request.dir_max_entries >= best_result.request.dir_max_entries:
+            if not isinstance(result.document, DirectoryDocument):
+                continue
+            if (
+                best_result is None
+                or request.directory_max_entries
+                >= best_result.request.directory_max_entries
+            ):
                 best_result = result
 
         if best_result is not None:
-            state.dir_preview_max_entries = best_result.request.dir_max_entries
+            state.preview.directory_max_entries = best_result.request.directory_max_entries
             apply_reset_scroll = False
             if pending_async_preview_context == context:
                 apply_reset_scroll = pending_async_preview_reset_scroll
                 pending_async_preview_context = None
                 pending_async_preview_reset_scroll = False
-            SourcePane.apply_rendered_for_path(
-                state,
-                best_result.rendered_for_path,
-                rebuild_screen_lines,
-                visible_content_rows,
-                reset_scroll=apply_reset_scroll,
-                resolved_target=resolved_target,
+            effects = session_coordinator.dispatch(
+                PreviewCompleted(
+                    best_result.request,
+                    best_result.document,
+                    apply_reset_scroll,
+                )
             )
-            changed = True
-            prefetch_requested_entries = max(prefetch_requested_entries, best_result.request.dir_max_entries)
+            changed = bool(effects)
+            prefetch_requested_entries = max(
+                prefetch_requested_entries,
+                best_result.request.directory_max_entries,
+            )
 
         return changed
 
     def maybe_prefetch_directory_preview() -> bool:
         changed = maybe_poll_directory_preview_results()
-        resolved_target = state.current_path.resolve()
+        resolved_target = state.workspace.current_path.resolve()
         if not resolved_target.is_dir():
             return changed
 
-        target_entries = SourcePane.directory_prefetch_target_entries(
-            state,
-            visible_content_rows,
-        )
+        target_entries = preview_controller.prefetch_target_entries()
         if target_entries is None:
             return changed
 
-        if target_entries <= max(state.dir_preview_max_entries, prefetch_requested_entries):
+        if target_entries <= max(state.preview.directory_max_entries, prefetch_requested_entries):
             return changed
 
         schedule_directory_preview_request(resolved_target, target_entries)
         return changed
 
-    directory_preview_target_for_display_line = partial(SourcePane.directory_preview_target_for_display_line, state)
-    copy_selected_source_range = partial(
-        SourcePane.copy_selected_source_range,
+    resolve_directory_preview_target = partial(directory_preview_target_for_display_line, state)
+    copy_source_range = partial(
+        copy_selected_source_range,
         state,
         copy_text_to_clipboard=_copy_text_to_clipboard,
     )
     source_pane_runtime: SourcePane
     tree_pane_runtime: TreePane
 
-    sync_selected_target_after_tree_refresh: Callable[..., None]
-    preview_selection = TreePane.PreviewSelection(
+    preview_selection = PreviewSelection(
         state=state,
         clear_source_selection=clear_source_selection,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
@@ -380,6 +424,7 @@ def run_pager(
         double_click_seconds=DOUBLE_CLICK_SECONDS,
         monotonic=time.monotonic,
         on_tree_filter_state_change=sync_left_width_for_tree_filter_mode,
+        search_service=search_service,
     )
     preview_selection.bind_jump_to_line(tree_pane_runtime.navigation.jump_to_line)
     source_pane_runtime = SourcePane(
@@ -388,14 +433,14 @@ def run_pager(
         move_tree_selection=tree_pane_runtime.filter.move_tree_selection,
         maybe_grow_directory_preview=maybe_grow_directory_preview,
         clear_source_selection=clear_source_selection,
-        copy_selected_source_range=copy_selected_source_range,
-        directory_preview_target_for_display_line=directory_preview_target_for_display_line,
+        copy_selected_source_range=copy_source_range,
+        directory_preview_target_for_display_line=resolve_directory_preview_target,
         open_tree_filter=tree_pane_runtime.filter_panel.open,
         apply_tree_filter_query=tree_pane_runtime.filter.apply_tree_filter_query,
         jump_to_path=tree_pane_runtime.navigation.jump_to_path,
         get_terminal_size=shutil.get_terminal_size,
     )
-    tree_refresh_sync = TreePane.TreeRefreshSync(
+    tree_refresh_sync = TreeRefreshSync(
         state=state,
         rebuild_tree_entries=tree_pane_runtime.filter.rebuild_tree_entries,
         refresh_rendered_for_current_path=refresh_rendered_for_current_path,
@@ -403,15 +448,26 @@ def run_pager(
         refresh_git_status_overlay=refresh_git_status_overlay,
     )
     sync_selected_target_after_tree_refresh = tree_refresh_sync.sync_selected_target_after_tree_refresh
-    maybe_refresh_tree_watch = partial(
-        watch_refresh.maybe_refresh_tree,
+    session_coordinator = SessionCoordinator(
         state,
-        sync_selected_target_after_tree_refresh,
-        build_tree_watch_signature=build_tree_watch_signature,
-        monotonic=time.monotonic,
-        tree_watch_poll_seconds=TREE_WATCH_POLL_SECONDS,
+        SessionEffectHandlers(
+            reflow_preview=lambda columns: rebuild_screen_lines(columns=columns),
+            save_pane_width=save_left_pane_width_for_mode,
+            synchronize_workspace=lambda preferred: sync_selected_target_after_tree_refresh(
+                preferred_path=preferred
+            ),
+            refresh_preview=lambda reset_scroll, reset_budget: refresh_rendered_for_current_path(
+                reset_scroll=reset_scroll,
+                reset_dir_budget=reset_budget,
+            ),
+            apply_preview=lambda request, document, reset_scroll: preview_controller.apply(
+                request,
+                document,
+                preview_presenter.present(document),
+                reset_scroll=reset_scroll,
+            ),
+        ),
     )
-
     current_jump_location = tree_pane_runtime.navigation.current_jump_location
     record_jump_if_changed = tree_pane_runtime.navigation.record_jump_if_changed
     git_modified_jump_navigator = GitModifiedJumpNavigator(
@@ -427,22 +483,17 @@ def run_pager(
     jump_to_next_git_modified = git_modified_jump_navigator.jump_to_next_git_modified
 
     schedule_tree_filter_index_warmup()
-    watch_refresh.tree_signature = build_tree_watch_signature(
-        state.tree_root,
-        state.expanded,
-        state.show_hidden,
-    )
-    watch_refresh.tree_last_poll = time.monotonic()
+    workspace_watcher.tree_last_poll = time.monotonic()
     reset_git_watch_context()
-    watch_refresh.git_signature = build_git_watch_signature(watch_refresh.git_dir)
-    watch_refresh.git_last_poll = time.monotonic()
+    workspace_watcher.git_last_poll = time.monotonic()
     refresh_git_status_overlay(force=True)
 
-    launch_editor_for_path = lambda target: launch_editor(  # noqa: E731
-        target,
-        terminal.disable_tui_mode,
-        terminal.enable_tui_mode,
-    )
+    def launch_editor_for_path(target: Path) -> str | None:
+        return launch_editor(
+            target,
+            terminal.disable_tui_mode,
+            terminal.enable_tui_mode,
+        )
     launch_lazygit = partial(
         _launch_lazygit,
         state,
@@ -458,28 +509,32 @@ def run_pager(
         tree_filter_spinner_frame_seconds=TREE_FILTER_SPINNER_FRAME_SECONDS,
     )
     app = App(
-        state=state,
-        terminal=terminal,
+        components=ApplicationComponents(
+            state=state,
+            terminal=terminal,
+            layout=layout,
+            source_pane=source_pane_runtime,
+            tree_pane=tree_pane_runtime,
+        ),
+        operations=ApplicationOperations(
+            maybe_refresh_tree_watch=maybe_refresh_tree_watch,
+            maybe_refresh_git_watch=maybe_refresh_git_watch,
+            refresh_git_status=refresh_git_status_overlay,
+            toggle_tree_size_labels=toggle_tree_size_labels,
+            toggle_git_features=toggle_git_features,
+            launch_lazygit=launch_lazygit,
+            mark_tree_watch_dirty=mark_tree_watch_dirty,
+            preview_selected_entry=preview_selected_entry,
+            refresh_preview=refresh_rendered_for_current_path,
+            maybe_grow_directory_preview=maybe_grow_directory_preview,
+            poll_preview_results=maybe_poll_directory_preview_results,
+            prefetch_directory_preview=maybe_prefetch_directory_preview,
+            launch_editor_for_path=launch_editor_for_path,
+            jump_to_next_git_modified=jump_to_next_git_modified,
+            save_left_pane_width=save_left_pane_width_for_mode,
+            run_main_loop=run_main_loop,
+        ),
         stdin_fd=stdin_fd,
         timing=loop_timing,
-        layout=layout,
-        source_pane=source_pane_runtime,
-        tree_pane=tree_pane_runtime,
-        maybe_refresh_tree_watch=maybe_refresh_tree_watch,
-        maybe_refresh_git_watch=maybe_refresh_git_watch,
-        refresh_git_status_overlay=refresh_git_status_overlay,
-        toggle_tree_size_labels=toggle_tree_size_labels,
-        toggle_git_features=toggle_git_features,
-        launch_lazygit=launch_lazygit,
-        mark_tree_watch_dirty=mark_tree_watch_dirty,
-        preview_selected_entry=preview_selected_entry,
-        refresh_rendered_for_current_path=refresh_rendered_for_current_path,
-        maybe_grow_directory_preview=maybe_grow_directory_preview,
-        maybe_poll_directory_preview_results=maybe_poll_directory_preview_results,
-        maybe_prefetch_directory_preview=maybe_prefetch_directory_preview,
-        launch_editor_for_path=launch_editor_for_path,
-        jump_to_next_git_modified=jump_to_next_git_modified,
-        save_left_pane_width=save_left_pane_width_for_mode,
-        run_main_loop_fn=run_main_loop,
     )
     app.run()

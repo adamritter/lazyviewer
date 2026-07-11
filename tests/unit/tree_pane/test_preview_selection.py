@@ -6,31 +6,20 @@ import time
 import unittest
 from pathlib import Path
 
-from lazyviewer.runtime.state import AppState
+from lazyviewer.session import LayoutState, PreviewViewState, SessionState, WorkspaceViewState
 from lazyviewer.tree_model import TreeEntry
 from lazyviewer.tree_pane.sync import PreviewSelection
 
 
-def _make_state(root: Path, entries: list[TreeEntry], selected_idx: int) -> AppState:
+def _make_state(root: Path, entries: list[TreeEntry], selected_idx: int) -> SessionState:
     resolved_root = root.resolve()
-    return AppState(
-        current_path=resolved_root,
-        tree_root=resolved_root,
-        expanded={resolved_root},
-        show_hidden=False,
-        tree_entries=entries,
-        selected_idx=selected_idx,
-        rendered="",
-        lines=[""],
-        start=0,
-        tree_start=0,
-        text_x=0,
-        wrap_text=False,
-        left_width=30,
-        right_width=90,
-        usable=24,
-        max_start=0,
-        last_right_width=90,
+    return SessionState(
+        workspace=WorkspaceViewState(
+            current_path=resolved_root, active_root=resolved_root,
+            expanded={resolved_root}, show_hidden=False, entries=entries, selected=selected_idx,
+        ),
+        preview=PreviewViewState(rendered="", lines=[""]),
+        layout=LayoutState(left_width=30, right_width=90, usable_rows=24, last_right_width=90),
     )
 
 
@@ -69,7 +58,7 @@ class PreviewSelectionTests(unittest.TestCase):
             async_calls,
             [(target_dir.resolve(), True, True)],
         )
-        self.assertEqual(state.current_path.resolve(), target_dir.resolve())
+        self.assertEqual(state.workspace.current_path.resolve(), target_dir.resolve())
 
     def test_directory_selection_force_uses_sync_refresh(self) -> None:
         root = Path("/tmp/lazyviewer-preview-root")
@@ -93,7 +82,7 @@ class PreviewSelectionTests(unittest.TestCase):
 
         self.assertEqual(async_calls, [])
         self.assertEqual(refresh_calls, [{"reset_scroll": True, "reset_dir_budget": True}])
-        self.assertEqual(state.current_path.resolve(), target_dir.resolve())
+        self.assertEqual(state.workspace.current_path.resolve(), target_dir.resolve())
 
     def test_file_selection_still_uses_sync_refresh(self) -> None:
         root = Path("/tmp/lazyviewer-preview-root")
@@ -117,7 +106,7 @@ class PreviewSelectionTests(unittest.TestCase):
 
         self.assertEqual(async_calls, [])
         self.assertEqual(refresh_calls, [{"reset_scroll": True, "reset_dir_budget": True}])
-        self.assertEqual(state.current_path.resolve(), target_file.resolve())
+        self.assertEqual(state.workspace.current_path.resolve(), target_file.resolve())
 
 
 if __name__ == "__main__":

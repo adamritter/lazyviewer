@@ -11,7 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .events import handle_preview_click
-from ...runtime.state import AppState
+from ...session import SessionState
+from ...ports import ApplyTreeFilterQuery
 
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_NUMERATOR = 2
 SOURCE_SELECTION_DRAG_SCROLL_SPEED_DENOMINATOR = 1
@@ -64,7 +65,7 @@ class SourcePaneMouseHandlers:
     def __init__(
         self,
         *,
-        state: AppState,
+        state: SessionState,
         visible_content_rows: Callable[[], int],
         source_pane_col_bounds: Callable[[], tuple[int, int]],
         source_selection_position: Callable[[int, int], tuple[int, int] | None],
@@ -74,7 +75,7 @@ class SourcePaneMouseHandlers:
         clear_source_selection: Callable[[], bool],
         copy_selected_source_range: Callable[[tuple[int, int], tuple[int, int]], bool],
         open_tree_filter: Callable[[str], None],
-        apply_tree_filter_query: Callable[..., None],
+        apply_tree_filter_query: ApplyTreeFilterQuery,
         jump_to_path: Callable[[Path], None],
     ) -> None:
         """Bind source-pane mouse handlers to app state and pane operations."""
@@ -129,7 +130,7 @@ class SourcePaneMouseHandlers:
     def tick_source_selection_drag(self) -> None:
         """Advance drag selection and auto-scroll when pointer is at pane edges."""
         state = self._state
-        if not self._drag.active or state.source_selection_anchor is None:
+        if not self._drag.active or state.preview.selection_anchor is None:
             return
         if self._drag.pointer is None:
             return
@@ -153,21 +154,21 @@ class SourcePaneMouseHandlers:
         if top_edge_active:
             overshoot = 1 - row
             step = _drag_scroll_step(overshoot, visible_rows)
-            previous_start = state.start
-            state.start = max(0, state.start - step)
-            changed = state.start != previous_start
+            previous_start = state.preview.scroll
+            state.preview.scroll = max(0, state.preview.scroll - step)
+            changed = state.preview.scroll != previous_start
             target_row = 1
         elif bottom_edge_active:
             overshoot = row - visible_rows
             step = _drag_scroll_step(overshoot, visible_rows)
-            previous_start = state.start
-            state.start = min(state.max_start, state.start + step)
+            previous_start = state.preview.scroll
+            state.preview.scroll = min(state.preview.max_scroll, state.preview.scroll + step)
             grew_preview = False
-            if state.start == previous_start:
+            if state.preview.scroll == previous_start:
                 grew_preview = self._maybe_grow_directory_preview()
                 if grew_preview:
-                    state.start = min(state.max_start, state.start + step)
-            changed = state.start != previous_start or grew_preview
+                    state.preview.scroll = min(state.preview.max_scroll, state.preview.scroll + step)
+            changed = state.preview.scroll != previous_start or grew_preview
             target_row = visible_rows
         else:
             target_row = row
@@ -175,25 +176,25 @@ class SourcePaneMouseHandlers:
         if left_edge_active:
             overshoot = min_source_col - col
             step = _drag_scroll_step(overshoot, max_source_col - min_source_col + 1)
-            previous_text_x = state.text_x
-            state.text_x = max(0, state.text_x - step)
-            if state.text_x != previous_text_x:
+            previous_text_x = state.preview.horizontal_scroll
+            state.preview.horizontal_scroll = max(0, state.preview.horizontal_scroll - step)
+            if state.preview.horizontal_scroll != previous_text_x:
                 changed = True
         elif right_edge_active:
             overshoot = col - max_source_col
             step = _drag_scroll_step(overshoot, max_source_col - min_source_col + 1)
-            previous_text_x = state.text_x
-            state.text_x = min(self._max_horizontal_text_offset(), state.text_x + step)
-            if state.text_x != previous_text_x:
+            previous_text_x = state.preview.horizontal_scroll
+            state.preview.horizontal_scroll = min(self._max_horizontal_text_offset(), state.preview.horizontal_scroll + step)
+            if state.preview.horizontal_scroll != previous_text_x:
                 changed = True
 
         target_pos = self._source_selection_position(target_col, target_row)
-        if target_pos is not None and target_pos != state.source_selection_focus:
-            state.source_selection_focus = target_pos
+        if target_pos is not None and target_pos != state.preview.selection_focus:
+            state.preview.selection_focus = target_pos
             changed = True
 
         if changed:
-            state.dirty = True
+            state.interface.dirty = True
 
     def handle_click(
         self,
@@ -213,19 +214,19 @@ class SourcePaneMouseHandlers:
         if selection_pos is not None:
             if is_left_down:
                 if not self._drag.active:
-                    state.source_selection_anchor = selection_pos
-                state.source_selection_focus = selection_pos
+                    state.preview.selection_anchor = selection_pos
+                state.preview.selection_focus = selection_pos
                 self._drag.active = True
                 self._drag.pointer = (col, row)
                 self._drag.vertical_edge = None
                 self._drag.horizontal_edge = None
-                state.dirty = True
+                state.interface.dirty = True
                 return SourcePaneClickResult(handled=True)
-            if state.source_selection_anchor is None:
+            if state.preview.selection_anchor is None:
                 self.reset_source_selection_drag_state()
                 return SourcePaneClickResult(handled=True)
-            state.source_selection_focus = selection_pos
-            same_selection_pos = state.source_selection_anchor == selection_pos
+            state.preview.selection_focus = selection_pos
+            same_selection_pos = state.preview.selection_anchor == selection_pos
             if same_selection_pos:
                 handled = handle_preview_click(
                     state,
@@ -239,19 +240,19 @@ class SourcePaneMouseHandlers:
                 )
                 if handled:
                     return SourcePaneClickResult(handled=True)
-            self._copy_selected_source_range(state.source_selection_anchor, selection_pos)
+            self._copy_selected_source_range(state.preview.selection_anchor, selection_pos)
             self.reset_source_selection_drag_state()
-            state.dirty = True
+            state.interface.dirty = True
             return SourcePaneClickResult(handled=True)
 
         if is_left_up:
-            if self._drag.active and state.source_selection_anchor is not None:
+            if self._drag.active and state.preview.selection_anchor is not None:
                 self._drag.pointer = (col, row)
                 self.tick_source_selection_drag()
-                end_pos = state.source_selection_focus or state.source_selection_anchor
-                self._copy_selected_source_range(state.source_selection_anchor, end_pos)
-                state.source_selection_focus = end_pos
-                state.dirty = True
+                end_pos = state.preview.selection_focus or state.preview.selection_anchor
+                self._copy_selected_source_range(state.preview.selection_anchor, end_pos)
+                state.preview.selection_focus = end_pos
+                state.interface.dirty = True
             self.reset_source_selection_drag_state()
             return SourcePaneClickResult(handled=True)
 
@@ -260,6 +261,6 @@ class SourcePaneMouseHandlers:
             return SourcePaneClickResult(handled=True)
 
         if self._clear_source_selection():
-            state.dirty = True
+            state.interface.dirty = True
         self.reset_source_selection_drag_state()
         return SourcePaneClickResult(handled=False, route_to_tree=True)

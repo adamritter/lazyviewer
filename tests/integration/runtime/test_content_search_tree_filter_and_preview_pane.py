@@ -6,24 +6,12 @@ These tests ensure runtime callbacks and state orchestration stay coherent.
 
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 import unittest
 from unittest import mock
 
 from lazyviewer.runtime import app as app_runtime
-from lazyviewer.render.ansi import ANSI_ESCAPE_RE
-from lazyviewer.runtime.screen import (
-    _centered_scroll_start,
-    _first_git_change_screen_line,
-    _tree_order_key_for_relative_path,
-)
-from lazyviewer.git_status import GIT_STATUS_CHANGED
-from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.render import help_panel_row_count, render_dual_page
 from lazyviewer.search.content import ContentMatch
 
 
@@ -95,14 +83,14 @@ class AppRuntimeContentSearchTestsPart1(unittest.TestCase):
                 apply_tree_filter_query = _callback(kwargs, "apply_tree_filter_query")
                 open_tree_filter("content")
                 apply_tree_filter_query("line", preview_selection=True, select_first_file=True)
-                snapshots["current_path"] = state.current_path.resolve()
-                snapshots["start"] = state.start
-                snapshots["selected_kind"] = state.tree_entries[state.selected_idx].kind if state.tree_entries else ""
+                snapshots["current_path"] = state.workspace.current_path.resolve()
+                snapshots["start"] = state.preview.scroll
+                snapshots["selected_kind"] = state.workspace.entries[state.workspace.selected].kind if state.workspace.entries else ""
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=fake_search_content
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
+                "lazyviewer.search.service.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch("lazyviewer.runtime.app.os.isatty", return_value=True), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
             ), mock.patch(
@@ -164,29 +152,29 @@ class AppRuntimeContentSearchTestsPart1(unittest.TestCase):
                 open_tree_filter = _callback(kwargs, "open_tree_filter")
                 apply_tree_filter_query = _callback(kwargs, "apply_tree_filter_query")
                 activate_tree_filter_selection = _callback(kwargs, "activate_tree_filter_selection")
-                state.start = 30
-                state.text_x = 4
-                snapshots["origin_path"] = state.current_path.resolve()
-                snapshots["origin_start"] = state.start
-                snapshots["origin_text_x"] = state.text_x
+                state.preview.scroll = 30
+                state.preview.horizontal_scroll = 4
+                snapshots["origin_path"] = state.workspace.current_path.resolve()
+                snapshots["origin_start"] = state.preview.scroll
+                snapshots["origin_text_x"] = state.preview.horizontal_scroll
 
                 open_tree_filter("content")
                 apply_tree_filter_query("needle", preview_selection=False, select_first_file=False)
-                snapshots["after_typing_path"] = state.current_path.resolve()
-                snapshots["after_typing_start"] = state.start
-                snapshots["after_typing_text_x"] = state.text_x
-                snapshots["after_typing_selected_kind"] = state.tree_entries[state.selected_idx].kind
+                snapshots["after_typing_path"] = state.workspace.current_path.resolve()
+                snapshots["after_typing_start"] = state.preview.scroll
+                snapshots["after_typing_text_x"] = state.preview.horizontal_scroll
+                snapshots["after_typing_selected_kind"] = state.workspace.entries[state.workspace.selected].kind
 
                 activate_tree_filter_selection()
-                snapshots["after_enter_path"] = state.current_path.resolve()
-                snapshots["after_enter_start"] = state.start
-                snapshots["after_enter_text_x"] = state.text_x
-                snapshots["after_enter_editing"] = state.tree_filter_editing
+                snapshots["after_enter_path"] = state.workspace.current_path.resolve()
+                snapshots["after_enter_start"] = state.preview.scroll
+                snapshots["after_enter_text_x"] = state.preview.horizontal_scroll
+                snapshots["after_enter_editing"] = state.filter.editing
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=fake_search_content
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
+                "lazyviewer.search.service.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch("lazyviewer.runtime.app.os.isatty", return_value=True), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
             ), mock.patch(
@@ -254,35 +242,35 @@ class AppRuntimeContentSearchTestsPart1(unittest.TestCase):
                 apply_tree_filter_query = _callback(kwargs, "apply_tree_filter_query")
                 activate_tree_filter_selection = _callback(kwargs, "activate_tree_filter_selection")
                 close_tree_filter = _callback(kwargs, "close_tree_filter")
-                state.start = 30
-                state.text_x = 6
-                snapshots["origin_path"] = state.current_path.resolve()
-                snapshots["origin_start"] = state.start
-                snapshots["origin_text_x"] = state.text_x
+                state.preview.scroll = 30
+                state.preview.horizontal_scroll = 6
+                snapshots["origin_path"] = state.workspace.current_path.resolve()
+                snapshots["origin_start"] = state.preview.scroll
+                snapshots["origin_text_x"] = state.preview.horizontal_scroll
 
                 open_tree_filter("content")
                 apply_tree_filter_query("needle", preview_selection=False, select_first_file=False)
-                state.selected_idx = next(
+                state.workspace.selected = next(
                     idx
-                    for idx, entry in enumerate(state.tree_entries)
+                    for idx, entry in enumerate(state.workspace.entries)
                     if entry.kind == "search_hit" and entry.path.resolve() == other_file.resolve()
                 )
                 activate_tree_filter_selection()
-                snapshots["after_select_path"] = state.current_path.resolve()
-                snapshots["after_select_start"] = state.start
+                snapshots["after_select_path"] = state.workspace.current_path.resolve()
+                snapshots["after_select_start"] = state.preview.scroll
 
-                state.tree_filter_editing = True
+                state.filter.editing = True
                 close_tree_filter(clear_query=True, restore_origin=True)
-                snapshots["after_escape_path"] = state.current_path.resolve()
-                snapshots["after_escape_start"] = state.start
-                snapshots["after_escape_text_x"] = state.text_x
-                snapshots["after_escape_active"] = state.tree_filter_active
-                snapshots["after_escape_query"] = state.tree_filter_query
+                snapshots["after_escape_path"] = state.workspace.current_path.resolve()
+                snapshots["after_escape_start"] = state.preview.scroll
+                snapshots["after_escape_text_x"] = state.preview.horizontal_scroll
+                snapshots["after_escape_active"] = state.filter.active
+                snapshots["after_escape_query"] = state.filter.query
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=fake_search_content
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
+                "lazyviewer.search.service.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch("lazyviewer.runtime.app.os.isatty", return_value=True), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
             ), mock.patch(
@@ -357,43 +345,43 @@ class AppRuntimeContentSearchTestsPart1(unittest.TestCase):
                 apply_tree_filter_query("needle", preview_selection=False, select_first_file=True)
 
                 docs_idx = next(
-                    idx for idx, entry in enumerate(state.tree_entries) if entry.path.resolve() == docs_dir.resolve()
+                    idx for idx, entry in enumerate(state.workspace.entries) if entry.path.resolve() == docs_dir.resolve()
                 )
-                docs_entry = state.tree_entries[docs_idx]
-                docs_row = (docs_idx - state.tree_start) + 2
+                docs_entry = state.workspace.entries[docs_idx]
+                docs_row = (docs_idx - state.workspace.scroll) + 2
                 arrow_col = 1 + (docs_entry.depth * 2)
                 snapshots["docs_child_visible_before"] = any(
                     entry.path.resolve() == docs_file.resolve() and entry.depth > docs_entry.depth
-                    for entry in state.tree_entries
+                    for entry in state.workspace.entries
                 )
 
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{arrow_col}:{docs_row}")
-                snapshots["docs_collapsed"] = docs_dir.resolve() in state.tree_filter_collapsed_dirs
+                snapshots["docs_collapsed"] = docs_dir.resolve() in state.filter.collapsed_dirs
                 snapshots["docs_child_hidden_after_close"] = not any(
                     entry.path.resolve() == docs_file.resolve() and entry.depth > docs_entry.depth
-                    for entry in state.tree_entries
+                    for entry in state.workspace.entries
                 )
 
                 docs_idx = next(
-                    idx for idx, entry in enumerate(state.tree_entries) if entry.path.resolve() == docs_dir.resolve()
+                    idx for idx, entry in enumerate(state.workspace.entries) if entry.path.resolve() == docs_dir.resolve()
                 )
-                docs_entry = state.tree_entries[docs_idx]
-                docs_row = (docs_idx - state.tree_start) + 2
+                docs_entry = state.workspace.entries[docs_idx]
+                docs_row = (docs_idx - state.workspace.scroll) + 2
                 arrow_col = 1 + (docs_entry.depth * 2)
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{arrow_col}:{docs_row}")
 
-                snapshots["docs_reopened"] = docs_dir.resolve() not in state.tree_filter_collapsed_dirs
+                snapshots["docs_reopened"] = docs_dir.resolve() not in state.filter.collapsed_dirs
                 snapshots["docs_child_visible_after_reopen"] = any(
                     entry.path.resolve() == docs_file.resolve() and entry.depth > docs_entry.depth
-                    for entry in state.tree_entries
+                    for entry in state.workspace.entries
                 )
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
             ), mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=fake_search_content
+                "lazyviewer.search.service.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch(
-                "lazyviewer.runtime.app.collect_project_file_labels", return_value=[]
+                "lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None
             ), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(

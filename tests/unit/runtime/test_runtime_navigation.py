@@ -16,32 +16,21 @@ from lazyviewer.tree_pane.panels.picker import (
     _first_display_index_for_source_line,
     _source_line_for_display_index,
 )
-from lazyviewer.runtime.state import AppState
+from lazyviewer.session import LayoutState, PreviewViewState, SessionState, WorkspaceViewState
 from lazyviewer.tree_model import TreeEntry
 
 
-def _make_state(*, wrap_text: bool, rendered: str, visible_rows: int, width: int) -> AppState:
+def _make_state(*, wrap_text: bool, rendered: str, visible_rows: int, width: int) -> SessionState:
     root = Path("/tmp").resolve()
     lines = build_screen_lines(rendered, width, wrap=wrap_text)
     max_start = max(0, len(lines) - visible_rows)
-    return AppState(
-        current_path=root / "demo.py",
-        tree_root=root,
-        expanded={root},
-        show_hidden=False,
-        tree_entries=[TreeEntry(path=root, depth=0, is_dir=True)],
-        selected_idx=0,
-        rendered=rendered,
-        lines=lines,
-        start=0,
-        tree_start=0,
-        text_x=0,
-        wrap_text=wrap_text,
-        left_width=24,
-        right_width=80,
-        usable=24,
-        max_start=max_start,
-        last_right_width=80,
+    return SessionState(
+        workspace=WorkspaceViewState(
+            current_path=root / "demo.py", active_root=root, expanded={root},
+            show_hidden=False, entries=[TreeEntry(path=root, depth=0, is_dir=True)], selected=0,
+        ),
+        preview=PreviewViewState(rendered=rendered, lines=lines, wrap=wrap_text, max_scroll=max_start),
+        layout=LayoutState(left_width=24, right_width=80, usable_rows=24, last_right_width=80),
     )
 
 
@@ -65,18 +54,18 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
         width = 3
         rendered = "abcdef\nghij\n"
         state = _make_state(wrap_text=False, rendered=rendered, visible_rows=visible_rows, width=width)
-        state.start = 1  # source line 2 at top in unwrapped mode
+        state.preview.scroll = 1  # source line 2 at top in unwrapped mode
 
         def rebuild_screen_lines(*, columns=None, preserve_scroll: bool = True) -> None:
             del columns
-            state.lines = build_screen_lines(state.rendered, width, wrap=state.wrap_text)
-            state.max_start = max(0, len(state.lines) - visible_rows)
+            state.preview.lines = build_screen_lines(state.preview.rendered, width, wrap=state.preview.wrap)
+            state.preview.max_scroll = max(0, len(state.preview.lines) - visible_rows)
             if preserve_scroll:
-                state.start = max(0, min(state.start, state.max_start))
+                state.preview.scroll = max(0, min(state.preview.scroll, state.preview.max_scroll))
             else:
-                state.start = 0
-            if state.wrap_text:
-                state.text_x = 0
+                state.preview.scroll = 0
+            if state.preview.wrap:
+                state.preview.horizontal_scroll = 0
 
         ops = NavigationController(
             state=state,
@@ -95,26 +84,26 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
 
         ops.toggle_wrap_mode()
 
-        self.assertTrue(state.wrap_text)
-        self.assertEqual(state.start, 2)  # first wrapped chunk for source line 2
+        self.assertTrue(state.preview.wrap)
+        self.assertEqual(state.preview.scroll, 2)  # first wrapped chunk for source line 2
 
     def test_toggle_wrap_mode_keeps_same_top_source_line_when_disabling_wrap(self) -> None:
         visible_rows = 1
         width = 3
         rendered = "abcdef\nghij\n"
         state = _make_state(wrap_text=True, rendered=rendered, visible_rows=visible_rows, width=width)
-        state.start = 3  # second chunk of source line 2 in wrapped mode
+        state.preview.scroll = 3  # second chunk of source line 2 in wrapped mode
 
         def rebuild_screen_lines(*, columns=None, preserve_scroll: bool = True) -> None:
             del columns
-            state.lines = build_screen_lines(state.rendered, width, wrap=state.wrap_text)
-            state.max_start = max(0, len(state.lines) - visible_rows)
+            state.preview.lines = build_screen_lines(state.preview.rendered, width, wrap=state.preview.wrap)
+            state.preview.max_scroll = max(0, len(state.preview.lines) - visible_rows)
             if preserve_scroll:
-                state.start = max(0, min(state.start, state.max_start))
+                state.preview.scroll = max(0, min(state.preview.scroll, state.preview.max_scroll))
             else:
-                state.start = 0
-            if state.wrap_text:
-                state.text_x = 0
+                state.preview.scroll = 0
+            if state.preview.wrap:
+                state.preview.horizontal_scroll = 0
 
         ops = NavigationController(
             state=state,
@@ -133,16 +122,16 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
 
         ops.toggle_wrap_mode()
 
-        self.assertFalse(state.wrap_text)
-        self.assertEqual(state.start, 1)  # source line 2 in unwrapped mode
+        self.assertFalse(state.preview.wrap)
+        self.assertEqual(state.preview.scroll, 1)  # source line 2 in unwrapped mode
 
     def test_set_named_mark_persists_marks(self) -> None:
         visible_rows = 8
         width = 80
         rendered = "first\nsecond\n"
         state = _make_state(wrap_text=False, rendered=rendered, visible_rows=visible_rows, width=width)
-        state.start = 5
-        state.text_x = 2
+        state.preview.scroll = 5
+        state.preview.horizontal_scroll = 2
 
         ops = NavigationController(
             state=state,
@@ -159,13 +148,13 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
             open_tree_filter=lambda _mode: None,
         )
 
-        with mock.patch("lazyviewer.tree_pane.panels.picker.navigation.save_named_marks") as save_named_marks:
+        with mock.patch("lazyviewer.tree_pane.panels.picker.controller.save_named_marks") as save_named_marks:
             self.assertTrue(ops.set_named_mark("a"))
 
-        self.assertIn("a", state.named_marks)
-        self.assertEqual(state.named_marks["a"].start, 5)
-        self.assertEqual(state.named_marks["a"].text_x, 2)
-        save_named_marks.assert_called_once_with(state.named_marks)
+        self.assertIn("a", state.navigation.marks)
+        self.assertEqual(state.navigation.marks["a"].start, 5)
+        self.assertEqual(state.navigation.marks["a"].text_x, 2)
+        save_named_marks.assert_called_once_with(state.navigation.marks)
 
     def test_add_workspace_root_from_selected_target_tracks_root_list(self) -> None:
         visible_rows = 8
@@ -173,11 +162,11 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
         root = Path("/tmp").resolve()
         nested = root / "nested"
         state = _make_state(wrap_text=False, rendered="first\n", visible_rows=visible_rows, width=width)
-        state.tree_entries = [
+        state.workspace.entries = [
             TreeEntry(path=root, depth=0, is_dir=True),
             TreeEntry(path=nested, depth=1, is_dir=True),
         ]
-        state.selected_idx = 1
+        state.workspace.selected = 1
         rebuild_calls: list[tuple[Path, Path | None]] = []
 
         ops = NavigationController(
@@ -202,24 +191,24 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
 
         ops.add_workspace_root_from_selected_target()
 
-        self.assertEqual(state.tree_root, root)
-        self.assertEqual(state.tree_roots, [root, nested])
+        self.assertEqual(state.workspace.active_root, root)
+        self.assertEqual(state.workspace.roots, [root, nested])
         self.assertEqual(rebuild_calls[-1], (nested, nested))
 
     def test_remove_active_workspace_root_keeps_last_root_and_sets_status(self) -> None:
         visible_rows = 8
         width = 80
         state = _make_state(wrap_text=False, rendered="first\n", visible_rows=visible_rows, width=width)
-        root = state.tree_root.resolve()
+        root = state.workspace.active_root.resolve()
         nested = root / "nested"
-        state.tree_roots = [root, nested]
-        state.tree_root = root
-        state.current_path = nested / "demo.py"
-        state.tree_entries = [
+        state.workspace.roots = [root, nested]
+        state.workspace.active_root = root
+        state.workspace.current_path = nested / "demo.py"
+        state.workspace.entries = [
             TreeEntry(path=root, depth=0, is_dir=True),
             TreeEntry(path=nested, depth=0, is_dir=True),
         ]
-        state.selected_idx = 1
+        state.workspace.selected = 1
         rebuild_calls: list[Path] = []
 
         ops = NavigationController(
@@ -238,32 +227,32 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
         )
 
         ops.remove_active_workspace_root()
-        self.assertEqual(state.tree_root, root)
-        self.assertEqual(state.tree_roots, [root])
+        self.assertEqual(state.workspace.active_root, root)
+        self.assertEqual(state.workspace.roots, [root])
         self.assertEqual(rebuild_calls[-1], (nested / "demo.py").resolve())
 
-        state.status_message = ""
+        state.interface.status_message = ""
         ops.remove_active_workspace_root()
-        self.assertEqual(state.tree_root, root)
-        self.assertEqual(state.tree_roots, [root])
-        self.assertIn("cannot delete", state.status_message)
+        self.assertEqual(state.workspace.active_root, root)
+        self.assertEqual(state.workspace.roots, [root])
+        self.assertIn("cannot delete", state.interface.status_message)
 
     def test_reroot_to_parent_replaces_selected_workspace_root_in_place(self) -> None:
         visible_rows = 8
         width = 80
         state = _make_state(wrap_text=False, rendered="first\n", visible_rows=visible_rows, width=width)
-        root = state.tree_root.resolve()
+        root = state.workspace.active_root.resolve()
         nested = root / "nested"
-        state.tree_roots = [root, nested]
-        state.tree_root = root
-        state.workspace_expanded = [{nested}, {nested}]
-        state.expanded = {nested}
-        state.tree_entries = [
+        state.workspace.roots = [root, nested]
+        state.workspace.active_root = root
+        state.workspace.expanded_by_root = [{nested}, {nested}]
+        state.workspace.expanded = {nested}
+        state.workspace.entries = [
             TreeEntry(path=root, depth=0, is_dir=True, workspace_root=root),
             TreeEntry(path=nested, depth=1, is_dir=True, workspace_root=root),
             TreeEntry(path=nested, depth=0, is_dir=True, workspace_root=nested),
         ]
-        state.selected_idx = 2
+        state.workspace.selected = 2
         rebuild_calls: list[tuple[Path, Path | None]] = []
 
         ops = NavigationController(
@@ -288,8 +277,8 @@ class RuntimeNavigationWrapTests(unittest.TestCase):
 
         ops.reroot_to_parent()
 
-        self.assertEqual(state.tree_roots, [root, root])
-        self.assertEqual(state.tree_root, root)
+        self.assertEqual(state.workspace.roots, [root, root])
+        self.assertEqual(state.workspace.active_root, root)
         self.assertEqual(rebuild_calls[-1], (nested, root))
 
 

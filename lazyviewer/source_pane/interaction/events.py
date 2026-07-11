@@ -14,7 +14,9 @@ from pathlib import Path
 
 from ...render.ansi import ANSI_ESCAPE_RE, char_display_width
 from ...render.help import help_panel_row_count
-from ...runtime.state import AppState
+from ...preview import DirectoryDocument
+from ...ports import ApplyTreeFilterQuery
+from ...session import SessionState
 from ...tree_model import find_content_hit_index
 from ..diffmap import (
     diff_preview_logical_line_is_removed,
@@ -24,9 +26,6 @@ from ..diffmap import (
 )
 
 _CLICK_SEARCH_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
-_TRAILING_GIT_BADGES_RE = re.compile(r"^(.*?)(?:\s(?:\[(?:M|\?)\])+)$")
-_TRAILING_SIZE_LABEL_RE = re.compile(r"^(.*?)(?:\s\[\d+\sKB\])$")
-_TRAILING_DOC_SUMMARY_RE = re.compile(r"^(.*?)(?:\s{2}--\s.+)$")
 _FROM_IMPORT_RE = re.compile(
     r"^\s*from\s+(?P<module>\.+[A-Za-z_][A-Za-z0-9_\.]*|\.+|[A-Za-z_][A-Za-z0-9_\.]*)\s+import\s+(?P<imports>.+?)\s*$"
 )
@@ -70,70 +69,23 @@ def _display_line_to_source_line(
     return source_idx
 
 
-def directory_preview_target_for_display_line(state: AppState, display_idx: int) -> Path | None:
+def directory_preview_target_for_display_line(state: SessionState, display_idx: int) -> Path | None:
     """Resolve clicked directory-preview row to filesystem path."""
-    if state.dir_preview_path is None:
+    document = state.preview.document
+    if not isinstance(document, DirectoryDocument):
         return None
 
-    source_idx = _display_line_to_source_line(state.lines, state.wrap_text, display_idx)
+    source_idx = _display_line_to_source_line(state.preview.lines, state.preview.wrap, display_idx)
     if source_idx is None:
         return None
-
-    rendered_lines = state.rendered.splitlines()
-    if source_idx < 0 or source_idx >= len(rendered_lines):
+    if source_idx == 0:
+        return document.path
+    # Directory presentation reserves row 1 as a blank separator.
+    row_index = source_idx - 2
+    if row_index < 0 or row_index >= len(document.rows):
         return None
-
-    root = state.dir_preview_path.resolve()
-    dirs_by_depth: dict[int, Path] = {0: root}
-
-    for idx, raw_line in enumerate(rendered_lines):
-        plain_line = ANSI_ESCAPE_RE.sub("", raw_line).rstrip("\r\n")
-        target: Path | None = None
-        depth = 0
-        is_dir = False
-
-        if idx == 0:
-            target = root
-            depth = 0
-            is_dir = True
-        else:
-            branch_idx = plain_line.find("├─ ")
-            if branch_idx < 0:
-                branch_idx = plain_line.find("└─ ")
-            if branch_idx >= 0:
-                name_part = plain_line[branch_idx + 3 :]
-                if name_part and not name_part.startswith("<error:"):
-                    name_part = name_part.rstrip()
-                    doc_summary_match = _TRAILING_DOC_SUMMARY_RE.match(name_part)
-                    if doc_summary_match is not None:
-                        name_part = doc_summary_match.group(1)
-                    badge_match = _TRAILING_GIT_BADGES_RE.match(name_part)
-                    if badge_match is not None:
-                        name_part = badge_match.group(1)
-                    size_match = _TRAILING_SIZE_LABEL_RE.match(name_part.rstrip())
-                    if size_match is not None:
-                        name_part = size_match.group(1)
-                    name_part = name_part.rstrip()
-                    is_dir = name_part.endswith("/")
-                    if is_dir:
-                        name_part = name_part[:-1]
-                    if name_part:
-                        depth = (branch_idx // 3) + 1
-                        parent = dirs_by_depth.get(depth - 1, root)
-                        target = (parent / name_part).resolve()
-
-        if target is not None and is_dir:
-            dirs_by_depth[depth] = target
-            for existing_depth in list(dirs_by_depth):
-                if existing_depth > depth:
-                    del dirs_by_depth[existing_depth]
-
-        if idx == source_idx:
-            if target is None:
-                return None
-            return target
-
-    return None
+    row = document.rows[row_index]
+    return None if row.error is not None else row.path
 
 
 def _clicked_preview_token_details(
@@ -199,93 +151,93 @@ def _logical_line_prefix_char_count(lines: list[str], start_idx: int, line_idx: 
 
 
 def _clicked_preview_hit_anchor(
-    state: AppState,
+    state: SessionState,
     selection_pos: tuple[int, int],
     token_start: int,
 ) -> tuple[Path, int | None, int | None] | None:
     """Compute preferred search-hit anchor (path/line/column) for a clicked token."""
     try:
-        preferred_path = state.current_path.resolve()
+        preferred_path = state.workspace.current_path.resolve()
     except Exception:
-        preferred_path = state.current_path
+        preferred_path = state.workspace.current_path
     if not preferred_path.is_file():
         return None
 
     line_idx, _text_col = selection_pos
-    if line_idx < 0 or line_idx >= len(state.lines):
+    if line_idx < 0 or line_idx >= len(state.preview.lines):
         return preferred_path, None, None
 
-    if state.preview_is_git_diff:
+    if state.preview.is_git_diff:
         source_line = diff_source_line_for_display_index(
-            state.lines,
+            state.preview.lines,
             line_idx,
-            state.wrap_text,
+            state.preview.wrap,
         )
-        if state.wrap_text:
+        if state.preview.wrap:
             start_idx = 0
-            for range_start, range_end in iter_diff_logical_line_ranges(state.lines, True):
+            for range_start, range_end in iter_diff_logical_line_ranges(state.preview.lines, True):
                 if range_start <= line_idx <= range_end:
                     start_idx = range_start
                     break
         else:
             start_idx = line_idx
-        prefix_chars = _logical_line_prefix_char_count(state.lines, start_idx, line_idx)
+        prefix_chars = _logical_line_prefix_char_count(state.preview.lines, start_idx, line_idx)
         column = prefix_chars + token_start + 1
 
-        use_plain_markers = diff_preview_uses_plain_markers(state.lines, state.wrap_text)
+        use_plain_markers = diff_preview_uses_plain_markers(state.preview.lines, state.preview.wrap)
         if use_plain_markers:
-            first_chunk = state.lines[start_idx]
+            first_chunk = state.preview.lines[start_idx]
             if diff_preview_logical_line_is_removed(first_chunk, use_plain_markers=True):
                 return preferred_path, None, None
             column = max(1, column - 2)
         return preferred_path, source_line, column
 
-    source_idx = _display_line_to_source_line(state.lines, state.wrap_text, line_idx)
+    source_idx = _display_line_to_source_line(state.preview.lines, state.preview.wrap, line_idx)
     source_line = source_idx + 1 if source_idx is not None else None
-    start_idx = _logical_line_start_index(state.lines, line_idx) if state.wrap_text else line_idx
-    prefix_chars = _logical_line_prefix_char_count(state.lines, start_idx, line_idx)
+    start_idx = _logical_line_start_index(state.preview.lines, line_idx) if state.preview.wrap else line_idx
+    prefix_chars = _logical_line_prefix_char_count(state.preview.lines, start_idx, line_idx)
     column = prefix_chars + token_start + 1
     return preferred_path, source_line, column
 
 
-def _tree_view_rows(state: AppState) -> int:
+def _tree_view_rows(state: SessionState) -> int:
     """Return visible row count in the tree pane for current UI state."""
     help_rows = help_panel_row_count(
-        state.usable,
-        state.show_help,
-        browser_visible=state.browser_visible,
-        tree_filter_active=state.tree_filter_active,
-        tree_filter_mode=state.tree_filter_mode,
-        tree_filter_editing=state.tree_filter_editing,
+        state.layout.usable_rows,
+        state.layout.show_help,
+        browser_visible=state.layout.browser_visible,
+        tree_filter_active=state.filter.active,
+        tree_filter_mode=state.filter.mode,
+        tree_filter_editing=state.filter.editing,
     )
-    content_rows = max(1, state.usable - help_rows)
-    if state.tree_filter_active and not state.picker_active:
+    content_rows = max(1, state.layout.usable_rows - help_rows)
+    if state.filter.active and not state.picker.active:
         return max(1, content_rows - 1)
     return content_rows
 
 
-def _center_tree_selection(state: AppState) -> None:
+def _center_tree_selection(state: SessionState) -> None:
     """Center selected tree entry in viewport when possible."""
-    if not state.tree_entries:
-        state.tree_start = 0
+    if not state.workspace.entries:
+        state.workspace.scroll = 0
         return
     rows = _tree_view_rows(state)
-    max_tree_start = max(0, len(state.tree_entries) - rows)
-    centered = max(0, state.selected_idx - max(1, rows // 2))
-    state.tree_start = max(0, min(centered, max_tree_start))
+    max_tree_start = max(0, len(state.workspace.entries) - rows)
+    centered = max(0, state.workspace.selected - max(1, rows // 2))
+    state.workspace.scroll = max(0, min(centered, max_tree_start))
 
 
 def _resolve_module_spec_to_path(
-    state: AppState,
+    state: SessionState,
     module_spec: str,
 ) -> Path | None:
     """Resolve Python import module spec (absolute/relative) to a local file."""
     if not module_spec:
         return None
-    if not state.current_path.resolve().is_file():
+    if not state.workspace.current_path.resolve().is_file():
         return None
 
-    current_file = state.current_path.resolve()
+    current_file = state.workspace.current_path.resolve()
     module_base: Path
     if module_spec.startswith("."):
         leading_dots = len(module_spec) - len(module_spec.lstrip("."))
@@ -296,7 +248,7 @@ def _resolve_module_spec_to_path(
         if relative_part:
             module_base = module_base.joinpath(*[part for part in relative_part.split(".") if part])
     else:
-        module_base = state.tree_root.resolve().joinpath(*[part for part in module_spec.split(".") if part])
+        module_base = state.workspace.active_root.resolve().joinpath(*[part for part in module_spec.split(".") if part])
 
     candidates: list[Path] = []
     if module_base.suffix == ".py":
@@ -315,7 +267,7 @@ def _resolve_module_spec_to_path(
 
 
 def clicked_preview_import_target(
-    state: AppState,
+    state: SessionState,
     lines: list[str],
     selection_pos: tuple[int, int],
 ) -> Path | None:
@@ -374,10 +326,10 @@ def clicked_preview_import_target(
 
 
 def _open_content_search_for_token(
-    state: AppState,
+    state: SessionState,
     query: str,
     open_tree_filter: Callable[[str], None],
-    apply_tree_filter_query: Callable[..., None],
+    apply_tree_filter_query: ApplyTreeFilterQuery,
     preferred_hit_path: Path | None = None,
     preferred_hit_line: int | None = None,
     preferred_hit_column: int | None = None,
@@ -395,23 +347,23 @@ def _open_content_search_for_token(
     )
     if preferred_hit_path is not None:
         selected_hit_idx = find_content_hit_index(
-            state.tree_entries,
+            state.workspace.entries,
             preferred_hit_path,
             preferred_line=preferred_hit_line,
             preferred_column=preferred_hit_column,
         )
         if selected_hit_idx is None:
-            selected_hit_idx = find_content_hit_index(state.tree_entries, preferred_hit_path)
+            selected_hit_idx = find_content_hit_index(state.workspace.entries, preferred_hit_path)
         if selected_hit_idx is not None:
-            state.selected_idx = selected_hit_idx
+            state.workspace.selected = selected_hit_idx
             _center_tree_selection(state)
-    state.tree_filter_editing = False
-    state.dirty = True
+    state.filter.editing = False
+    state.interface.dirty = True
     return True
 
 
 def handle_preview_click(
-    state: AppState,
+    state: SessionState,
     selection_pos: tuple[int, int],
     *,
     directory_preview_target_for_display_line: Callable[[int], Path | None],
@@ -419,27 +371,27 @@ def handle_preview_click(
     reset_source_selection_drag_state: Callable[[], None],
     jump_to_path: Callable[[Path], None],
     open_tree_filter: Callable[[str], None],
-    apply_tree_filter_query: Callable[..., None],
+    apply_tree_filter_query: ApplyTreeFilterQuery,
 ) -> bool:
     """Handle a click in source pane and execute highest-priority matching action."""
-    if state.dir_preview_path is not None:
+    if state.preview.directory_path is not None:
         preview_target = directory_preview_target_for_display_line(selection_pos[0])
         if preview_target is not None:
             clear_source_selection()
             reset_source_selection_drag_state()
             jump_to_path(preview_target)
-            state.dirty = True
+            state.interface.dirty = True
             return True
 
-    import_target = clicked_preview_import_target(state, state.lines, selection_pos)
+    import_target = clicked_preview_import_target(state, state.preview.lines, selection_pos)
     if import_target is not None:
         clear_source_selection()
         reset_source_selection_drag_state()
         jump_to_path(import_target)
-        state.dirty = True
+        state.interface.dirty = True
         return True
 
-    token_details = _clicked_preview_token_details(state.lines, selection_pos)
+    token_details = _clicked_preview_token_details(state.preview.lines, selection_pos)
     if token_details is None:
         return False
     clicked_token, token_start, _token_end, _plain_line, _clicked_index = token_details

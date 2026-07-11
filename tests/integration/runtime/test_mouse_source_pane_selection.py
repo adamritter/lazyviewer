@@ -6,25 +6,12 @@ These tests ensure runtime callbacks and state orchestration stay coherent.
 
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 import unittest
 from unittest import mock
 
 from lazyviewer.runtime import app as app_runtime
-from lazyviewer.render.ansi import ANSI_ESCAPE_RE
-from lazyviewer.runtime.screen import (
-    _centered_scroll_start,
-    _first_git_change_screen_line,
-    _tree_order_key_for_relative_path,
-)
-from lazyviewer.git_status import GIT_STATUS_CHANGED
-from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.render import help_panel_row_count, render_dual_page
-from lazyviewer.search.content import ContentMatch
 
 
 def _callback(kwargs: dict[str, object], name: str):
@@ -76,12 +63,12 @@ class AppRuntimeMouseTestsPart2(unittest.TestCase):
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
                 handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
-                right_start_col = state.left_width + 2
+                right_start_col = state.layout.left_width + 2
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 6}:1")
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 4}:2")
                 handle_tree_mouse_click(f"MOUSE_LEFT_UP:{right_start_col + 4}:2")
-                snapshots["anchor"] = state.source_selection_anchor
-                snapshots["focus"] = state.source_selection_focus
+                snapshots["anchor"] = state.preview.selection_anchor
+                snapshots["focus"] = state.preview.selection_focus
 
             def fake_which(cmd: str) -> str | None:
                 if cmd == "pbcopy":
@@ -90,7 +77,7 @@ class AppRuntimeMouseTestsPart2(unittest.TestCase):
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app_helpers.sys.platform", "darwin"
             ), mock.patch(
                 "lazyviewer.runtime.app_helpers.shutil.which", side_effect=fake_which
@@ -146,15 +133,15 @@ class AppRuntimeMouseTestsPart2(unittest.TestCase):
                 state = kwargs["state"]
                 handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
                 tick_source_selection_drag = _callback(kwargs, "tick_source_selection_drag")
-                right_start_col = state.left_width + 2
-                snapshots["start_before"] = state.start
+                right_start_col = state.layout.left_width + 2
+                snapshots["start_before"] = state.preview.scroll
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 2}:1")
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 2}:999")
-                snapshots["start_after_drag"] = state.start
+                snapshots["start_after_drag"] = state.preview.scroll
                 for _ in range(5):
                     tick_source_selection_drag()
-                snapshots["start_after_wait"] = state.start
-                snapshots["focus_after_drag"] = state.source_selection_focus
+                snapshots["start_after_wait"] = state.preview.scroll
+                snapshots["focus_after_drag"] = state.preview.selection_focus
                 handle_tree_mouse_click(f"MOUSE_LEFT_UP:{right_start_col + 2}:999")
 
             def fake_which(cmd: str) -> str | None:
@@ -164,7 +151,7 @@ class AppRuntimeMouseTestsPart2(unittest.TestCase):
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app_helpers.sys.platform", "darwin"
             ), mock.patch(
                 "lazyviewer.runtime.app_helpers.shutil.which", side_effect=fake_which
@@ -213,15 +200,15 @@ class AppRuntimeMouseTestsPart2(unittest.TestCase):
                 state = kwargs["state"]
                 handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
                 tick_source_selection_drag = _callback(kwargs, "tick_source_selection_drag")
-                right_start_col = state.left_width + 2
-                state.start = min(state.max_start, 80)
-                snapshots["start_before"] = state.start
+                right_start_col = state.layout.left_width + 2
+                state.preview.scroll = min(state.preview.max_scroll, 80)
+                snapshots["start_before"] = state.preview.scroll
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 2}:4")
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 2}:1")
-                snapshots["start_after_drag"] = state.start
+                snapshots["start_after_drag"] = state.preview.scroll
                 for _ in range(5):
                     tick_source_selection_drag()
-                snapshots["start_after_wait"] = state.start
+                snapshots["start_after_wait"] = state.preview.scroll
                 handle_tree_mouse_click(f"MOUSE_LEFT_UP:{right_start_col + 2}:1")
 
             def fake_which(cmd: str) -> str | None:
@@ -231,7 +218,7 @@ class AppRuntimeMouseTestsPart2(unittest.TestCase):
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app_helpers.sys.platform", "darwin"
             ), mock.patch(
                 "lazyviewer.runtime.app_helpers.shutil.which", side_effect=fake_which

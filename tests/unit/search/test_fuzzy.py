@@ -1,21 +1,16 @@
 """Behavior tests for fuzzy indexing and matching.
 
-Covers scoring, strict substring mode, rg/walk collection paths, and caching.
-These cases defend picker/filter correctness and large-list performance.
+Covers scoring and strict substring behavior for small and large label sets.
 """
 
 from __future__ import annotations
 
 import tempfile
 import unittest
-from unittest import mock
 from pathlib import Path
 
 from lazyviewer.search.fuzzy import (
     STRICT_SUBSTRING_ONLY_MIN_FILES,
-    clear_project_files_cache,
-    collect_project_file_labels,
-    collect_project_files,
     fuzzy_match_label_index,
     fuzzy_match_labels,
     fuzzy_match_file_index,
@@ -26,43 +21,6 @@ from lazyviewer.search.fuzzy import (
 
 
 class FuzzyBehaviorTests(unittest.TestCase):
-    def setUp(self) -> None:
-        clear_project_files_cache()
-
-    def tearDown(self) -> None:
-        clear_project_files_cache()
-
-    def test_collect_project_files_hides_hidden_when_disabled(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "a.txt").write_text("a", encoding="utf-8")
-            (root / ".dotfile").write_text("hidden", encoding="utf-8")
-            (root / "src").mkdir()
-            (root / "src" / "b.py").write_text("b", encoding="utf-8")
-            (root / "src" / ".secret.py").write_text("c", encoding="utf-8")
-            (root / ".git").mkdir()
-            (root / ".git" / "config").write_text("cfg", encoding="utf-8")
-
-            files = collect_project_files(root, show_hidden=False)
-            labels = [to_project_relative(path, root) for path in files]
-
-            self.assertEqual(labels, ["a.txt", "src/b.py"])
-
-    def test_collect_project_files_includes_hidden_when_enabled(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "a.txt").write_text("a", encoding="utf-8")
-            (root / ".dotfile").write_text("hidden", encoding="utf-8")
-            (root / "src").mkdir()
-            (root / "src" / ".secret.py").write_text("c", encoding="utf-8")
-
-            files = collect_project_files(root, show_hidden=True)
-            labels = {to_project_relative(path, root) for path in files}
-
-            self.assertIn("a.txt", labels)
-            self.assertIn(".dotfile", labels)
-            self.assertIn("src/.secret.py", labels)
-
     def test_to_project_relative_falls_back_for_outside_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -230,41 +188,6 @@ class FuzzyBehaviorTests(unittest.TestCase):
         self.assertEqual(matches[0][1], "src/00000_alpha.py")
         self.assertEqual(matches[-1][1], "src/00299_alpha.py")
 
-    def test_collect_project_files_prefers_rg_and_uses_cache(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "src").mkdir()
-            (root / "src" / "main.py").write_text("print('hi')", encoding="utf-8")
-            (root / "a.txt").write_text("a", encoding="utf-8")
-
-            cp = mock.Mock(stdout="src/main.py\na.txt\n")
-            with mock.patch("lazyviewer.search.fuzzy.shutil.which", return_value="/usr/bin/rg"), mock.patch(
-                "lazyviewer.search.fuzzy.subprocess.run",
-                return_value=cp,
-            ) as run_mock:
-                first = collect_project_files(root, show_hidden=False)
-                second = collect_project_files(root, show_hidden=False)
-
-            labels = [to_project_relative(path, root) for path in first]
-            self.assertEqual(labels, ["a.txt", "src/main.py"])
-            self.assertEqual([to_project_relative(path, root) for path in second], labels)
-            self.assertEqual(run_mock.call_count, 1)
-
-    def test_collect_project_file_labels_prefers_rg_and_uses_cache(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            cp = mock.Mock(stdout="src/main.py\na.txt\n")
-            with mock.patch("lazyviewer.search.fuzzy.shutil.which", return_value="/usr/bin/rg"), mock.patch(
-                "lazyviewer.search.fuzzy.subprocess.run",
-                return_value=cp,
-            ) as run_mock:
-                first = collect_project_file_labels(root, show_hidden=False)
-                second = collect_project_file_labels(root, show_hidden=False)
-
-            self.assertEqual(first, ["src/main.py", "a.txt"])
-            self.assertEqual(second, first)
-            self.assertEqual(run_mock.call_count, 1)
-
     def test_fuzzy_match_label_index_strict_mode_stops_after_limit(self) -> None:
         labels = [f"src/{idx:05d}_alpha.py" for idx in range(20_000)]
         labels_folded = [label.casefold() for label in labels]
@@ -280,23 +203,6 @@ class FuzzyBehaviorTests(unittest.TestCase):
         self.assertEqual(len(matched), 300)
         self.assertEqual(matched[0][1], "src/00000_alpha.py")
         self.assertEqual(matched[-1][1], "src/00299_alpha.py")
-
-    def test_collect_project_files_falls_back_when_rg_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "src").mkdir()
-            (root / "src" / "main.py").write_text("print('hi')", encoding="utf-8")
-            (root / "a.txt").write_text("a", encoding="utf-8")
-
-            with mock.patch("lazyviewer.search.fuzzy.shutil.which", return_value="/usr/bin/rg"), mock.patch(
-                "lazyviewer.search.fuzzy.subprocess.run",
-                side_effect=RuntimeError("rg failed"),
-            ):
-                files = collect_project_files(root, show_hidden=False)
-
-            labels = [to_project_relative(path, root) for path in files]
-            self.assertEqual(labels, ["a.txt", "src/main.py"])
-
 
 if __name__ == "__main__":
     unittest.main()

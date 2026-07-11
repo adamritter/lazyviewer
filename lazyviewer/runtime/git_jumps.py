@@ -12,7 +12,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .state import AppState
+from ..session import SessionState
+from ..ports import RefreshGitStatus
+from ..session.navigation import JumpLocation
 from .screen import (
     _centered_scroll_start,
     _git_change_block_start_lines,
@@ -20,16 +22,16 @@ from .screen import (
 )
 
 
-def _sorted_git_modified_file_paths(state: AppState) -> list[Path]:
+def _sorted_git_modified_file_paths(state: SessionState) -> list[Path]:
     """Return git-modified file paths under tree root in tree display order."""
-    if not state.git_features_enabled:
+    if not state.git.enabled:
         return []
-    if not state.git_status_overlay:
+    if not state.git.status:
         return []
 
-    root = state.tree_root.resolve()
+    root = state.workspace.active_root.resolve()
     rel_to_path: dict[Path, Path] = {}
-    for raw_path, flags in state.git_status_overlay.items():
+    for raw_path, flags in state.git.status.items():
         if flags == 0:
             continue
         path = raw_path.resolve()
@@ -41,7 +43,7 @@ def _sorted_git_modified_file_paths(state: AppState) -> list[Path]:
             rel = path.relative_to(root)
         except Exception:
             continue
-        if not state.show_hidden and any(part.startswith(".") for part in rel.parts):
+        if not state.workspace.show_hidden and any(part.startswith(".") for part in rel.parts):
             continue
         rel_to_path[rel] = path
 
@@ -55,12 +57,12 @@ def _sorted_git_modified_file_paths(state: AppState) -> list[Path]:
 class GitModifiedJumpNavigator:
     """Dependency bundle for jumping across git-modified locations."""
 
-    state: AppState
+    state: SessionState
     visible_content_rows: Callable[[], int]
-    refresh_git_status_overlay: Callable[..., None]
-    current_jump_location: Callable[[], object]
+    refresh_git_status_overlay: RefreshGitStatus
+    current_jump_location: Callable[[], JumpLocation]
     jump_to_path: Callable[[Path], None]
-    record_jump_if_changed: Callable[[object], None]
+    record_jump_if_changed: Callable[[JumpLocation], None]
     clear_status_message: Callable[[], None]
     set_status_message: Callable[[str], None]
 
@@ -80,10 +82,10 @@ class GitModifiedJumpNavigator:
         self.clear_status_message()
 
         same_file_change_blocks: list[int] = []
-        if state.preview_is_git_diff and state.current_path.is_file():
-            same_file_change_blocks = _git_change_block_start_lines(state.lines)
+        if state.preview.is_git_diff and state.workspace.current_path.is_file():
+            same_file_change_blocks = _git_change_block_start_lines(state.preview.lines)
             if same_file_change_blocks:
-                probe_line = state.start + max(0, self.visible_content_rows() // 3)
+                probe_line = state.preview.scroll + max(0, self.visible_content_rows() // 3)
                 current_block: int | None = None
                 for line_idx in same_file_change_blocks:
                     if line_idx <= probe_line:
@@ -110,11 +112,11 @@ class GitModifiedJumpNavigator:
                 if target_line is not None:
                     next_start = _centered_scroll_start(
                         target_line,
-                        state.max_start,
+                        state.preview.max_scroll,
                         self.visible_content_rows(),
                     )
-                    if next_start != state.start:
-                        state.start = next_start
+                    if next_start != state.preview.scroll:
+                        state.preview.scroll = next_start
                         return True
 
         self.refresh_git_status_overlay()
@@ -122,11 +124,11 @@ class GitModifiedJumpNavigator:
         if not modified_paths:
             return False
 
-        root = state.tree_root.resolve()
-        if state.browser_visible and state.tree_entries and 0 <= state.selected_idx < len(state.tree_entries):
-            anchor_path = state.tree_entries[state.selected_idx].path.resolve()
+        root = state.workspace.active_root.resolve()
+        if state.layout.browser_visible and state.workspace.entries and 0 <= state.workspace.selected < len(state.workspace.entries):
+            anchor_path = state.workspace.entries[state.workspace.selected].path.resolve()
         else:
-            anchor_path = state.current_path.resolve()
+            anchor_path = state.workspace.current_path.resolve()
 
         ordered_items: list[tuple[tuple[tuple[int, str, str], ...], Path]] = []
         for path in modified_paths:
@@ -172,10 +174,10 @@ class GitModifiedJumpNavigator:
             wrap_line = same_file_change_blocks[0] if direction > 0 else same_file_change_blocks[-1]
             next_start = _centered_scroll_start(
                 wrap_line,
-                state.max_start,
+                state.preview.max_scroll,
                 self.visible_content_rows(),
             )
-            state.start = next_start
+            state.preview.scroll = next_start
             self.set_status_message("wrapped to first change" if direction > 0 else "wrapped to last change")
             return True
 
@@ -185,13 +187,13 @@ class GitModifiedJumpNavigator:
         origin = self.current_jump_location()
         self.jump_to_path(target)
         target_change_blocks: list[int] = []
-        if state.preview_is_git_diff and state.current_path.is_file():
-            target_change_blocks = _git_change_block_start_lines(state.lines)
+        if state.preview.is_git_diff and state.workspace.current_path.is_file():
+            target_change_blocks = _git_change_block_start_lines(state.preview.lines)
         if target_change_blocks:
             target_line = target_change_blocks[0] if direction > 0 else target_change_blocks[-1]
-            state.start = _centered_scroll_start(
+            state.preview.scroll = _centered_scroll_start(
                 target_line,
-                state.max_start,
+                state.preview.max_scroll,
                 self.visible_content_rows(),
             )
         self.record_jump_if_changed(origin)

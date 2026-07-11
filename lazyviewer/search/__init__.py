@@ -1,17 +1,10 @@
-"""Search package exports for fuzzy file matching and content search.
-
-The public surface intentionally exposes both cached file-index helpers and the
-ripgrep-backed content-search entry point used by content filter mode.
-"""
+"""Typed file/content search service and pure fuzzy-matching helpers."""
 
 from __future__ import annotations
 
 from .content import ContentMatch, search_project_content_rg
 from .fuzzy import (
     STRICT_SUBSTRING_ONLY_MIN_FILES,
-    clear_project_files_cache,
-    collect_project_file_labels,
-    collect_project_files,
     fuzzy_match_file_index,
     fuzzy_match_label_index,
     fuzzy_match_labels,
@@ -19,13 +12,19 @@ from .fuzzy import (
     fuzzy_score,
     to_project_relative,
 )
+from .model import (
+    ContentMatchesAdded,
+    ContentSearchFinished,
+    ContentSearchRequest,
+    ContentSearchResult,
+    FileSearchMatch,
+    FileSearchRequest,
+)
+from .service import ContentSearchJob, SearchService
 
 __all__ = [
     "ContentMatch",
     "STRICT_SUBSTRING_ONLY_MIN_FILES",
-    "clear_project_files_cache",
-    "collect_project_file_labels",
-    "collect_project_files",
     "fuzzy_match_file_index",
     "fuzzy_match_label_index",
     "fuzzy_match_labels",
@@ -33,4 +32,12 @@ __all__ = [
     "fuzzy_score",
     "search_project_content_rg",
     "to_project_relative",
+    "ContentMatchesAdded",
+    "ContentSearchFinished",
+    "ContentSearchJob",
+    "ContentSearchRequest",
+    "ContentSearchResult",
+    "FileSearchMatch",
+    "FileSearchRequest",
+    "SearchService",
 ]

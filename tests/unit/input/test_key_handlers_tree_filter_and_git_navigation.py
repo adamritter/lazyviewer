@@ -6,47 +6,53 @@ Keeps keybinding regressions isolated from full runtime integration tests.
 
 from __future__ import annotations
 
-import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from lazyviewer.input import (
     NormalKeyContext,
     handle_normal_key,
-    handle_tree_filter_key,
 )
-from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.runtime.state import AppState
+from lazyviewer.tree_pane.panels.filter.panel import FilterPanel
+from lazyviewer.session.navigation import JumpLocation
+from lazyviewer.session import LayoutState, PreviewViewState, SessionState, WorkspaceViewState
 from lazyviewer.tree_model import TreeEntry
 
 
-def _make_state() -> AppState:
+def handle_tree_filter_key(
+    key,
+    state,
+    *,
+    handle_tree_mouse_wheel,
+    handle_tree_mouse_click,
+    toggle_help_panel,
+    **operations,
+):
+    return FilterPanel(SimpleNamespace(state=state, **operations)).handle_key(
+        key,
+        handle_tree_mouse_wheel=handle_tree_mouse_wheel,
+        handle_tree_mouse_click=handle_tree_mouse_click,
+        toggle_help_panel=toggle_help_panel,
+    )
+
+
+def _make_state() -> SessionState:
     root = Path("/tmp").resolve()
-    return AppState(
-        current_path=root,
-        tree_root=root,
-        expanded={root},
-        show_hidden=False,
-        tree_entries=[TreeEntry(path=root, depth=0, is_dir=True)],
-        selected_idx=0,
-        rendered="",
-        lines=[],
-        start=0,
-        tree_start=0,
-        text_x=0,
-        wrap_text=False,
-        left_width=24,
-        right_width=80,
-        usable=24,
-        max_start=0,
-        last_right_width=80,
+    return SessionState(
+        workspace=WorkspaceViewState(
+            current_path=root, active_root=root, expanded={root}, show_hidden=False,
+            entries=[TreeEntry(path=root, depth=0, is_dir=True)], selected=0,
+        ),
+        preview=PreviewViewState(rendered="", lines=[]),
+        layout=LayoutState(left_width=24, right_width=80, usable_rows=24, last_right_width=80),
     )
 
 class KeyHandlersBehaviorTestsPart2(unittest.TestCase):
     def _invoke(
         self,
         *,
-        state: AppState,
+        state: SessionState,
         key: str,
         toggle_git_features,
         jump_to_next_git_modified,
@@ -58,10 +64,11 @@ class KeyHandlersBehaviorTestsPart2(unittest.TestCase):
         visible_rows: int = 20,
     ) -> bool:
         if launch_editor_for_path is None:
-            launch_editor_for_path = lambda _path: None
+            def launch_editor_for_path(_path):
+                return None
         context = NormalKeyContext(
             state=state,
-            current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+            current_jump_location=lambda: JumpLocation(path=state.workspace.current_path, start=state.preview.scroll, text_x=state.preview.horizontal_scroll),
             record_jump_if_changed=lambda _origin: None,
             open_symbol_picker=open_symbol_picker,
             reroot_to_parent=lambda: None,
@@ -92,7 +99,7 @@ class KeyHandlersBehaviorTestsPart2(unittest.TestCase):
 
     def test_n_jumps_to_git_modified_when_enabled(self) -> None:
         state = _make_state()
-        state.git_features_enabled = True
+        state.git.enabled = True
         called = {"count": 0}
 
         should_quit = self._invoke(
@@ -107,7 +114,7 @@ class KeyHandlersBehaviorTestsPart2(unittest.TestCase):
 
     def test_p_jumps_to_previous_git_modified_when_enabled(self) -> None:
         state = _make_state()
-        state.git_features_enabled = True
+        state.git.enabled = True
         called = {"count": 0, "direction": 0}
 
         should_quit = self._invoke(
@@ -125,10 +132,10 @@ class KeyHandlersBehaviorTestsPart2(unittest.TestCase):
 
     def test_question_character_is_appended_while_tree_filter_editing(self) -> None:
         state = _make_state()
-        state.tree_filter_active = True
-        state.tree_filter_mode = "content"
-        state.tree_filter_editing = True
-        state.tree_filter_query = "abc"
+        state.filter.active = True
+        state.filter.mode = "content"
+        state.filter.editing = True
+        state.filter.query = "abc"
         called = {"query": "", "preview_selection": None, "select_first_file": None, "toggle_help": 0}
 
         handled = handle_tree_filter_key(
@@ -154,9 +161,9 @@ class KeyHandlersBehaviorTestsPart2(unittest.TestCase):
 
     def test_escape_in_content_filter_prompt_requests_restore_to_origin(self) -> None:
         state = _make_state()
-        state.tree_filter_active = True
-        state.tree_filter_mode = "content"
-        state.tree_filter_editing = True
+        state.filter.active = True
+        state.filter.mode = "content"
+        state.filter.editing = True
         called: dict[str, object] = {}
 
         handled = handle_tree_filter_key(
@@ -178,9 +185,9 @@ class KeyHandlersBehaviorTestsPart2(unittest.TestCase):
 
     def test_ctrl_question_toggles_help_while_tree_filter_editing(self) -> None:
         state = _make_state()
-        state.tree_filter_active = True
-        state.tree_filter_editing = True
-        state.tree_filter_query = "abc"
+        state.filter.active = True
+        state.filter.editing = True
+        state.filter.query = "abc"
         called = {"apply": 0, "toggle_help": 0}
 
         handled = handle_tree_filter_key(
@@ -202,9 +209,9 @@ class KeyHandlersBehaviorTestsPart2(unittest.TestCase):
 
     def test_p_jumps_to_previous_content_hit_in_content_filter_mode(self) -> None:
         state = _make_state()
-        state.tree_filter_active = True
-        state.tree_filter_mode = "content"
-        state.tree_filter_editing = False
+        state.filter.active = True
+        state.filter.mode = "content"
+        state.filter.editing = False
         called = {"direction": 0}
 
         handled = handle_tree_filter_key(
@@ -222,13 +229,13 @@ class KeyHandlersBehaviorTestsPart2(unittest.TestCase):
 
         self.assertTrue(handled)
         self.assertEqual(called["direction"], -1)
-        self.assertTrue(state.dirty)
+        self.assertTrue(state.interface.dirty)
 
     def test_e_launches_selected_directory_when_browser_visible(self) -> None:
         state = _make_state()
-        state.browser_visible = True
-        state.tree_entries = [TreeEntry(path=Path("/tmp").resolve(), depth=0, is_dir=True)]
-        state.selected_idx = 0
+        state.layout.browser_visible = True
+        state.workspace.entries = [TreeEntry(path=Path("/tmp").resolve(), depth=0, is_dir=True)]
+        state.workspace.selected = 0
         launched: list[Path] = []
 
         should_quit = self._invoke(
@@ -241,4 +248,4 @@ class KeyHandlersBehaviorTestsPart2(unittest.TestCase):
 
         self.assertFalse(should_quit)
         self.assertEqual(launched, [Path("/tmp").resolve()])
-        self.assertEqual(state.current_path, Path("/tmp").resolve())
+        self.assertEqual(state.workspace.current_path, Path("/tmp").resolve())

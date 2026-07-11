@@ -27,7 +27,7 @@ from .symbols_sticky import (
 )
 from .symbols_sticky import next_symbol_start_line as _next_symbol_start_line
 from .symbols_types import SymbolEntry
-from .syntax import read_text
+from ..preview.text import read_text
 
 _SYMBOL_CONTEXT_CACHE: OrderedDict[
     tuple[str, int, int, int],

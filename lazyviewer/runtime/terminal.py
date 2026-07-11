@@ -9,9 +9,23 @@ from __future__ import annotations
 import base64
 import contextlib
 import os
+from dataclasses import dataclass
 from pathlib import Path
 import termios
 import tty
+
+from ..render.diff import diff_frames
+from ..render.frame import Frame
+
+
+@dataclass(frozen=True, slots=True)
+class PresentStats:
+    """Measurements for the most recent terminal presentation."""
+
+    bytes_written: int
+    rows_touched: int
+    surfaces_touched: int
+    full_repaint: bool
 
 
 class TerminalController:
@@ -23,6 +37,8 @@ class TerminalController:
         self.stdout_fd = stdout_fd
         self._saved_tty_state = termios.tcgetattr(stdin_fd)
         self._mouse_reporting_enabled = False
+        self._presented_frame: Frame | None = None
+        self.last_present_stats = PresentStats(0, 0, 0, False)
 
     def enable_tui_mode(self) -> None:
         """Enter raw alternate-screen mode with mouse reporting enabled."""
@@ -30,12 +46,14 @@ class TerminalController:
         # Enter alternate screen, enable mouse reporting, and hide cursor.
         os.write(self.stdout_fd, b"\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1002h\x1b[?1006h")
         self._mouse_reporting_enabled = True
+        self.invalidate_screen()
 
     def disable_tui_mode(self) -> None:
         """Restore normal terminal state and disable TUI mouse mode."""
         # Disable mouse reporting, show cursor, and restore the main screen buffer.
         os.write(self.stdout_fd, b"\x1b[?1000l\x1b[?1002l\x1b[?1006l\x1b[?25h\x1b[?1049l")
         self._mouse_reporting_enabled = False
+        self.invalidate_screen()
         termios.tcsetattr(self.stdin_fd, termios.TCSAFLUSH, self._saved_tty_state)
 
     def set_mouse_reporting(self, enabled: bool) -> None:
@@ -48,6 +66,30 @@ class TerminalController:
         else:
             os.write(self.stdout_fd, b"\x1b[?1000l\x1b[?1002l\x1b[?1006l")
         self._mouse_reporting_enabled = desired
+
+    def invalidate_screen(self) -> None:
+        """Forget retained terminal contents so the next frame repaints fully."""
+        self._presented_frame = None
+
+    def write_frame(self, frame: Frame) -> PresentStats:
+        """Present one frame atomically, emitting only changed surface rows.
+
+        The first structured frame, a geometry change, or an explicit screen
+        invalidation uses the frame's canonical full repaint.  Stable layouts
+        use absolute cursor addressing and exact-width pane-row updates.
+        """
+        patch = diff_frames(self._presented_frame, frame)
+        if patch.data:
+            os.write(self.stdout_fd, patch.data)
+        stats = PresentStats(
+            bytes_written=len(patch.data),
+            rows_touched=patch.rows_touched,
+            surfaces_touched=patch.surfaces_touched,
+            full_repaint=patch.full_repaint,
+        )
+        self._presented_frame = frame if frame.is_structured else None
+        self.last_present_stats = stats
+        return stats
 
     def supports_kitty_graphics(self) -> bool:
         """Return whether environment appears to support kitty graphics protocol."""
@@ -86,3 +128,6 @@ class TerminalController:
             yield
         finally:
             self.disable_tui_mode()
+
+
+__all__ = ["PresentStats", "TerminalController"]

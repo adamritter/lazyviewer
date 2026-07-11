@@ -13,7 +13,8 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
-from .state import AppState
+from ..session import SessionState
+from ..ports import BuildScreenLines, HelpPanelRowCount
 
 
 class PagerLayout:
@@ -21,11 +22,11 @@ class PagerLayout:
 
     def __init__(
         self,
-        state: AppState,
+        state: SessionState,
         kitty_graphics_supported: bool,
         *,
-        help_panel_row_count: Callable[..., int],
-        build_screen_lines: Callable[..., list[str]],
+        help_panel_row_count: HelpPanelRowCount,
+        build_screen_lines: BuildScreenLines,
         get_terminal_size: Callable[[tuple[int, int]], os.terminal_size],
         load_content_search_left_pane_percent: Callable[[], float | None],
         load_left_pane_percent: Callable[[], float | None],
@@ -56,28 +57,28 @@ class PagerLayout:
         """Return preview-pane text width for current browser visibility."""
         if columns is None:
             columns = self._get_terminal_size((80, 24)).columns
-        if self.state.browser_visible:
-            return max(1, columns - self.state.left_width - 1)
+        if self.state.layout.browser_visible:
+            return max(1, columns - self.state.layout.left_width - 1)
         return max(1, columns)
 
     def visible_content_rows(self) -> int:
         """Return number of content rows after reserving help panel rows."""
         help_rows = self._help_panel_row_count(
-            self.state.usable,
-            self.state.show_help,
-            browser_visible=self.state.browser_visible,
-            tree_filter_active=self.state.tree_filter_active,
-            tree_filter_mode=self.state.tree_filter_mode,
-            tree_filter_editing=self.state.tree_filter_editing,
+            self.state.layout.usable_rows,
+            self.state.layout.show_help,
+            browser_visible=self.state.layout.browser_visible,
+            tree_filter_active=self.state.filter.active,
+            tree_filter_mode=self.state.filter.mode,
+            tree_filter_editing=self.state.filter.editing,
         )
-        return max(1, self.state.usable - help_rows)
+        return max(1, self.state.layout.usable_rows - help_rows)
 
     def content_search_match_view_active(self) -> bool:
         """Return whether content-search results are currently being shown."""
         return (
-            self.state.tree_filter_active
-            and self.state.tree_filter_mode == "content"
-            and bool(self.state.tree_filter_query)
+            self.state.filter.active
+            and self.state.filter.mode == "content"
+            and bool(self.state.filter.query)
         )
 
     def rebuild_screen_lines(
@@ -86,18 +87,18 @@ class PagerLayout:
         preserve_scroll: bool = True,
     ) -> None:
         """Reflow rendered text into screen lines and clamp scroll offsets."""
-        self.state.lines = self._build_screen_lines(
-            self.state.rendered,
+        self.state.preview.lines = self._build_screen_lines(
+            self.state.preview.rendered,
             self.effective_text_width(columns),
-            wrap=self.state.wrap_text,
+            wrap=self.state.preview.wrap,
         )
-        self.state.max_start = max(0, len(self.state.lines) - self.visible_content_rows())
+        self.state.preview.max_scroll = max(0, len(self.state.preview.lines) - self.visible_content_rows())
         if preserve_scroll:
-            self.state.start = max(0, min(self.state.start, self.state.max_start))
+            self.state.preview.scroll = max(0, min(self.state.preview.scroll, self.state.preview.max_scroll))
         else:
-            self.state.start = 0
-        if self.state.wrap_text:
-            self.state.text_x = 0
+            self.state.preview.scroll = 0
+        if self.state.preview.wrap:
+            self.state.preview.horizontal_scroll = 0
 
     def sync_left_width_for_tree_filter_mode(self, force: bool = False) -> None:
         """Switch left-pane width profile when content-search view toggles.
@@ -113,7 +114,7 @@ class PagerLayout:
         if use_content_mode_width:
             saved_percent = self._load_content_search_left_pane_percent()
             if saved_percent is None:
-                current_percent = (self.state.left_width / max(1, columns)) * 100.0
+                current_percent = (self.state.layout.left_width / max(1, columns)) * 100.0
                 saved_percent = min(
                     99.0,
                     max(
@@ -129,15 +130,15 @@ class PagerLayout:
         else:
             desired_left = int((saved_percent / 100.0) * columns)
         desired_left = self._clamp_left_width(columns, desired_left)
-        if desired_left == self.state.left_width:
+        if desired_left == self.state.layout.left_width:
             return
 
-        self.state.left_width = desired_left
-        self.state.right_width = max(1, columns - self.state.left_width - 1)
-        if self.state.right_width != self.state.last_right_width:
-            self.state.last_right_width = self.state.right_width
+        self.state.layout.left_width = desired_left
+        self.state.layout.right_width = max(1, columns - self.state.layout.left_width - 1)
+        if self.state.layout.right_width != self.state.layout.last_right_width:
+            self.state.layout.last_right_width = self.state.layout.right_width
             self.rebuild_screen_lines(columns=columns)
-        self.state.dirty = True
+        self.state.interface.dirty = True
 
     def save_left_pane_width_for_mode(self, total_width: int, left_width: int) -> None:
         """Persist pane width in mode-specific config slot."""
@@ -148,27 +149,27 @@ class PagerLayout:
 
     def show_inline_error(self, message: str) -> None:
         """Replace preview with an inline red error message and reset media state."""
-        self.state.rendered = f"\033[31m{message}\033[0m"
+        self.state.preview.rendered = f"\033[31m{message}\033[0m"
         self.rebuild_screen_lines(preserve_scroll=False)
-        self.state.text_x = 0
-        self.state.dir_preview_path = None
-        self.state.dir_preview_truncated = False
-        self.state.preview_image_path = None
-        self.state.preview_image_format = None
-        self.state.dirty = True
+        self.state.preview.horizontal_scroll = 0
+        self.state.preview.directory_path = None
+        self.state.preview.directory_truncated = False
+        self.state.preview.image_path = None
+        self.state.preview.image_format = None
+        self.state.interface.dirty = True
 
     def current_preview_image_path(self) -> Path | None:
         """Return resolved PNG path eligible for kitty graphics rendering."""
         if not self.kitty_graphics_supported:
             return None
-        if self.state.preview_image_format != "png":
+        if self.state.preview.image_format != "png":
             return None
-        if self.state.preview_image_path is None:
+        if self.state.preview.image_path is None:
             return None
         try:
-            image_path = self.state.preview_image_path.resolve()
+            image_path = self.state.preview.image_path.resolve()
         except Exception:
-            image_path = self.state.preview_image_path
+            image_path = self.state.preview.image_path
         if not image_path.exists() or not image_path.is_file():
             return None
         return image_path
@@ -176,9 +177,9 @@ class PagerLayout:
     def current_preview_image_geometry(self, columns: int) -> tuple[int, int, int, int]:
         """Return kitty image placement as ``(col, row, width_cells, height_cells)``."""
         image_rows = self.visible_content_rows()
-        if self.state.browser_visible:
-            image_col = self.state.left_width + 2
-            image_width = max(1, columns - self.state.left_width - 1)
+        if self.state.layout.browser_visible:
+            image_col = self.state.layout.left_width + 2
+            image_width = max(1, columns - self.state.layout.left_width - 1)
         else:
             image_col = 1
             image_width = max(1, columns)

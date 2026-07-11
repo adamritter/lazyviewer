@@ -11,14 +11,10 @@ import unittest
 from pathlib import Path
 
 from lazyviewer.render.ansi import ANSI_ESCAPE_RE
-from lazyviewer.search.content import ContentMatch
-from lazyviewer.search.fuzzy import fuzzy_match_file_index, to_project_relative
 from lazyviewer.tree_model import (
     TreeEntry,
     build_tree_entries,
-    filter_tree_entries_for_content_matches,
     filter_tree_entries_for_files,
-    find_content_hit_index,
     format_tree_entry,
     next_index_after_directory_subtree,
     next_directory_entry_index,

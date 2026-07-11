@@ -6,25 +6,14 @@ These tests ensure runtime callbacks and state orchestration stay coherent.
 
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
-import tempfile
 from pathlib import Path
 import unittest
-from unittest import mock
 
-from lazyviewer.runtime import app as app_runtime
-from lazyviewer.render.ansi import ANSI_ESCAPE_RE
 from lazyviewer.runtime.screen import (
     _centered_scroll_start,
     _first_git_change_screen_line,
     _tree_order_key_for_relative_path,
 )
-from lazyviewer.git_status import GIT_STATUS_CHANGED
-from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.render import help_panel_row_count, render_dual_page
-from lazyviewer.search.content import ContentMatch
 
 
 def _callback(kwargs: dict[str, object], name: str):

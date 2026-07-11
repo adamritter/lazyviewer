@@ -9,7 +9,8 @@ import sys
 import time
 from collections.abc import Callable
 
-from .state import AppState
+from ..session import SessionState
+from ..ports import RefreshGitStatus, RefreshPreview, SynchronizeTree
 from .terminal import TerminalController
 
 WRAP_STATUS_SECONDS = 1.2
@@ -57,51 +58,51 @@ def copy_text_to_clipboard(text: str) -> bool:
     return False
 
 
-def clear_status_message(state: AppState) -> None:
+def clear_status_message(state: SessionState) -> None:
     """Clear transient status message and its expiration timestamp."""
-    state.status_message = ""
-    state.status_message_until = 0.0
+    state.interface.status_message = ""
+    state.interface.status_message_until = 0.0
 
 
-def set_status_message(state: AppState, message: str) -> None:
+def set_status_message(state: SessionState, message: str) -> None:
     """Set transient status message visible for a fixed short interval."""
-    state.status_message = message
-    state.status_message_until = time.monotonic() + WRAP_STATUS_SECONDS
+    state.interface.status_message = message
+    state.interface.status_message_until = time.monotonic() + WRAP_STATUS_SECONDS
 
 
-def clear_source_selection(state: AppState) -> bool:
+def clear_source_selection(state: SessionState) -> bool:
     """Clear source text selection anchors, returning whether anything changed."""
-    changed = state.source_selection_anchor is not None or state.source_selection_focus is not None
-    state.source_selection_anchor = None
-    state.source_selection_focus = None
+    changed = state.preview.selection_anchor is not None or state.preview.selection_focus is not None
+    state.preview.selection_anchor = None
+    state.preview.selection_focus = None
     return changed
 
 
 def toggle_git_features(
-    state: AppState,
-    refresh_git_status_overlay: Callable[..., None],
-    refresh_rendered_for_current_path_fn: Callable[..., None],
+    state: SessionState,
+    refresh_git_status_overlay: RefreshGitStatus,
+    refresh_rendered_for_current_path_fn: RefreshPreview,
 ) -> None:
     """Toggle git-aware features and refresh overlays/rendering accordingly."""
-    state.git_features_enabled = not state.git_features_enabled
-    if state.git_features_enabled:
+    state.git.enabled = not state.git.enabled
+    if state.git.enabled:
         refresh_git_status_overlay(force=True)
     else:
-        if state.git_status_overlay:
-            state.git_status_overlay = {}
-        state.git_status_last_refresh = time.monotonic()
+        if state.git.status:
+            state.git.status = {}
+        state.git.last_refresh = time.monotonic()
     refresh_rendered_for_current_path_fn(
-        reset_scroll=state.git_features_enabled,
+        reset_scroll=state.git.enabled,
         reset_dir_budget=False,
     )
-    state.dirty = True
+    state.interface.dirty = True
 
 
 def launch_lazygit(
-    state: AppState,
+    state: SessionState,
     terminal: TerminalController,
     show_inline_error: Callable[[str], None],
-    sync_selected_target_after_tree_refresh: Callable[..., None],
+    sync_selected_target_after_tree_refresh: SynchronizeTree,
     mark_tree_watch_dirty: Callable[[], None],
 ) -> None:
     """Run ``lazygit`` in tree root and resync UI state after returning."""
@@ -115,7 +116,7 @@ def launch_lazygit(
         try:
             subprocess.run(
                 ["lazygit"],
-                cwd=state.tree_root.resolve(),
+                cwd=state.workspace.active_root.resolve(),
                 check=False,
             )
         except Exception as exc:
@@ -127,6 +128,6 @@ def launch_lazygit(
         show_inline_error(launch_error)
         return
 
-    preferred_path = state.current_path.resolve()
+    preferred_path = state.workspace.current_path.resolve()
     sync_selected_target_after_tree_refresh(preferred_path=preferred_path, force_rebuild=True)
     mark_tree_watch_dirty()

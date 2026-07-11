@@ -13,34 +13,46 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.runtime.navigation import JumpLocation
+from lazyviewer.session.navigation import JumpLocation
 from lazyviewer.search.content import ContentMatch
+from lazyviewer.search import SearchService
+import lazyviewer.search.service as search_runtime
 from lazyviewer.tree_pane.panels.filter import TreeFilterController
-from lazyviewer.runtime.state import AppState
+from lazyviewer.session import LayoutState, PreviewViewState, SessionState, WorkspaceViewState
 from lazyviewer.tree_model import TreeEntry
+from lazyviewer.workspace import WorkspaceQuery, WorkspaceService
 
 
-def _make_state(root: Path) -> AppState:
+def _make_state(root: Path) -> SessionState:
     resolved_root = root.resolve()
-    return AppState(
-        current_path=resolved_root,
-        tree_root=resolved_root,
-        expanded={resolved_root},
-        show_hidden=False,
-        tree_entries=[TreeEntry(path=resolved_root, depth=0, is_dir=True)],
-        selected_idx=0,
-        rendered="",
-        lines=[""],
-        start=0,
-        tree_start=0,
-        text_x=0,
-        wrap_text=False,
-        left_width=24,
-        right_width=80,
-        usable=24,
-        max_start=0,
-        last_right_width=80,
+    return SessionState(
+        workspace=WorkspaceViewState(
+            current_path=resolved_root, active_root=resolved_root,
+            expanded={resolved_root}, show_hidden=False,
+            entries=[TreeEntry(path=resolved_root, depth=0, is_dir=True)], selected=0,
+        ),
+        preview=PreviewViewState(rendered="", lines=[""]),
+        layout=LayoutState(left_width=24, right_width=80, usable_rows=24, last_right_width=80),
     )
+
+
+def _search_service(state: SessionState) -> SearchService:
+    workspace = WorkspaceService()
+    roots = list(state.workspace.roots) or [state.workspace.active_root]
+    sections = list(state.workspace.expanded_by_root) or [{root} for root in roots]
+    state.workspace.snapshot = workspace.snapshot(
+        WorkspaceQuery.create(
+            roots,
+            sections,
+            show_hidden=state.workspace.show_hidden,
+            skip_gitignored=not state.workspace.show_hidden,
+        )
+    )
+
+    def backend(*args, **kwargs):
+        return search_runtime.search_project_content_rg(*args, **kwargs)
+
+    return SearchService(workspace, content_backend=backend)
 
 
 class RuntimeTreeFilterTests(unittest.TestCase):
@@ -48,7 +60,7 @@ class RuntimeTreeFilterTests(unittest.TestCase):
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             ops.poll_content_search_updates(timeout_seconds=0.01)
-            if not ops.state.tree_filter_loading:
+            if not ops.state.filter.loading:
                 return
         self.fail("timed out waiting for background content search to finish")
 
@@ -70,18 +82,19 @@ class RuntimeTreeFilterTests(unittest.TestCase):
             (root_b / "pkg" / "other.txt").write_text("noop\n", encoding="utf-8")
 
             state = _make_state(root_a)
-            state.tree_roots = [root_a, root_b]
-            state.workspace_expanded = [{root_a}, {root_b}]
-            state.expanded = {root_a, root_b}
-            state.tree_filter_active = True
-            state.tree_filter_mode = "files"
+            state.workspace.roots = [root_a, root_b]
+            state.workspace.expanded_by_root = [{root_a}, {root_b}]
+            state.workspace.expanded = {root_a, root_b}
+            state.filter.active = True
+            state.filter.mode = "files"
 
             ops = TreeFilterController(
                 state=state,
+                search_service=_search_service(state),
                 visible_content_rows=lambda: 20,
                 rebuild_screen_lines=lambda **_kwargs: None,
                 preview_selected_entry=lambda **_kwargs: None,
-                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                current_jump_location=lambda: JumpLocation(path=state.workspace.current_path, start=state.preview.scroll, text_x=state.preview.horizontal_scroll),
                 record_jump_if_changed=lambda _origin: None,
                 jump_to_path=lambda _target: None,
                 jump_to_line=lambda _line: None,
@@ -89,16 +102,16 @@ class RuntimeTreeFilterTests(unittest.TestCase):
 
             ops.apply_tree_filter_query("alpha_only")
 
-            file_rows = [entry for entry in state.tree_entries if not entry.is_dir]
+            file_rows = [entry for entry in state.workspace.entries if not entry.is_dir]
             matched_paths = {entry.path.resolve() for entry in file_rows}
             self.assertEqual(matched_paths, {file_a.resolve(), file_b.resolve()})
             section_by_path = {entry.path.resolve(): entry.workspace_section for entry in file_rows}
             self.assertEqual(section_by_path[file_a.resolve()], 0)
             self.assertEqual(section_by_path[file_b.resolve()], 1)
-            root_rows = [entry for entry in state.tree_entries if entry.is_dir and entry.depth == 0]
+            root_rows = [entry for entry in state.workspace.entries if entry.is_dir and entry.depth == 0]
             self.assertEqual([entry.path.resolve() for entry in root_rows], [root_a, root_b])
-            self.assertEqual(state.tree_filter_match_count, 2)
-            self.assertFalse(state.tree_filter_truncated)
+            self.assertEqual(state.filter.match_count, 2)
+            self.assertFalse(state.filter.truncated)
 
     def test_content_search_searches_all_workspace_roots(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -115,18 +128,19 @@ class RuntimeTreeFilterTests(unittest.TestCase):
             file_b.write_text("needle\n", encoding="utf-8")
 
             state = _make_state(root_a)
-            state.tree_roots = [root_a, root_b]
-            state.workspace_expanded = [{root_a}, {root_b}]
-            state.expanded = {root_a, root_b}
-            state.tree_filter_active = True
-            state.tree_filter_mode = "content"
+            state.workspace.roots = [root_a, root_b]
+            state.workspace.expanded_by_root = [{root_a}, {root_b}]
+            state.workspace.expanded = {root_a, root_b}
+            state.filter.active = True
+            state.filter.mode = "content"
 
             ops = TreeFilterController(
                 state=state,
+                search_service=_search_service(state),
                 visible_content_rows=lambda: 20,
                 rebuild_screen_lines=lambda **_kwargs: None,
                 preview_selected_entry=lambda **_kwargs: None,
-                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                current_jump_location=lambda: JumpLocation(path=state.workspace.current_path, start=state.preview.scroll, text_x=state.preview.horizontal_scroll),
                 record_jump_if_changed=lambda _origin: None,
                 jump_to_path=lambda _target: None,
                 jump_to_line=lambda _line: None,
@@ -145,15 +159,15 @@ class RuntimeTreeFilterTests(unittest.TestCase):
                 return {match.path: [match]}, False, None
 
             with mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg",
+                "lazyviewer.search.service.search_project_content_rg",
                 side_effect=fake_search_content,
             ) as search_mock:
                 ops.apply_tree_filter_query("needle")
                 self._drain_content_search(ops)
 
             self.assertEqual(search_mock.call_count, 2)
-            self.assertEqual(state.tree_filter_match_count, 2)
-            hit_rows = [entry for entry in state.tree_entries if entry.kind == "search_hit"]
+            self.assertEqual(state.filter.match_count, 2)
+            hit_rows = [entry for entry in state.workspace.entries if entry.kind == "search_hit"]
             self.assertEqual({entry.path.resolve() for entry in hit_rows}, {file_a.resolve(), file_b.resolve()})
             section_by_path = {entry.path.resolve(): entry.workspace_section for entry in hit_rows}
             self.assertEqual(section_by_path[file_a.resolve()], 0)
@@ -168,18 +182,19 @@ class RuntimeTreeFilterTests(unittest.TestCase):
             target_file.write_text("needle\n", encoding="utf-8")
 
             state = _make_state(root)
-            state.tree_roots = [root, nested]
-            state.workspace_expanded = [{root, nested}, {nested}]
-            state.expanded = {root, nested}
-            state.tree_filter_active = True
-            state.tree_filter_mode = "content"
+            state.workspace.roots = [root, nested]
+            state.workspace.expanded_by_root = [{root, nested}, {nested}]
+            state.workspace.expanded = {root, nested}
+            state.filter.active = True
+            state.filter.mode = "content"
 
             ops = TreeFilterController(
                 state=state,
+                search_service=_search_service(state),
                 visible_content_rows=lambda: 20,
                 rebuild_screen_lines=lambda **_kwargs: None,
                 preview_selected_entry=lambda **_kwargs: None,
-                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                current_jump_location=lambda: JumpLocation(path=state.workspace.current_path, start=state.preview.scroll, text_x=state.preview.horizontal_scroll),
                 record_jump_if_changed=lambda _origin: None,
                 jump_to_path=lambda _target: None,
                 jump_to_line=lambda _line: None,
@@ -194,38 +209,39 @@ class RuntimeTreeFilterTests(unittest.TestCase):
                 return {shared_match.path: [shared_match]}, False, None
 
             with mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg",
+                "lazyviewer.search.service.search_project_content_rg",
                 side_effect=fake_search_content,
             ):
                 ops.apply_tree_filter_query("needle")
                 self._drain_content_search(ops)
 
-            hit_rows = [entry for entry in state.tree_entries if entry.kind == "search_hit"]
+            hit_rows = [entry for entry in state.workspace.entries if entry.kind == "search_hit"]
             self.assertEqual(len(hit_rows), 2)
             self.assertEqual({entry.workspace_section for entry in hit_rows}, {0, 1})
-            self.assertEqual(state.tree_filter_match_count, 1)
+            self.assertEqual(state.filter.match_count, 1)
 
     def test_content_search_reuses_cached_results_when_backspacing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             (root / "demo.py").write_text("alpha beta gamma\n", encoding="utf-8")
             state = _make_state(root)
-            state.tree_filter_active = True
-            state.tree_filter_mode = "content"
+            state.filter.active = True
+            state.filter.mode = "content"
 
             ops = TreeFilterController(
                 state=state,
+                search_service=_search_service(state),
                 visible_content_rows=lambda: 20,
                 rebuild_screen_lines=lambda **_kwargs: None,
                 preview_selected_entry=lambda **_kwargs: None,
-                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                current_jump_location=lambda: JumpLocation(path=state.workspace.current_path, start=state.preview.scroll, text_x=state.preview.horizontal_scroll),
                 record_jump_if_changed=lambda _origin: None,
                 jump_to_path=lambda _target: None,
                 jump_to_line=lambda _line: None,
             )
 
             with mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg",
+                "lazyviewer.search.service.search_project_content_rg",
                 return_value=({}, False, None),
             ) as search_mock:
                 ops.apply_tree_filter_query("a")
@@ -243,15 +259,16 @@ class RuntimeTreeFilterTests(unittest.TestCase):
             target_file = root / "demo.py"
             target_file.write_text("alpha\nbeta\n", encoding="utf-8")
             state = _make_state(root)
-            state.tree_filter_active = True
-            state.tree_filter_mode = "content"
+            state.filter.active = True
+            state.filter.mode = "content"
 
             ops = TreeFilterController(
                 state=state,
+                search_service=_search_service(state),
                 visible_content_rows=lambda: 20,
                 rebuild_screen_lines=lambda **_kwargs: None,
                 preview_selected_entry=lambda **_kwargs: None,
-                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                current_jump_location=lambda: JumpLocation(path=state.workspace.current_path, start=state.preview.scroll, text_x=state.preview.horizontal_scroll),
                 record_jump_if_changed=lambda _origin: None,
                 jump_to_path=lambda _target: None,
                 jump_to_line=lambda _line: None,
@@ -275,7 +292,7 @@ class RuntimeTreeFilterTests(unittest.TestCase):
                 return {target_file.resolve(): [first_match, second_match]}, False, None
 
             with mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg",
+                "lazyviewer.search.service.search_project_content_rg",
                 side_effect=fake_streaming_search,
             ):
                 start = time.perf_counter()
@@ -285,15 +302,15 @@ class RuntimeTreeFilterTests(unittest.TestCase):
                 self.assertTrue(first_emitted.wait(timeout=1.0))
 
                 deadline = time.monotonic() + 0.5
-                while time.monotonic() < deadline and state.tree_filter_match_count < 1:
+                while time.monotonic() < deadline and state.filter.match_count < 1:
                     ops.poll_content_search_updates(timeout_seconds=0.01)
-                self.assertEqual(state.tree_filter_match_count, 1)
-                self.assertTrue(state.tree_filter_loading)
+                self.assertEqual(state.filter.match_count, 1)
+                self.assertTrue(state.filter.loading)
 
                 release_finish.set()
                 self._drain_content_search(ops)
-                self.assertEqual(state.tree_filter_match_count, 2)
-                self.assertFalse(state.tree_filter_loading)
+                self.assertEqual(state.filter.match_count, 2)
+                self.assertFalse(state.filter.loading)
 
     def test_content_search_debounces_partial_refresh_and_finishes_immediately(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -301,15 +318,16 @@ class RuntimeTreeFilterTests(unittest.TestCase):
             target_file = root / "demo.py"
             target_file.write_text("alpha\n", encoding="utf-8")
             state = _make_state(root)
-            state.tree_filter_active = True
-            state.tree_filter_mode = "content"
+            state.filter.active = True
+            state.filter.mode = "content"
 
             ops = TreeFilterController(
                 state=state,
+                search_service=_search_service(state),
                 visible_content_rows=lambda: 20,
                 rebuild_screen_lines=lambda **_kwargs: None,
                 preview_selected_entry=lambda **_kwargs: None,
-                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                current_jump_location=lambda: JumpLocation(path=state.workspace.current_path, start=state.preview.scroll, text_x=state.preview.horizontal_scroll),
                 record_jump_if_changed=lambda _origin: None,
                 jump_to_path=lambda _target: None,
                 jump_to_line=lambda _line: None,
@@ -332,19 +350,19 @@ class RuntimeTreeFilterTests(unittest.TestCase):
                 0.05,
             ):
                 with mock.patch(
-                    "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg",
+                    "lazyviewer.search.service.search_project_content_rg",
                     side_effect=fake_streaming_search,
                 ):
                     ops.apply_tree_filter_query("a")
                     self.assertTrue(first_emitted.wait(timeout=1.0))
                     ops.poll_content_search_updates(timeout_seconds=0.01)
-                    self.assertEqual(state.tree_filter_match_count, 0)
-                    self.assertTrue(state.tree_filter_loading)
+                    self.assertEqual(state.filter.match_count, 0)
+                    self.assertTrue(state.filter.loading)
 
                     release_finish.set()
                     self._drain_content_search(ops)
-                    self.assertEqual(state.tree_filter_match_count, 1)
-                    self.assertFalse(state.tree_filter_loading)
+                    self.assertEqual(state.filter.match_count, 1)
+                    self.assertFalse(state.filter.loading)
 
     def test_content_search_click_query_hides_prompt_row_when_results_finish_fast(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -352,15 +370,16 @@ class RuntimeTreeFilterTests(unittest.TestCase):
             target_file = root / "demo.py"
             target_file.write_text("alpha\n", encoding="utf-8")
             state = _make_state(root)
-            state.tree_filter_active = True
-            state.tree_filter_mode = "content"
+            state.filter.active = True
+            state.filter.mode = "content"
 
             ops = TreeFilterController(
                 state=state,
+                search_service=_search_service(state),
                 visible_content_rows=lambda: 20,
                 rebuild_screen_lines=lambda **_kwargs: None,
                 preview_selected_entry=lambda **_kwargs: None,
-                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                current_jump_location=lambda: JumpLocation(path=state.workspace.current_path, start=state.preview.scroll, text_x=state.preview.horizontal_scroll),
                 record_jump_if_changed=lambda _origin: None,
                 jump_to_path=lambda _target: None,
                 jump_to_line=lambda _line: None,
@@ -372,14 +391,14 @@ class RuntimeTreeFilterTests(unittest.TestCase):
                 None,
             )
             with mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg",
+                "lazyviewer.search.service.search_project_content_rg",
                 return_value=result,
             ):
                 ops.apply_tree_filter_query("alpha", debounce_prompt_row=True)
                 self._drain_content_search(ops)
 
-            self.assertFalse(state.tree_filter_prompt_row_visible)
-            self.assertEqual(state.tree_filter_match_count, 1)
+            self.assertFalse(state.filter.prompt_row_visible)
+            self.assertEqual(state.filter.match_count, 1)
 
     def test_content_search_click_query_fast_result_skips_empty_intermediate_rebuild(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -387,15 +406,16 @@ class RuntimeTreeFilterTests(unittest.TestCase):
             target_file = root / "demo.py"
             target_file.write_text("alpha\n", encoding="utf-8")
             state = _make_state(root)
-            state.tree_filter_active = True
-            state.tree_filter_mode = "content"
+            state.filter.active = True
+            state.filter.mode = "content"
 
             ops = TreeFilterController(
                 state=state,
+                search_service=_search_service(state),
                 visible_content_rows=lambda: 20,
                 rebuild_screen_lines=lambda **_kwargs: None,
                 preview_selected_entry=lambda **_kwargs: None,
-                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                current_jump_location=lambda: JumpLocation(path=state.workspace.current_path, start=state.preview.scroll, text_x=state.preview.horizontal_scroll),
                 record_jump_if_changed=lambda _origin: None,
                 jump_to_path=lambda _target: None,
                 jump_to_line=lambda _line: None,
@@ -417,7 +437,7 @@ class RuntimeTreeFilterTests(unittest.TestCase):
                 None,
             )
             with mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg",
+                "lazyviewer.search.service.search_project_content_rg",
                 return_value=result,
             ):
                 ops.apply_tree_filter_query("alpha", debounce_prompt_row=True)
@@ -435,15 +455,16 @@ class RuntimeTreeFilterTests(unittest.TestCase):
             root = Path(tmp).resolve()
             (root / "demo.py").write_text("alpha\n", encoding="utf-8")
             state = _make_state(root)
-            state.tree_filter_active = True
-            state.tree_filter_mode = "content"
+            state.filter.active = True
+            state.filter.mode = "content"
 
             ops = TreeFilterController(
                 state=state,
+                search_service=_search_service(state),
                 visible_content_rows=lambda: 20,
                 rebuild_screen_lines=lambda **_kwargs: None,
                 preview_selected_entry=lambda **_kwargs: None,
-                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                current_jump_location=lambda: JumpLocation(path=state.workspace.current_path, start=state.preview.scroll, text_x=state.preview.horizontal_scroll),
                 record_jump_if_changed=lambda _origin: None,
                 jump_to_path=lambda _target: None,
                 jump_to_line=lambda _line: None,
@@ -464,21 +485,21 @@ class RuntimeTreeFilterTests(unittest.TestCase):
                     0.0,
                 ):
                     with mock.patch(
-                        "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg",
+                        "lazyviewer.search.service.search_project_content_rg",
                         side_effect=fake_streaming_search,
                     ):
                         ops.apply_tree_filter_query("alpha", debounce_prompt_row=True)
-                        self.assertFalse(state.tree_filter_prompt_row_visible)
-                        self.assertTrue(state.tree_filter_loading)
+                        self.assertFalse(state.filter.prompt_row_visible)
+                        self.assertTrue(state.filter.loading)
 
                         time.sleep(0.03)
                         ops.poll_content_search_updates(timeout_seconds=0.0)
-                        self.assertTrue(state.tree_filter_prompt_row_visible)
-                        self.assertTrue(state.tree_filter_loading)
+                        self.assertTrue(state.filter.prompt_row_visible)
+                        self.assertTrue(state.filter.loading)
 
                         release_finish.set()
                         self._drain_content_search(ops)
-                        self.assertFalse(state.tree_filter_loading)
+                        self.assertFalse(state.filter.loading)
 
     def test_content_search_ignores_stale_results_after_query_change(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -486,15 +507,16 @@ class RuntimeTreeFilterTests(unittest.TestCase):
             target_file = root / "demo.py"
             target_file.write_text("alpha\nbeta\n", encoding="utf-8")
             state = _make_state(root)
-            state.tree_filter_active = True
-            state.tree_filter_mode = "content"
+            state.filter.active = True
+            state.filter.mode = "content"
 
             ops = TreeFilterController(
                 state=state,
+                search_service=_search_service(state),
                 visible_content_rows=lambda: 20,
                 rebuild_screen_lines=lambda **_kwargs: None,
                 preview_selected_entry=lambda **_kwargs: None,
-                current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+                current_jump_location=lambda: JumpLocation(path=state.workspace.current_path, start=state.preview.scroll, text_x=state.preview.horizontal_scroll),
                 record_jump_if_changed=lambda _origin: None,
                 jump_to_path=lambda _target: None,
                 jump_to_line=lambda _line: None,
@@ -524,7 +546,7 @@ class RuntimeTreeFilterTests(unittest.TestCase):
                 return {target_file.resolve(): [second]}, False, None
 
             with mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg",
+                "lazyviewer.search.service.search_project_content_rg",
                 side_effect=fake_streaming_search,
             ):
                 ops.apply_tree_filter_query("a")
@@ -533,9 +555,9 @@ class RuntimeTreeFilterTests(unittest.TestCase):
                 release_first_query.set()
                 self._drain_content_search(ops)
 
-                self.assertEqual(state.tree_filter_query, "ab")
-                self.assertEqual(state.tree_filter_match_count, 1)
-                selected_entry = state.tree_entries[state.selected_idx]
+                self.assertEqual(state.filter.query, "ab")
+                self.assertEqual(state.filter.match_count, 1)
+                selected_entry = state.workspace.entries[state.workspace.selected]
                 self.assertEqual(selected_entry.kind, "search_hit")
                 self.assertEqual(selected_entry.line, 2)
 

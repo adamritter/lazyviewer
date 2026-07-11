@@ -1,634 +1,160 @@
-# lazyviewer Architecture Deep Dive
+# LazyViewer architecture
 
-## 1. Purpose and Architectural Style
+LazyViewer is organized as a small set of components with typed APIs. Filesystem observation, search, preview loading, presentation, session transitions, and terminal I/O have separate owners.
 
-`lazyviewer` is a terminal TUI for navigating a directory tree and previewing content in a split layout:
+## Dependency direction
 
-- Left pane: tree, filter/search results, picker overlays.
-- Right pane: source/directory/diff/image preview.
-- Bottom row: status.
+```text
+CLI
+ └─ runtime (composition, event loop, effect interpretation)
+     ├─ session (feature state, actions, effects, update)
+     ├─ workspace (revisioned filesystem/Git observations)
+     ├─ search (typed file/content search)
+     ├─ preview (semantic document loading)
+     ├─ tree_pane / source_pane (UI controllers and presenters)
+     ├─ tree_model (tree-row projection)
+     └─ render → retained Frame surfaces → terminal driver
 
-The codebase is organized around a **single mutable runtime state object** (`AppState`) plus a set of focused modules that:
+search ─────→ workspace
+preview ────→ workspace
+tree_model ─→ workspace
+session ────→ preview, workspace, tree_model
+```
 
-1. read input,
-2. mutate state,
-3. render state.
+The domain components (`workspace`, `search`, `preview`, `session`, and `tree_model`) do not import the runtime or pane packages. `tests/unit/architecture/test_boundaries.py` enforces these boundaries.
 
-The architecture is intentionally callback-driven:
+## Components and public contracts
 
-- The main loop (`lazyviewer/runtime/loop.py`) is wiring-heavy and generic.
-- Domain logic lives in subsystem controllers (`tree_pane/panels/*`, `source_pane/*`, `tree_model/*`, `runtime/*` helpers).
-- Rendering is side-effect free until final frame write.
+### Workspace
 
-This keeps feature logic testable and separates "what changed" from "how it is drawn."
+`lazyviewer.workspace` is the only owner of filesystem and Git observations.
 
----
+- `WorkspaceQuery` describes normalized multi-root visibility and expansion inputs.
+- `WorkspaceSnapshot` is an immutable observation of all roots.
+- `WorkspaceRevision` provides separate tree and Git identities.
+- `WorkspaceDelta` says exactly which root sections changed.
+- `WorkspaceService.snapshot`, `refresh`, and `refresh_git` are the observation API.
+- `WorkspaceService.file_index` owns the revision-keyed file catalog.
+- `WorkspaceWatcher` owns polling policy; Git-only polling does not mutate the tree revision.
+- `workspace.tree` contains the canonical `DirectoryEntry` and `FileEntry` model.
 
-## 2. Repository Topology
+Symlinks that resolve outside a workspace root are excluded by the canonical scanner. Overlapping and duplicate roots remain separate workspace sections.
 
-Primary packages and responsibilities:
+### Search
 
-- `lazyviewer/cli.py`: CLI argument parsing and launch handoff.
-- `lazyviewer/runtime/*`: composition, event loop, layout, watch refresh, git jumps, terminal lifecycle, shared state.
-- `lazyviewer/render/*`: frame rendering and ANSI line shaping.
-- `lazyviewer/tree_model/*`: shared tree entry construction, filtering, layout helpers, and metadata/doc-summary caching.
-- `lazyviewer/tree_pane/*`: left-pane rendering and click semantics.
-- `lazyviewer/tree_pane/panels/filter/*`: file-filter + content-search controller.
-- `lazyviewer/tree_pane/panels/picker/*`: symbol picker + command palette + navigation controller.
-- `lazyviewer/source_pane/*`: right-pane preview generation (file/dir/diff/image), sticky headers, highlighting, rendering.
-- `lazyviewer/source_pane/interaction/*`: source-pane click/drag behavior and geometry utilities.
-- `lazyviewer/input/*`: raw terminal input decoding and mode-specific key/mouse handlers.
-- `lazyviewer/search/*`: fuzzy matching and ripgrep content search.
-- `lazyviewer/git_status.py`, `lazyviewer/watch.py`, `lazyviewer/gitignore.py`: git metadata and watch signatures.
+`SearchService` owns search workers and caches. Callers use immutable contracts from `search.model`:
 
-### 2.1 UI-Oriented Hierarchy Rules
+- `FileSearchRequest` → `FileSearchMatch`
+- `ContentSearchRequest` → streaming `ContentMatchesAdded` / `ContentSearchFinished`
+- `ContentSearchJob.cancel()` and `poll()`
 
-Current directory hierarchy follows UI responsibilities with one shared model layer:
+File indexes and content results are keyed by workspace revision. The filter controller decides UI selection and projection; it does not own threads, queues, or result caches.
 
-- Shared layer: `tree_model/*` (tree rows, metadata extraction, filter/navigation primitives).
-- Left-pane UI: `tree_pane/*` and `tree_pane/panels/*`.
-- Right-pane UI: `source_pane/*` and `source_pane/interaction/*`.
-- Orchestration layer: `runtime/*` composes all panels into one interactive loop.
+### Preview
 
-Practical rule used during refactors:
+`PreviewService` loads a `PreviewRequest` into a semantic `PreviewDocument`:
 
-- If logic is metadata about filesystem/tree nodes (mtime, git flags, doc summaries), it belongs in `tree_model`.
-- If logic is pane-specific rendering/interaction, it belongs in that pane package.
-- `runtime/app.py` is composition glue and should avoid re-implementing domain rules.
+- `TextDocument`
+- `BinaryDocument`
+- `ImageDocument`
+- `DirectoryDocument` with exact `DirectoryRow.path` values
+- `DiffDocument` with semantic line kinds
+- `ErrorDocument`
 
----
+Loading has no ANSI, theme, stdout, or TTY decisions. Its bounded cache is keyed by the request, including `workspace_revision`.
 
-## 3. Startup and Process Lifecycle
+`source_pane.PreviewPresenter` is the terminal presentation boundary. It applies syntax color, directory styling, Git badges, and diff backgrounds. Directory clicks use `DirectoryDocument.rows`; rendered text is never reparsed to recover paths.
 
-### 3.1 Entry points
+`runtime.PreviewWorker` performs semantic loading in the background. Completed requests carry their revision, and stale results are rejected by the session update function.
 
-- Script entry: `lazyviewer.py` -> `lazyviewer.cli.main`.
-- Module entry: `python -m lazyviewer` -> `lazyviewer/__main__.py` -> `main`.
-- Installed entrypoint (from `pyproject.toml`): `lazyviewer = lazyviewer.cli:main`.
+### Session
 
-### 3.2 CLI phase
+`SessionState` composes feature-owned mutable state:
 
-`lazyviewer/cli.py`:
+- `WorkspaceViewState`
+- `PreviewViewState`
+- `LayoutState`
+- `FilterState`
+- `PickerState`
+- `GitState`
+- `NavigationState`
+- `InterfaceState`
 
-1. Parses args (`path`, `--style`, `--no-color`, `--nopager`).
-2. Resolves target path.
-3. Reads file content for file targets (directory targets use empty source at startup).
-4. Calls `run_pager(...)` in `lazyviewer/runtime/app.py`.
+Code accesses the owning feature explicitly (`state.preview.lines`, `state.filter.query`, and so on); there is no flat global state facade.
 
-### 3.3 Non-interactive fast path
+External events enter through typed actions in `session.actions`. `session.update.update(state, action)` performs the state transition and returns typed effects from `session.effects`. `SessionCoordinator` interprets effects at the runtime boundary.
 
-In `run_pager`, if `--nopager` or stdin is not a TTY:
+Current root-level actions cover clock ticks, terminal resize, pane-width changes, workspace deltas, and completed previews. Mode-specific pane controllers still own local keyboard/navigation rules.
 
-- optional syntax colorization (if output TTY and color enabled),
-- write once to stdout,
-- exit.
+### Tree and source panes
 
-### 3.4 Interactive path
+`TreePane` composes three focused UI objects:
 
-`run_pager` initializes:
+- `TreeFilterController` for filter state, result projection, and selection
+- `NavigationController` / `PickerPanel` for navigation, roots, marks, and pickers
+- `TreePaneMouseHandlers` for tree pointer intent
 
-- tree root and entries,
-- preview payload for selected path,
-- initial pane widths (with persisted percentages),
-- `AppState`,
-- all controllers/ops callbacks,
-- then enters `run_main_loop(...)`.
+`SourcePane` owns only source geometry and mouse behavior. `PreviewController` owns request/apply and directory-budget behavior. `PreviewPresenter` owns terminal formatting.
 
----
+Shared callback shapes live as small protocols in `lazyviewer.ports`; dynamic `getattr`, `SimpleNamespace`, and `Callable[..., ...]` adapters are intentionally absent.
 
-## 4. The Core State Model (`AppState`)
+### Rendering and terminal I/O
 
-`lazyviewer/runtime/state.py` defines a single mutable dataclass shared across the program.
-
-State categories:
+Rendering is pure:
 
-- **Navigation and selection**:
-  - `current_path`, `tree_root`, `expanded`, `selected_idx`, `tree_start`.
-- **Rendered preview and scrolling**:
-  - `rendered`, `lines`, `start`, `text_x`, `max_start`, `wrap_text`.
-- **Layout**:
-  - `left_width`, `right_width`, `usable`, `browser_visible`, `show_help`.
-- **Filter/picker session state**:
-  - `tree_filter_*`, `picker_*`.
-- **Source selection drag/copy state**:
-  - `source_selection_anchor`, `source_selection_focus`.
-- **Directory/image/diff preview metadata**:
-  - `dir_preview_*`, `preview_image_*`, `preview_is_git_diff`.
-- **Git and watches**:
-  - `git_status_overlay`, `git_status_last_refresh`, `git_features_enabled`.
-- **Navigation history and marks**:
-  - `jump_history`, `named_marks`, `pending_mark_set`, `pending_mark_jump`.
-- **Render invalidation**:
-  - `dirty`, `status_message`, `status_message_until`.
+1. Runtime builds a `RenderContext`.
+2. `RetainedPageRenderer` compares pane-specific input keys and reuses unchanged tree, preview, and help presentations.
+3. It returns an immutable `Frame` of named rectangular `Surface` values; standalone capture frames also carry the legacy canonical full-screen text.
+4. `render.diff.diff_frames` compares the surfaces with the previously presented frame and returns a pure ANSI patch.
+5. `TerminalController.write_frame` performs one atomic file-descriptor write.
 
-Design implication: every subsystem speaks through this one state object, so cross-feature interactions are explicit and observable.
+The coarse `InterfaceState.dirty` flag schedules presentation only. Feature controllers do not carry pane-specific rendering flags; the retained renderer owns its dependency keys. A preview-only scroll therefore reuses the tree presentation, and the terminal patch addresses only changed preview rows plus the status row.
 
----
+The first frame, geometry changes, and terminal re-entry derive a full repaint from the surfaces. Production rendering does not rebuild that full-screen string on ordinary updates. Stable layouts use absolute cursor positioning, style-isolated row writes, and clear-to-line-end at the right screen edge. The render package never writes to stdout. Terminal mode, mouse reporting, Kitty image commands, retained-screen state, and frame writes all belong to `TerminalController`.
 
-## 5. Runtime Composition Graph (`runtime/app.py`)
+## Runtime flow
 
-`run_pager` is the "assembly root." It wires all modules into a dependency graph using function injection and `partial(...)`.
+Startup in `runtime.app.run_pager` is the composition root:
 
-Key composition phases:
+1. Construct `WorkspaceService`, `PreviewService`, and `PreviewPresenter`.
+2. `SessionBootstrap` creates the initial workspace snapshot, tree projection, preview document, and feature states.
+3. Construct layout, watchers, preview worker, pane controllers, and `SessionCoordinator`.
+4. Bundle concrete components and operations into `ApplicationComponents` and `ApplicationOperations`.
+5. Start the event loop.
 
-1. **Environment + state init**
-   - terminal sizing,
-   - tree entries via `tree_model.build_tree_entries`,
-   - preview payload via `source_pane.build_rendered_for_path`,
-   - initial `AppState`.
+The loop maps decoded terminal tokens to typed input commands, applies root session actions for resize/time changes, delegates mode-specific keys to pane controllers, builds a frame when dirty, and lets the terminal driver emit it.
 
-2. **Infrastructure ops**
-   - `TerminalController`,
-   - `PagerLayoutOps`,
-   - `WatchRefreshContext`,
-   - `TreeFilterIndexWarmupScheduler`.
+## Cache and freshness rules
 
-3. **Preview refresh closures**
-   - `_refresh_rendered_for_current_path`,
-   - `_maybe_grow_directory_preview`,
-   - `_refresh_git_status_overlay`.
+- Workspace file indexes: tree revision.
+- Search results: workspace tree revision plus query/limits.
+- Preview documents: full workspace revision plus request policy.
+- Document summaries: file metadata, owned by `workspace.doc_summary`.
+- Git polling: Git observations only; tree polling is independent.
+- Rendered panes: O(1) identity and scalar keys over replace-on-change view collections.
+- Presented terminal screen: the previous structured frame, invalidated on geometry or terminal lifecycle changes.
 
-4. **Controllers**
-   - `TreeFilterOps` (`tree_pane/panels/filter/controller.py`),
-   - `NavigationPickerOps` (`tree_pane/panels/picker/controller.py`),
-   - `GitModifiedJumpDeps` (`runtime/git_jumps.py`).
+When a workspace revision changes, consumers issue a new typed request. Async results from older revisions are ignored rather than heuristically accepted.
 
-5. **Mouse routing**
-   - `TreeMouseHandlers` (`input/mouse.py`) combining source + tree pane mouse handlers.
+## Testing strategy
 
-6. **Keyboard ops bundle**
-   - `NormalKeyOps` passed into `input/keys.handle_normal_key`.
+- `tests/unit/workspace`, `search`, `preview`, and `session` test component contracts.
+- `tests/unit/render` proves retained-cache isolation and applies incremental patches to a virtual screen for equivalence with full rendering.
+- `tests/unit/architecture` enforces import direction, explicit contracts, and pure rendering.
+- `tests/integration/runtime` drives assembled controllers and long interaction sequences.
+- `tests/integration/git` validates real Git and ignore behavior.
+- `tests/regressions` protects performance and randomized multi-root invariants.
 
-7. **Loop callback bundle**
-   - `RuntimeLoopCallbacks` passed into `runtime/loop.run_main_loop`.
+Use Python 3.12 for the repository test environment:
 
-An internal `NavigationProxy` breaks construction-order cycles where tree filter deps require navigation ops before they are fully instantiated.
+```bash
+PYENV_VERSION=3.12.3 uv run --with pytest pytest -q
+```
 
----
+## Extension rules
 
-## 6. Main Event Loop Mechanics (`runtime/loop.py`)
-
-`run_main_loop` is a deterministic tick loop:
-
-### 6.1 Per-iteration maintenance
-
-1. Read terminal size and clamp pane widths.
-2. Expire transient status message.
-3. Recompute:
-   - content viewport (`max_start`),
-   - tree scroll window (`tree_start`),
-   - picker list window (`picker_list_start`).
-4. Update blink/spinner states for filter prompt UI.
-5. Set `dirty` when any computed visual state changes.
-
-### 6.2 Render phase (only if dirty)
-
-When `state.dirty`:
-
-1. Build `RenderContext`.
-2. Call `render.render_dual_page_context`.
-3. Handle kitty image placement:
-   - clear previous image if geometry/path changed,
-   - draw new PNG if needed.
-4. Set `state.dirty = False`.
-
-### 6.3 Input read phase
-
-- Read one normalized key token via `input.read_key`.
-- If timeout/no key:
-  - maybe refresh tree watch,
-  - maybe refresh git watch,
-  - periodic git overlay refresh,
-  - source drag auto-scroll tick.
-
-### 6.4 Key normalization and dispatch order
-
-Special normalization:
-
-- `ENTER_CR`/`ENTER_LF` handling (`skip_next_lf` prevents CRLF double-fire).
-- Shift resize and pending mark modes handled before general key dispatch.
-
-Dispatch precedence:
-
-1. pane resize hotkeys,
-2. pending mark set/jump handlers,
-3. ALT history hotkeys (if allowed),
-4. open filter/picker overlays (`Ctrl+P`, `/`, `:`),
-5. `handle_picker_key`,
-6. `handle_tree_filter_key`,
-7. `handle_normal_key`.
-
-Any stage can consume the key. Quit occurs when picker/normal handlers return quit signal.
-
----
-
-## 7. Input Layer
-
-## 7.1 Raw decode (`input/reader.py`)
-
-`read_key(fd, timeout_ms)` decodes:
-
-- printable UTF-8 chars,
-- control keys (`CTRL_*`, backspace, tab, enter),
-- arrow/modified arrows (`SHIFT_LEFT`, `ALT_RIGHT`, etc.),
-- SGR mouse tokens (`MOUSE_LEFT_DOWN:col:row`, wheel events).
-
-A short ESC timeout distinguishes lone `Esc` from escape sequences.
-
-## 7.2 Keyboard behavior (`input/keys.py`)
-
-Three mode handlers:
-
-- `handle_picker_key`,
-- `handle_tree_filter_key`,
-- `handle_normal_key`.
-
-`handle_normal_key` includes:
-
-- vim-like movement (`h/j/k/l`, paging, `g/G`, counts),
-- tree actions (open/collapse/toggle),
-- wrap/tree/help toggles,
-- root changes (`r`, `R`),
-- marks (`m{key}`, `'{key}`),
-- git jumps (`n/N/p`) when enabled,
-- external editor launch,
-- quit.
-
-The file uses small `KeyComboRegistry` dispatchers to keep key maps composable.
-
-## 7.3 Mouse orchestration (`input/mouse.py`)
-
-`TreeMouseHandlers` composes:
-
-- `SourcePaneMouseHandlers` (drag-select, click-intent in source pane),
-- `TreePaneMouseHandlers` (tree row clicks, arrow toggles, double-click activation).
-
-Top-level wheel routing:
-
-- vertical wheel over tree => move selection,
-- vertical wheel over source => scroll content,
-- horizontal wheel over source => x-scroll.
-
----
-
-## 8. Rendering Pipeline
-
-## 8.1 ANSI primitives (`render/ansi.py`)
-
-Foundational functions:
-
-- character width calculation with tab stop + East Asian width handling,
-- ANSI-safe clipping and slicing,
-- ANSI-preserving wrapping,
-- `build_screen_lines` (logical rendered text -> display rows).
-
-These are reused by both panes and highlighting modules.
-
-## 8.2 Frame compositor (`render/__init__.py`)
-
-`render_dual_page(...)`:
-
-1. Clears frame (`\x1b[H\x1b[J`).
-2. Computes help panel row reservation.
-3. Chooses text-only vs split-pane mode.
-4. Constructs:
-   - `TreePaneRenderer` for left pane,
-   - `SourcePaneRenderer` for right pane.
-5. Renders content rows + help rows.
-6. Builds inverted status line with location + help hint.
-7. Writes one atomic frame to stdout.
-
-## 8.3 Help overlay (`render/help.py`)
-
-- contextual inline help rows (normal vs content-search edit/hit mode),
-- full-screen modal help renderer (`render_help_page`).
-
----
-
-## 9. Tree Architecture
-
-## 9.1 Shared tree model (`tree_model/*`)
-
-`tree_model` is the shared data/metadata layer consumed by both panes.
-
-Core types and builders:
-
-- `TreeEntry`: canonical row model (`kind="path"` or synthetic `kind="search_hit"`).
-- `DirectoryChild`: directory-scan record with `file_size`, `mtime_ns`, `git_status_flags`, and optional `doc_summary`.
-- `build_tree_entries`: full tree projection from filesystem + expansion state.
-- `filter_tree_entries_for_files`: file-query projection.
-- `filter_tree_entries_for_content_matches`: content-hit projection.
-- `list_directory_children`: reusable directory scan with sorting and metadata extraction.
-
-Metadata ownership:
-
-- `tree_model/doc_summary.py` owns top-of-file summary extraction + bounded LRU cache.
-- Directory preview opts in to summaries when needed (`include_doc_summaries=True`) instead of reimplementing parsing.
-- This keeps metadata policy centralized and reduces duplicated cache logic.
-
-## 9.2 Left-pane rendering (`tree_pane/rendering.py`)
-
-`TreePaneRenderer` renders:
-
-- optional filter prompt row,
-- optional picker overlay rows,
-- regular tree rows with selection reverse-video,
-- file size labels and git status badges.
-
-`_format_tree_filter_status` shows loading spinner, match counts, and truncation.
-
-## 9.3 Tree click semantics (`tree_pane/events.py`)
-
-- clicking filter query row enters edit mode,
-- clicking directory arrow toggles expansion immediately,
-- single click selects + previews,
-- double click activates:
-  - directory toggles,
-  - file copies basename,
-  - active filter mode triggers selection activation.
-
-## 9.4 Left-pane panel controllers (`tree_pane/panels/*`)
-
-- `tree_pane/panels/filter/*`: `TreeFilterOps` (`lifecycle`, `matching`, `navigation` mixins).
-- `tree_pane/panels/picker/*`: `NavigationPickerOps` (`picker_lifecycle`, `matching`, `navigation`, `view_actions` mixins).
-
-This split keeps domain state machines close to each UI panel while leaving runtime composition in `runtime/app.py`.
-
----
-
-## 10. Source Pane Architecture
-
-The source pane is a layered pipeline:
-
-1. choose preview payload (`path.py` + `directory.py` + `diff.py` + `syntax.py`),
-2. map source/display lines (`source.py`, `diffmap.py`),
-3. apply overlays (`highlighting.py`, `sticky.py`),
-4. render rows (`renderer.py`),
-5. route source clicks/drags (`interaction/mouse.py`, `interaction/events.py`).
-
-## 10.1 Path-to-preview resolution (`source_pane/path.py`)
-
-For files:
-
-1. PNG signature => image preview metadata.
-2. binary detection (NUL probe) => binary placeholder.
-3. optional git diff preview (if enabled and available).
-4. source text (sanitized, optionally colorized).
-
-For directories:
-
-- delegate to `build_directory_preview`.
-
-Result object: `RenderedPath(text, is_directory, truncated, image_path, image_format, is_git_diff_preview)`.
-
-## 10.2 Directory preview (`source_pane/directory.py`)
-
-Features:
-
-- depth/entry-bounded recursive tree preview,
-- optional hidden/gitignored filtering,
-- optional size labels,
-- git badges per row,
-- cached doc summaries sourced from `tree_model.list_directory_children(...)`,
-- LRU cache keyed by root+mtime+overlay signature+options and validated by watched path metadata.
-
-## 10.3 Diff preview (`source_pane/diff.py`)
-
-- obtains hunks via git diff against HEAD (plus staged/unstaged fallback),
-- parses hunk metadata + removed lines,
-- merges into full-file annotated preview:
-  - unchanged lines prefixed with space marker semantics,
-  - added lines with greenish background,
-  - removed lines inserted with redish background,
-- preserves syntax coloring and boosts low-contrast foreground on diff backgrounds,
-- memoized with cache key including file mtime/size + git signature + style/color flags.
-
-## 10.4 Syntax and text safety (`source_pane/syntax.py`)
-
-- robust text read fallback encodings,
-- sanitizes control bytes into visible escapes,
-- highlighting strategy:
-  - Pygments first,
-  - tokenizer fallback,
-  - raw source as final fallback.
-
-## 10.5 Line mapping + overlays
-
-- `source.py`: maps between display rows and logical source lines (including wrapped and diff previews).
-- `diffmap.py`: treats removed diff lines as non-advancing source lines.
-- `highlighting.py`: ANSI-preserving query highlighting + source selection background overlays.
-- `sticky.py`: sticky symbol scope logic and header row generation.
-- `text.py`: ANSI-aware widths, underline helpers, scroll percent.
-
-## 10.6 Source click/drag interactions (`source_pane/interaction/*`)
-
-`source_pane/interaction/mouse.py`:
-
-- drag-select with auto-scroll at pane edges (vertical + horizontal),
-- copy selected range to clipboard on release,
-- delegates click intent handling.
-
-`source_pane/interaction/events.py` click intent priority:
-
-1. directory preview row jump,
-2. import target resolution jump (`import` / `from ... import ...`),
-3. token-under-cursor content search bootstrap.
-
----
-
-## 11. Tree Filter Panel (File Filter + Content Search)
-
-`tree_pane/panels/filter/controller.py` (`TreeFilterOps`) owns session semantics:
-
-- open/close mode transitions (`files` vs `content`),
-- query application,
-- tree rebuild and selection coercion,
-- match counters and truncation flags,
-- loading indicator timing,
-- content search cache with bounded LRU.
-
-Important behavior:
-
-- file mode builds a filtered directory/file projection using fuzzy labels.
-- content mode builds file nodes + synthetic hit nodes from ripgrep matches.
-- content mode maintains collapsed directories separately (`tree_filter_collapsed_dirs`).
-- `Enter` in content mode keeps search session active (not an automatic close).
-- `Esc` can restore original location via stored `tree_filter_origin`.
-
----
-
-## 12. Picker Panel and Navigation Controller
-
-`tree_pane/panels/picker/controller.py` (`NavigationPickerOps`) unifies:
-
-- symbol picker open/match/activate,
-- command palette open/match/dispatch,
-- jump history and named marks,
-- reroot and visibility toggles,
-- wrap/help/tree mode toggles,
-- jump-to-path / jump-to-line operations.
-
-It also manages picker/browser visibility transitions and selection windowing state.
-
----
-
-## 13. Search Subsystems
-
-## 13.1 Fuzzy/file search (`search/fuzzy.py`)
-
-- project file and label collection (`rg --files` preferred, `os.walk` fallback),
-- caching by `(root, show_hidden, skip_gitignored)`,
-- strict substring mode for huge projects,
-- fuzzy fallback scoring for smaller sets.
-
-## 13.2 Content search (`search/content.py`)
-
-- runs ripgrep JSON mode,
-- parses match events into `ContentMatch(path,line,column,preview)`,
-- guards against path traversal/absolute paths from tool output,
-- enforces match/file caps and returns truncation flag + optional error.
-
----
-
-## 14. Git and Watch Integration
-
-## 14.1 Git status overlay (`git_status.py`)
-
-- parses porcelain output,
-- computes path flags (`changed`, `untracked`),
-- propagates flags to ancestor directories under current tree root,
-- provides badge formatter for tree rows.
-
-## 14.2 Watch signatures (`watch.py`)
-
-- `build_tree_watch_signature`: hashes visible directory metadata under expanded dirs.
-- `build_git_watch_signature`: hashes git control files (`HEAD`, refs, index, etc.).
-- `resolve_git_paths`: finds repo root and git dir.
-
-## 14.3 Runtime refresh policy (`runtime/watch_refresh.py`)
-
-- debounced polling intervals for tree/git signatures,
-- refresh and rebuild only on signature change,
-- ensures git diff previews are re-rendered when repo state changes.
-
-## 14.4 Git navigation (`runtime/git_jumps.py`)
-
-`n` / `N` / `p` behavior:
-
-1. prefer intra-file diff block jumps when in diff preview,
-2. otherwise navigate among modified files in tree order,
-3. wrap with user-visible status messages.
-
----
-
-## 15. Terminal and External Process Integration
-
-## 15.1 Terminal control (`runtime/terminal.py`)
-
-- raw mode + alternate screen lifecycle,
-- mouse reporting toggles,
-- kitty graphics clear/draw protocol helpers.
-
-## 15.2 External editor and lazygit
-
-- editor launch (`runtime/editor.py`) temporarily exits TUI mode,
-- lazygit launch in `runtime/app.py` does same and resyncs tree/preview after exit.
-
-## 15.3 Clipboard copy
-
-`runtime/app.py` tries platform commands in order:
-
-- macOS: `pbcopy`,
-- Windows: `clip`,
-- Linux: `wl-copy`, `xclip`, `xsel`.
-
-Used for selected source text copy and filename copy on tree double-click file rows.
-
----
-
-## 16. Persistence and User Preferences
-
-`runtime/config.py` stores JSON in `~/.config/lazyviewer.json`:
-
-- pane width percentages (normal mode + content-search mode),
-- hidden-file preference,
-- named marks (`JumpLocation` payloads).
-
-All reads/writes are defensive (malformed or missing config is non-fatal).
-
----
-
-## 17. Cache and Performance Strategy
-
-Multiple bounded caches reduce repeated heavy work:
-
-- directory preview LRU (`source_pane/directory.py`),
-- diff preview LRU (`source_pane/diff.py`),
-- symbol context LRU (`source_pane/symbols.py`),
-- top-of-file doc summary LRU (`tree_model/doc_summary.py`),
-- project file list/label caches (`search/fuzzy.py`),
-- content search query cache (`tree_pane/panels/filter/matching.py`).
-
-Other performance controls:
-
-- adaptive match limits by query length,
-- strict substring-only fast path for huge file sets,
-- background index warmup thread (`runtime/index_warmup.py`),
-- spinner/loading timers decoupled from expensive calls.
-
----
-
-## 18. End-to-End Interaction Traces
-
-## 18.1 Startup
-
-`cli.main` -> `run_pager` -> build `AppState` -> wire ops/callbacks -> `run_main_loop` -> render frame.
-
-## 18.2 `/` content search flow
-
-`runtime.loop` detects `/` -> `TreeFilterOps.open_tree_filter("content")` ->
-typing keys handled in `handle_tree_filter_key` -> `apply_tree_filter_query` ->
-`search_project_content_rg` (cached) -> tree rebuilt with `search_hit` entries ->
-preview selection updates from selected hit.
-
-## 18.3 Source click token search flow
-
-mouse event decoded in `input.reader` -> routed by `input.mouse` ->
-`SourcePaneMouseHandlers` click -> `source_pane.interaction.events.handle_preview_click` ->
-token extracted -> opens content filter and applies query.
-
-## 18.4 Git jump flow
-
-`n/N/p` in normal mode -> `input.keys.handle_normal_key` ->
-`GitModifiedJumpDeps.jump_to_next_git_modified` ->
-intra-diff block jump or modified-file jump ->
-path/scroll state updated and optional wrap status message.
-
----
-
-## 19. Architectural Invariants
-
-Core invariants maintained throughout code:
-
-- `AppState` is the only mutable cross-subsystem truth.
-- Rendering reads state and does not perform business-logic decisions.
-- Input handlers mutate state but rely on injected callbacks for external side effects.
-- Tree and source panes are independently renderable but synchronized through shared selection/path state.
-- Watch and git refreshes are poll-based and signature-driven, not event-driven.
-- Non-critical failures (config I/O, optional tools, parser availability) degrade gracefully instead of crashing.
-
----
-
-## 20. High-Level Dependency Direction
-
-A simplified dependency direction:
-
-- `cli` -> `runtime.app`
-- `runtime.loop` -> `input`, `render`, callback interfaces
-- `runtime.app` -> assembles `tree_model`, `tree_pane/panels`, `source_pane`, `input`, `search`, `git/watch`
-- `render` -> `tree_pane.rendering` + `source_pane.renderer`
-- `tree_pane` consumes `tree_model` for rows/navigation/filtering primitives
-- `source_pane` consumes `tree_model` for directory metadata/doc summaries
-- leaf modules use lower-level utilities (`render.ansi`, `git_status`, `gitignore`, `search` models)
-
-This keeps runtime orchestration centralized while allowing leaf modules to stay focused and testable.
+- New filesystem facts belong in `workspace` and must affect a revision when consumers need invalidation.
+- New search modes start with request/result types, then a `SearchService` method.
+- New preview formats add a `PreviewDocument` variant, loader branch, and presenter branch.
+- New external runtime events add a session action and, when necessary, an explicit effect.
+- Pane code may format or interpret UI intent; it must not acquire filesystem caches, worker queues, or terminal output responsibilities.

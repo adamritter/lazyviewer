@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
+from typing import Protocol
 
-from ..runtime.navigation import JumpLocation
-from ..runtime.state import AppState
+from ..session.navigation import JumpLocation
+from ..session import SessionState
 from ..tree_model import (
     next_directory_entry_index,
     next_index_after_directory_subtree,
@@ -19,11 +19,42 @@ from .key_common import default_max_horizontal_text_offset, effective_max_start
 from .key_registry import KeyComboBinding, KeyComboRegistry
 
 
+class RebuildTree(Protocol):
+    def __call__(self, *, preferred_path: Path | None = None) -> None: ...
+
+
+class RefreshPreview(Protocol):
+    def __call__(
+        self,
+        *,
+        reset_scroll: bool = True,
+        reset_dir_budget: bool = False,
+        force_rebuild: bool = False,
+    ) -> None: ...
+
+
+class RefreshGitStatus(Protocol):
+    def __call__(self, *, force: bool = False) -> None: ...
+
+
+class RebuildScreen(Protocol):
+    def __call__(
+        self,
+        *,
+        columns: int | None = None,
+        preserve_scroll: bool = False,
+    ) -> None: ...
+
+
+def _noop() -> None:
+    return None
+
+
 @dataclass(frozen=True)
 class NormalKeyContext:
     """State and bound operations required for normal-mode key handling."""
 
-    state: AppState
+    state: SessionState
     current_jump_location: Callable[[], JumpLocation]
     record_jump_if_changed: Callable[[JumpLocation], None]
     open_symbol_picker: Callable[[], None]
@@ -39,77 +70,30 @@ class NormalKeyContext:
     handle_tree_mouse_wheel: Callable[[str], bool]
     handle_tree_mouse_click: Callable[[str], bool]
     move_tree_selection: Callable[[int], bool]
-    rebuild_tree_entries: Callable[..., None]
-    preview_selected_entry: Callable[..., None]
-    refresh_rendered_for_current_path: Callable[..., None]
-    refresh_git_status_overlay: Callable[..., None]
+    rebuild_tree_entries: RebuildTree
+    preview_selected_entry: Callable[[], None]
+    refresh_rendered_for_current_path: RefreshPreview
+    refresh_git_status_overlay: RefreshGitStatus
     maybe_grow_directory_preview: Callable[[], bool]
     visible_content_rows: Callable[[], int]
-    rebuild_screen_lines: Callable[..., None]
+    rebuild_screen_lines: RebuildScreen
     mark_tree_watch_dirty: Callable[[], None]
     launch_editor_for_path: Callable[[Path], str | None]
     jump_to_next_git_modified: Callable[[int], bool]
     max_horizontal_text_offset: Callable[[], int] = default_max_horizontal_text_offset
-
-
-class _ContextHostAdapter:
-    """Adapt legacy ``NormalKeyContext`` to the app-style UI host interface."""
-
-    def __init__(self, context: NormalKeyContext) -> None:
-        self._context = context
-        self.state = context.state
-        self.toggle_tree_size_labels = context.toggle_tree_size_labels
-        self.toggle_git_features = context.toggle_git_features
-        self.launch_lazygit = context.launch_lazygit
-        self.preview_selected_entry = context.preview_selected_entry
-        self.refresh_rendered_for_current_path = context.refresh_rendered_for_current_path
-        self.refresh_git_status_overlay = context.refresh_git_status_overlay
-        self.maybe_grow_directory_preview = context.maybe_grow_directory_preview
-        self.mark_tree_watch_dirty = context.mark_tree_watch_dirty
-        self.launch_editor_for_path = context.launch_editor_for_path
-        self.jump_to_next_git_modified = context.jump_to_next_git_modified
-        self.tree_pane = SimpleNamespace(
-            picker_panel=SimpleNamespace(open_symbol_picker=context.open_symbol_picker),
-            navigation=SimpleNamespace(
-                current_jump_location=context.current_jump_location,
-                record_jump_if_changed=context.record_jump_if_changed,
-                reroot_to_parent=context.reroot_to_parent,
-                reroot_to_selected_target=context.reroot_to_selected_target,
-                toggle_hidden_files=context.toggle_hidden_files,
-                toggle_tree_pane=context.toggle_tree_pane,
-                toggle_wrap_mode=context.toggle_wrap_mode,
-                toggle_help_panel=context.toggle_help_panel,
-            ),
-            filter=SimpleNamespace(
-                move_tree_selection=context.move_tree_selection,
-                rebuild_tree_entries=context.rebuild_tree_entries,
-            ),
-        )
-        self.source_pane = SimpleNamespace(
-            geometry=SimpleNamespace(
-                visible_content_rows=context.visible_content_rows,
-                max_horizontal_text_offset=context.max_horizontal_text_offset,
-            ),
-            handle_tree_mouse_wheel=context.handle_tree_mouse_wheel,
-        )
-        self.layout = SimpleNamespace(rebuild_screen_lines=context.rebuild_screen_lines)
-
-    def handle_tree_mouse_click(self, mouse_key: str) -> bool:
-        return self._context.handle_tree_mouse_click(mouse_key)
-
-    def handle_tree_mouse_wheel(self, mouse_key: str) -> bool:
-        return self._context.handle_tree_mouse_wheel(mouse_key)
+    add_workspace_root_from_selected_target: Callable[[], None] = _noop
+    remove_active_workspace_root: Callable[[], None] = _noop
 
 
 class NormalKeyHandler:
     """Reusable normal-mode handler with bound runtime dependencies."""
 
-    def __init__(self, host: object) -> None:
-        self.host = _ContextHostAdapter(host) if isinstance(host, NormalKeyContext) else host
+    def __init__(self, context: NormalKeyContext) -> None:
+        self.context = context
 
     def handle(self, key: str, term_columns: int) -> bool:
         """Handle one normal-mode key and return ``True`` when app should quit."""
-        return _handle_normal_key(key, term_columns, self.host)
+        return _handle_normal_key(key, term_columns, self.context)
 
 
 def handle_normal_key(
@@ -124,78 +108,58 @@ def handle_normal_key(
 def _handle_normal_key(
     key: str,
     term_columns: int,
-    host: object,
+    context: NormalKeyContext,
 ) -> bool:
     """Handle one normal-mode key and return ``True`` when app should quit."""
-    state = host.state
-    tree_pane = host.tree_pane
-    source_pane = host.source_pane
-    navigation = host.tree_pane.navigation
-    current_jump_location = navigation.current_jump_location
-    record_jump_if_changed = navigation.record_jump_if_changed
-    open_symbol_picker = tree_pane.picker_panel.open_symbol_picker
-    reroot_to_parent = navigation.reroot_to_parent
-    reroot_to_selected_target = navigation.reroot_to_selected_target
-    add_workspace_root_from_selected_target = getattr(
-        navigation,
-        "add_workspace_root_from_selected_target",
-        lambda: None,
-    )
-    remove_active_workspace_root = getattr(
-        navigation,
-        "remove_active_workspace_root",
-        lambda: None,
-    )
-    toggle_hidden_files = navigation.toggle_hidden_files
-    toggle_tree_pane = navigation.toggle_tree_pane
-    toggle_wrap_mode = navigation.toggle_wrap_mode
-    toggle_tree_size_labels = host.toggle_tree_size_labels
-    toggle_help_panel = navigation.toggle_help_panel
-    toggle_git_features = host.toggle_git_features
-    launch_lazygit = host.launch_lazygit
-    handle_tree_mouse_wheel = getattr(host, "handle_tree_mouse_wheel", source_pane.handle_tree_mouse_wheel)
-    handle_tree_mouse_click = getattr(host, "handle_tree_mouse_click", None)
-    if handle_tree_mouse_click is None:
-        def handle_tree_mouse_click(mouse_key: str) -> bool:
-            source_result = source_pane.handle_tree_mouse_click(mouse_key)
-            if source_result.handled:
-                return True
-            if source_result.route_to_tree:
-                return tree_pane.handle_tree_mouse_click(mouse_key)
-            return False
-
-    move_tree_selection = tree_pane.filter.move_tree_selection
-    rebuild_tree_entries = tree_pane.filter.rebuild_tree_entries
-    preview_selected_entry = host.preview_selected_entry
-    refresh_rendered_for_current_path = host.refresh_rendered_for_current_path
-    refresh_git_status_overlay = host.refresh_git_status_overlay
-    maybe_grow_directory_preview = host.maybe_grow_directory_preview
-    visible_content_rows = source_pane.geometry.visible_content_rows
-    rebuild_screen_lines = host.layout.rebuild_screen_lines
-    mark_tree_watch_dirty = host.mark_tree_watch_dirty
-    launch_editor_for_path = host.launch_editor_for_path
-    jump_to_next_git_modified = host.jump_to_next_git_modified
-    max_horizontal_text_offset = source_pane.geometry.max_horizontal_text_offset
+    state = context.state
+    current_jump_location = context.current_jump_location
+    record_jump_if_changed = context.record_jump_if_changed
+    open_symbol_picker = context.open_symbol_picker
+    reroot_to_parent = context.reroot_to_parent
+    reroot_to_selected_target = context.reroot_to_selected_target
+    add_workspace_root_from_selected_target = context.add_workspace_root_from_selected_target
+    remove_active_workspace_root = context.remove_active_workspace_root
+    toggle_hidden_files = context.toggle_hidden_files
+    toggle_tree_pane = context.toggle_tree_pane
+    toggle_wrap_mode = context.toggle_wrap_mode
+    toggle_tree_size_labels = context.toggle_tree_size_labels
+    toggle_help_panel = context.toggle_help_panel
+    toggle_git_features = context.toggle_git_features
+    launch_lazygit = context.launch_lazygit
+    handle_tree_mouse_wheel = context.handle_tree_mouse_wheel
+    handle_tree_mouse_click = context.handle_tree_mouse_click
+    move_tree_selection = context.move_tree_selection
+    rebuild_tree_entries = context.rebuild_tree_entries
+    preview_selected_entry = context.preview_selected_entry
+    refresh_rendered_for_current_path = context.refresh_rendered_for_current_path
+    refresh_git_status_overlay = context.refresh_git_status_overlay
+    maybe_grow_directory_preview = context.maybe_grow_directory_preview
+    visible_content_rows = context.visible_content_rows
+    rebuild_screen_lines = context.rebuild_screen_lines
+    mark_tree_watch_dirty = context.mark_tree_watch_dirty
+    launch_editor_for_path = context.launch_editor_for_path
+    jump_to_next_git_modified = context.jump_to_next_git_modified
+    max_horizontal_text_offset = context.max_horizontal_text_offset
     key_lower = key.lower()
 
     def normalized_workspace_expanded_state() -> tuple[list[Path], list[set[Path]]]:
         """Return normalized roots + per-section expanded state."""
         roots, sections, union = normalized_workspace_expanded_sections(
-            state.tree_roots,
-            state.tree_root,
-            state.workspace_expanded,
-            state.expanded,
+            state.workspace.roots,
+            state.workspace.active_root,
+            state.workspace.expanded_by_root,
+            state.workspace.expanded,
         )
-        state.tree_roots = roots
-        state.workspace_expanded = sections
-        state.expanded = union
+        state.workspace.roots = roots
+        state.workspace.expanded_by_root = sections
+        state.workspace.expanded = union
         return roots, sections
 
     def entry_workspace_scope(entry) -> tuple[int, Path]:
         """Resolve workspace section index/root for a rendered tree entry."""
         roots, _sections = normalized_workspace_expanded_state()
         if not roots:
-            root = state.tree_root.resolve()
+            root = state.workspace.active_root.resolve()
             return 0, root
         if entry.workspace_section is not None and 0 <= entry.workspace_section < len(roots):
             idx = entry.workspace_section
@@ -223,7 +187,7 @@ def _handle_normal_key(
             else None
         )
         if section_idx is None:
-            resolved_scope = (workspace_root or state.tree_root).resolve()
+            resolved_scope = (workspace_root or state.workspace.active_root).resolve()
             section_idx = next((i for i, root in enumerate(roots) if root == resolved_scope), 0)
         scoped_expanded = set(sections[section_idx])
         if expanded:
@@ -231,42 +195,42 @@ def _handle_normal_key(
         else:
             scoped_expanded.discard(resolved)
         sections[section_idx] = scoped_expanded
-        state.workspace_expanded = sections
-        state.expanded = set().union(*sections)
+        state.workspace.expanded_by_root = sections
+        state.workspace.expanded = set().union(*sections)
 
-        if state.tree_filter_active and state.tree_filter_mode == "content":
+        if state.filter.active and state.filter.mode == "content":
             if expanded:
-                state.tree_filter_collapsed_dirs.discard(resolved)
+                state.filter.collapsed_dirs.discard(resolved)
             else:
-                state.tree_filter_collapsed_dirs.add(resolved)
+                state.filter.collapsed_dirs.add(resolved)
 
     def refresh_tree_after_directory_change(resolved: Path) -> None:
         """Rebuild tree and preview after expand/collapse state mutation."""
         rebuild_tree_entries(preferred_path=resolved)
         mark_tree_watch_dirty()
         preview_selected_entry()
-        state.dirty = True
+        state.interface.dirty = True
 
     def open_symbol_picker_action() -> bool | None:
         """Open symbol picker unless already active, clearing pending count."""
-        if state.picker_active:
+        if state.picker.active:
             return None
-        state.count_buffer = ""
+        state.interface.count_buffer = ""
         open_symbol_picker()
         return False
 
     def begin_mark_set_action() -> bool:
         """Enter named-mark set mode for next keypress."""
-        state.count_buffer = ""
-        state.pending_mark_set = True
-        state.pending_mark_jump = False
+        state.interface.count_buffer = ""
+        state.navigation.pending_mark_set = True
+        state.navigation.pending_mark_jump = False
         return False
 
     def begin_mark_jump_action() -> bool:
         """Enter named-mark jump mode for next keypress."""
-        state.count_buffer = ""
-        state.pending_mark_set = False
-        state.pending_mark_jump = True
+        state.interface.count_buffer = ""
+        state.navigation.pending_mark_set = False
+        state.navigation.pending_mark_jump = True
         return False
 
     pre_exact_bindings = KeyComboRegistry().register_bindings(
@@ -280,11 +244,11 @@ def _handle_normal_key(
         return handled
 
     if key.isdigit():
-        state.count_buffer += key
+        state.interface.count_buffer += key
         return False
 
-    count = int(state.count_buffer) if state.count_buffer else None
-    state.count_buffer = ""
+    count = int(state.interface.count_buffer) if state.interface.count_buffer else None
+    state.interface.count_buffer = ""
 
     def toggle_help_panel_action() -> bool:
         """Toggle help overlay from normal mode."""
@@ -311,16 +275,16 @@ def _handle_normal_key(
         return handled
 
     if key in {"CTRL_U", "CTRL_D"}:
-        if state.browser_visible and state.tree_entries:
+        if state.layout.browser_visible and state.workspace.entries:
             direction = -1 if key == "CTRL_U" else 1
             jump_steps = 1 if count is None else max(1, min(10, count))
 
             def parent_directory_index(from_idx: int) -> int | None:
                 """Return nearest ancestor directory index above ``from_idx``."""
-                current_depth = state.tree_entries[from_idx].depth
+                current_depth = state.workspace.entries[from_idx].depth
                 idx = from_idx - 1
                 while idx >= 0:
-                    candidate = state.tree_entries[idx]
+                    candidate = state.workspace.entries[idx]
                     if candidate.is_dir and candidate.depth < current_depth:
                         return idx
                     idx -= 1
@@ -330,36 +294,36 @@ def _handle_normal_key(
                 """Compute contextual ctrl-u/ctrl-d tree jump destination."""
                 if jump_direction < 0:
                     prev_opened = next_opened_directory_entry_index(
-                        state.tree_entries,
+                        state.workspace.entries,
                         from_idx,
                         -1,
-                        state.expanded,
+                        state.workspace.expanded,
                     )
                     if prev_opened is not None:
                         return prev_opened
                     return parent_directory_index(from_idx)
 
-                current_entry = state.tree_entries[from_idx]
-                if current_entry.is_dir and current_entry.path.resolve() in state.expanded:
-                    after_current = next_index_after_directory_subtree(state.tree_entries, from_idx)
+                current_entry = state.workspace.entries[from_idx]
+                if current_entry.is_dir and current_entry.path.resolve() in state.workspace.expanded:
+                    after_current = next_index_after_directory_subtree(state.workspace.entries, from_idx)
                     if after_current is not None:
                         return after_current
 
                 next_opened = next_opened_directory_entry_index(
-                    state.tree_entries,
+                    state.workspace.entries,
                     from_idx,
                     1,
-                    state.expanded,
+                    state.workspace.expanded,
                 )
                 if next_opened is not None:
-                    after_next_opened = next_index_after_directory_subtree(state.tree_entries, next_opened)
+                    after_next_opened = next_index_after_directory_subtree(state.workspace.entries, next_opened)
                     if after_next_opened is not None:
                         return after_next_opened
                     return next_opened
 
-                return next_directory_entry_index(state.tree_entries, from_idx, 1)
+                return next_directory_entry_index(state.workspace.entries, from_idx, 1)
 
-            target_idx = state.selected_idx
+            target_idx = state.workspace.selected
             moved = 0
             while moved < jump_steps:
                 next_idx = smart_directory_jump(target_idx, direction)
@@ -369,12 +333,12 @@ def _handle_normal_key(
                 moved += 1
             if moved > 0:
                 origin = current_jump_location()
-                prev_selected = state.selected_idx
-                state.selected_idx = target_idx
+                prev_selected = state.workspace.selected
+                state.workspace.selected = target_idx
                 preview_selected_entry()
                 record_jump_if_changed(origin)
-                if state.selected_idx != prev_selected or current_jump_location() != origin:
-                    state.dirty = True
+                if state.workspace.selected != prev_selected or current_jump_location() != origin:
+                    state.interface.dirty = True
         return False
 
     def reroot_to_parent_action() -> bool:
@@ -389,14 +353,14 @@ def _handle_normal_key(
 
     def add_workspace_root_action() -> bool | None:
         """Add selected directory as a workspace root and activate it."""
-        if not state.browser_visible:
+        if not state.layout.browser_visible:
             return None
         add_workspace_root_from_selected_target()
         return False
 
     def remove_workspace_root_action() -> bool | None:
         """Delete selected workspace root if more than one root exists."""
-        if not state.browser_visible:
+        if not state.layout.browser_visible:
             return None
         remove_active_workspace_root()
         return False
@@ -424,14 +388,14 @@ def _handle_normal_key(
     def edit_selected_target_action() -> bool:
         """Open selected path in editor and refresh preview/tree state."""
         edit_target: Path | None = None
-        if state.browser_visible and state.tree_entries:
-            selected_entry = state.tree_entries[state.selected_idx]
+        if state.layout.browser_visible and state.workspace.entries:
+            selected_entry = state.workspace.entries[state.workspace.selected]
             edit_target = selected_entry.path.resolve()
         if edit_target is None:
-            edit_target = state.current_path.resolve()
+            edit_target = state.workspace.current_path.resolve()
 
         error = launch_editor_for_path(edit_target)
-        state.current_path = edit_target
+        state.workspace.current_path = edit_target
         if error is None:
             if edit_target.is_dir():
                 rebuild_tree_entries(preferred_path=edit_target)
@@ -443,15 +407,15 @@ def _handle_normal_key(
             )
             refresh_git_status_overlay(force=True)
         else:
-            state.rendered = f"\033[31m{error}\033[0m"
+            state.preview.rendered = f"\033[31m{error}\033[0m"
             rebuild_screen_lines(columns=term_columns, preserve_scroll=False)
-            state.text_x = 0
-            state.dir_preview_path = None
-            state.dir_preview_truncated = False
-            state.preview_image_path = None
-            state.preview_image_format = None
-            state.preview_is_git_diff = False
-        state.dirty = True
+            state.preview.horizontal_scroll = 0
+            state.preview.directory_path = None
+            state.preview.directory_truncated = False
+            state.preview.image_path = None
+            state.preview.image_format = None
+            state.preview.is_git_diff = False
+        state.interface.dirty = True
         return False
 
     def quit_action() -> bool:
@@ -460,10 +424,10 @@ def _handle_normal_key(
 
     def jump_to_next_git_modified_action(direction: int) -> bool | None:
         """Jump to next/previous git-modified entry when feature is enabled."""
-        if state.tree_filter_active or not state.git_features_enabled:
+        if state.filter.active or not state.git.enabled:
             return None
         if jump_to_next_git_modified(direction):
-            state.dirty = True
+            state.interface.dirty = True
         return False
 
     mode_exact_bindings = KeyComboRegistry().register_bindings(
@@ -498,18 +462,18 @@ def _handle_normal_key(
     def move_tree_down_action() -> bool:
         """Move tree selection down one entry."""
         if move_tree_selection(1):
-            state.dirty = True
+            state.interface.dirty = True
         return False
 
     def move_tree_up_action() -> bool:
         """Move tree selection up one entry."""
         if move_tree_selection(-1):
-            state.dirty = True
+            state.interface.dirty = True
         return False
 
     def open_tree_entry_action() -> bool:
         """Open selected tree entry, expanding dirs or previewing files."""
-        entry = state.tree_entries[state.selected_idx]
+        entry = state.workspace.entries[state.workspace.selected]
         if entry.is_dir:
             resolved = entry.path.resolve()
             scope_section, scope_root = entry_workspace_scope(entry)
@@ -524,22 +488,22 @@ def _handle_normal_key(
                 )
                 refresh_tree_after_directory_change(resolved)
             else:
-                next_idx = state.selected_idx + 1
-                if next_idx < len(state.tree_entries) and state.tree_entries[next_idx].depth > entry.depth:
-                    state.selected_idx = next_idx
+                next_idx = state.workspace.selected + 1
+                if next_idx < len(state.workspace.entries) and state.workspace.entries[next_idx].depth > entry.depth:
+                    state.workspace.selected = next_idx
                     preview_selected_entry()
-                    state.dirty = True
+                    state.interface.dirty = True
         else:
             origin = current_jump_location()
-            state.current_path = entry.path.resolve()
+            state.workspace.current_path = entry.path.resolve()
             refresh_rendered_for_current_path(reset_scroll=True, reset_dir_budget=True)
             record_jump_if_changed(origin)
-            state.dirty = True
+            state.interface.dirty = True
         return False
 
     def close_or_parent_tree_entry_action() -> bool:
         """Collapse selected directory or move selection to parent directory."""
-        entry = state.tree_entries[state.selected_idx]
+        entry = state.workspace.entries[state.workspace.selected]
         scope_section, scope_root = entry_workspace_scope(entry)
         _roots, sections = normalized_workspace_expanded_state()
         expanded_for_scope = sections[scope_section] if scope_section < len(sections) else set()
@@ -557,17 +521,17 @@ def _handle_normal_key(
             refresh_tree_after_directory_change(resolved)
         else:
             parent = entry.path.parent.resolve()
-            for idx, candidate in enumerate(state.tree_entries):
+            for idx, candidate in enumerate(state.workspace.entries):
                 if candidate.path.resolve() == parent:
-                    state.selected_idx = idx
+                    state.workspace.selected = idx
                     preview_selected_entry()
-                    state.dirty = True
+                    state.interface.dirty = True
                     break
         return False
 
     def toggle_directory_tree_entry_action() -> bool | None:
         """Toggle expand/collapse on selected directory tree entry."""
-        entry = state.tree_entries[state.selected_idx]
+        entry = state.workspace.entries[state.workspace.selected]
         if not entry.is_dir:
             return None
         resolved = entry.path.resolve()
@@ -591,7 +555,7 @@ def _handle_normal_key(
         refresh_tree_after_directory_change(resolved)
         return False
 
-    if state.browser_visible:
+    if state.layout.browser_visible:
         browser_lower_bindings = KeyComboRegistry(normalize=str.lower).register_bindings(
             KeyComboBinding(("j",), move_tree_down_action),
             KeyComboBinding(("k",), move_tree_up_action),
@@ -608,60 +572,60 @@ def _handle_normal_key(
         if handled is not None:
             return handled
 
-    prev_start = state.start
-    prev_text_x = state.text_x
+    prev_start = state.preview.scroll
+    prev_text_x = state.preview.horizontal_scroll
     scrolling_down = False
     page_rows = visible_content_rows()
     max_start = effective_max_start(state, page_rows)
     if key == " " or key_lower == "f":
         pages = count if count is not None else 1
-        state.start += page_rows * max(1, pages)
+        state.preview.scroll += page_rows * max(1, pages)
         scrolling_down = True
     elif key_lower == "d":
         mult = count if count is not None else 1
-        state.start += max(1, page_rows // 2) * max(1, mult)
+        state.preview.scroll += max(1, page_rows // 2) * max(1, mult)
         scrolling_down = True
     elif key_lower == "u":
         mult = count if count is not None else 1
-        state.start -= max(1, page_rows // 2) * max(1, mult)
-    elif key == "DOWN" or (not state.browser_visible and key_lower == "j"):
-        state.start += count if count is not None else 1
+        state.preview.scroll -= max(1, page_rows // 2) * max(1, mult)
+    elif key == "DOWN" or (not state.layout.browser_visible and key_lower == "j"):
+        state.preview.scroll += count if count is not None else 1
         scrolling_down = True
-    elif key == "UP" or (not state.browser_visible and key_lower == "k"):
-        state.start -= count if count is not None else 1
+    elif key == "UP" or (not state.layout.browser_visible and key_lower == "k"):
+        state.preview.scroll -= count if count is not None else 1
     elif key == "g":
         if count is None:
-            state.start = 0
+            state.preview.scroll = 0
         else:
-            state.start = max(0, min(count - 1, state.max_start))
+            state.preview.scroll = max(0, min(count - 1, state.preview.max_scroll))
     elif key == "G":
         if count is None:
-            state.start = max_start
+            state.preview.scroll = max_start
         else:
-            state.start = max(0, min(count - 1, max_start))
+            state.preview.scroll = max(0, min(count - 1, max_start))
         scrolling_down = True
     elif key == "ENTER":
-        state.start += count if count is not None else 1
+        state.preview.scroll += count if count is not None else 1
         scrolling_down = True
     elif key == "B":
         pages = count if count is not None else 1
-        state.start -= page_rows * max(1, pages)
-    elif (key == "LEFT" or (not state.browser_visible and key_lower == "h")) and not state.wrap_text:
+        state.preview.scroll -= page_rows * max(1, pages)
+    elif (key == "LEFT" or (not state.layout.browser_visible and key_lower == "h")) and not state.preview.wrap:
         step = count if count is not None else 4
-        state.text_x = max(0, state.text_x - max(1, step))
-    elif (key == "RIGHT" or (not state.browser_visible and key_lower == "l")) and not state.wrap_text:
+        state.preview.horizontal_scroll = max(0, state.preview.horizontal_scroll - max(1, step))
+    elif (key == "RIGHT" or (not state.layout.browser_visible and key_lower == "l")) and not state.preview.wrap:
         step = count if count is not None else 4
-        state.text_x = min(max_horizontal_text_offset(), state.text_x + max(1, step))
+        state.preview.horizontal_scroll = min(max_horizontal_text_offset(), state.preview.horizontal_scroll + max(1, step))
     elif key == "HOME":
-        state.start = 0
+        state.preview.scroll = 0
     elif key == "END":
-        state.start = max_start
+        state.preview.scroll = max_start
     elif key == "ESC":
         return True
 
-    state.start = max(0, min(state.start, max_start))
-    state.max_start = max(state.max_start, max_start)
+    state.preview.scroll = max(0, min(state.preview.scroll, max_start))
+    state.preview.max_scroll = max(state.preview.max_scroll, max_start)
     grew_preview = scrolling_down and maybe_grow_directory_preview()
-    if state.start != prev_start or state.text_x != prev_text_x or grew_preview:
-        state.dirty = True
+    if state.preview.scroll != prev_start or state.preview.horizontal_scroll != prev_text_x or grew_preview:
+        state.interface.dirty = True
     return False

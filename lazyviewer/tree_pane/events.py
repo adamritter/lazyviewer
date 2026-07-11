@@ -11,7 +11,8 @@ from collections.abc import Callable
 from pathlib import Path
 import time
 
-from ..runtime.state import AppState
+from ..session import SessionState
+from ..ports import PreviewSelectedEntry, RebuildTreeEntries
 from .workspace_roots import (
     normalized_workspace_expanded_sections,
     workspace_root_banner_rows,
@@ -29,12 +30,12 @@ class TreePaneMouseHandlers:
     def __init__(
         self,
         *,
-        state: AppState,
+        state: SessionState,
         visible_content_rows: Callable[[], int],
-        rebuild_tree_entries: Callable[..., None],
+        rebuild_tree_entries: RebuildTreeEntries,
         mark_tree_watch_dirty: Callable[[], None],
         coerce_tree_filter_result_index: Callable[[int], int | None],
-        preview_selected_entry: Callable[..., None],
+        preview_selected_entry: PreviewSelectedEntry,
         activate_tree_filter_selection: Callable[[], None],
         copy_text_to_clipboard: Callable[[str], bool],
         double_click_seconds: float,
@@ -80,37 +81,37 @@ class TreePaneMouseHandlers:
           filter-activation behavior.
         """
         state = self._state
-        if not (state.browser_visible and 1 <= row <= self._visible_content_rows() and col <= state.left_width):
+        if not (state.layout.browser_visible and 1 <= row <= self._visible_content_rows() and col <= state.layout.left_width):
             return True
 
         query_row_visible = (
-            state.tree_filter_active
-            and state.tree_filter_prompt_row_visible
-            and not state.picker_active
+            state.filter.active
+            and state.filter.prompt_row_visible
+            and not state.picker.active
         )
         if query_row_visible and row == 1:
-            state.tree_filter_editing = True
-            state.dirty = True
+            state.filter.editing = True
+            state.interface.dirty = True
             return True
 
         root_row_count = workspace_root_banner_rows(
-            state.tree_roots,
-            state.tree_root,
-            picker_active=state.picker_active,
+            state.workspace.roots,
+            state.workspace.active_root,
+            picker_active=state.picker.active,
         )
         row_offset = (1 if query_row_visible else 0) + root_row_count
         if row <= row_offset:
             return True
 
-        raw_clicked_idx = state.tree_start + (row - 1 - row_offset)
-        if not (0 <= raw_clicked_idx < len(state.tree_entries)):
+        raw_clicked_idx = state.workspace.scroll + (row - 1 - row_offset)
+        if not (0 <= raw_clicked_idx < len(state.workspace.entries)):
             return True
 
-        raw_clicked_entry = state.tree_entries[raw_clicked_idx]
+        raw_clicked_entry = state.workspace.entries[raw_clicked_idx]
         raw_workspace_root = (
             raw_clicked_entry.workspace_root.resolve()
             if raw_clicked_entry.workspace_root is not None
-            else state.tree_root.resolve()
+            else state.workspace.active_root.resolve()
         )
         raw_workspace_section = raw_clicked_entry.workspace_section
         raw_arrow_col = 1 + (raw_clicked_entry.depth * 2)
@@ -122,38 +123,38 @@ class TreePaneMouseHandlers:
                 workspace_root=raw_workspace_root,
                 content_mode_toggle=True,
             )
-            state.last_click_idx = -1
-            state.last_click_time = 0.0
+            state.interface.last_click_index = -1
+            state.interface.last_click_time = 0.0
             return True
 
         clicked_idx = self._coerce_tree_filter_result_index(raw_clicked_idx)
         if clicked_idx is None:
             return True
 
-        prev_selected = state.selected_idx
-        state.selected_idx = clicked_idx
+        prev_selected = state.workspace.selected
+        state.workspace.selected = clicked_idx
         self._preview_selected_entry()
-        if state.selected_idx != prev_selected:
-            state.dirty = True
+        if state.workspace.selected != prev_selected:
+            state.interface.dirty = True
 
         now = self._monotonic()
-        is_double = clicked_idx == state.last_click_idx and (now - state.last_click_time) <= self._double_click_seconds
-        state.last_click_idx = clicked_idx
-        state.last_click_time = now
+        is_double = clicked_idx == state.interface.last_click_index and (now - state.interface.last_click_time) <= self._double_click_seconds
+        state.interface.last_click_index = clicked_idx
+        state.interface.last_click_time = now
         if not is_double:
             return True
 
-        if state.tree_filter_active and state.tree_filter_query:
+        if state.filter.active and state.filter.query:
             self._activate_tree_filter_selection()
             return True
 
-        entry = state.tree_entries[state.selected_idx]
+        entry = state.workspace.entries[state.workspace.selected]
         if entry.is_dir:
             resolved = entry.path.resolve()
             workspace_root = (
                 entry.workspace_root.resolve()
                 if entry.workspace_root is not None
-                else state.tree_root.resolve()
+                else state.workspace.active_root.resolve()
             )
             self._toggle_directory_entry(
                 resolved,
@@ -163,7 +164,7 @@ class TreePaneMouseHandlers:
             return True
 
         self._copy_text_to_clipboard(entry.path.name)
-        state.dirty = True
+        state.interface.dirty = True
         return True
 
     def _toggle_directory_entry(
@@ -176,16 +177,16 @@ class TreePaneMouseHandlers:
         """Toggle a directory and rebuild the rendered tree snapshot.
 
         In content-search mode with ``content_mode_toggle=True``, collapsed state
-        is tracked in ``state.tree_filter_collapsed_dirs`` so subtree visibility is
+        is tracked in ``state.filter.collapsed_dirs`` so subtree visibility is
         local to that search session. In all other cases this flips membership in
-        ``state.expanded``.
+        ``state.workspace.expanded``.
         """
         state = self._state
         roots, sections, _flat_union = normalized_workspace_expanded_sections(
-            state.tree_roots,
-            state.tree_root,
-            state.workspace_expanded,
-            state.expanded,
+            state.workspace.roots,
+            state.workspace.active_root,
+            state.workspace.expanded_by_root,
+            state.workspace.expanded,
         )
         if not roots:
             return
@@ -202,12 +203,12 @@ class TreePaneMouseHandlers:
 
         scoped = set(sections[scope_section])
 
-        if content_mode_toggle and state.tree_filter_active and state.tree_filter_mode == "content":
-            if resolved in state.tree_filter_collapsed_dirs:
-                state.tree_filter_collapsed_dirs.remove(resolved)
+        if content_mode_toggle and state.filter.active and state.filter.mode == "content":
+            if resolved in state.filter.collapsed_dirs:
+                state.filter.collapsed_dirs.remove(resolved)
                 scoped.add(resolved)
             else:
-                state.tree_filter_collapsed_dirs.add(resolved)
+                state.filter.collapsed_dirs.add(resolved)
                 scoped.discard(resolved)
         else:
             if resolved in scoped:
@@ -215,9 +216,9 @@ class TreePaneMouseHandlers:
             else:
                 scoped.add(resolved)
         sections[scope_section] = scoped
-        state.tree_roots = roots
-        state.workspace_expanded = sections
-        state.expanded = set().union(*sections)
+        state.workspace.roots = roots
+        state.workspace.expanded_by_root = sections
+        state.workspace.expanded = set().union(*sections)
         self._rebuild_tree_entries(preferred_path=resolved)
         self._mark_tree_watch_dirty()
-        state.dirty = True
+        state.interface.dirty = True

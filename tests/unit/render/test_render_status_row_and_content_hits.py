@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.render import render_dual_page
+from tests.render_capture import render_dual_page
 
 class RenderStatusFilteringTestsPart2(unittest.TestCase):
     def test_tree_filter_query_row_shows_loading_spinner_status(self) -> None:
@@ -17,7 +17,7 @@ class RenderStatusFilteringTestsPart2(unittest.TestCase):
             writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=["line 1", "line 2"],
                 text_start=0,
@@ -56,7 +56,7 @@ class RenderStatusFilteringTestsPart2(unittest.TestCase):
             bottom_writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture_top):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture_top):
             render_dual_page(
                 text_lines=text_lines,
                 text_start=0,
@@ -75,7 +75,7 @@ class RenderStatusFilteringTestsPart2(unittest.TestCase):
                 show_hidden=False,
             )
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture_bottom):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture_bottom):
             render_dual_page(
                 text_lines=text_lines,
                 text_start=14,
@@ -114,7 +114,7 @@ class RenderStatusFilteringTestsPart2(unittest.TestCase):
             writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=text_lines,
                 text_start=1,
@@ -144,7 +144,7 @@ class RenderStatusFilteringTestsPart2(unittest.TestCase):
             writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=["line 1", "line 2"],
                 text_start=0,
@@ -181,7 +181,7 @@ class RenderStatusFilteringTestsPart2(unittest.TestCase):
             writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=["alpha beta gamma"],
                 text_start=0,
@@ -211,7 +211,7 @@ class RenderStatusFilteringTestsPart2(unittest.TestCase):
             writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=["\033[38;5;81malpha beta\033[0m"],
                 text_start=0,
@@ -242,7 +242,7 @@ class RenderStatusFilteringTestsPart2(unittest.TestCase):
             writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=["beta beta"],
                 text_start=0,

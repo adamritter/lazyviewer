@@ -1,6 +1,6 @@
 """Pure screen-analysis helpers shared across runtime navigation features.
 
-These functions intentionally avoid ``AppState`` mutation. They inspect
+These functions intentionally avoid ``SessionState`` mutation. They inspect
 rendered lines and paths to compute anchors and ordering keys used by git-jump
 navigation and initial diff-preview placement.
 """

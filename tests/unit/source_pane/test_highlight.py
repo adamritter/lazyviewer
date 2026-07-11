@@ -11,7 +11,8 @@ from unittest import mock
 
 from lazyviewer.source_pane.diff import _ADDED_BG_SGR, _apply_line_background
 from lazyviewer.source_pane.highlighting import rendered_preview_row
-from lazyviewer.source_pane.syntax import colorize_source, sanitize_terminal_text
+from lazyviewer.preview.text import sanitize_text
+from lazyviewer.source_pane.syntax import colorize_source
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
@@ -19,7 +20,7 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 class HighlightSanitizationTests(unittest.TestCase):
     def test_sanitize_terminal_text_escapes_control_bytes_but_keeps_common_whitespace(self) -> None:
         source = "a\tb\nc\rd\x07e\x1bf"
-        sanitized = sanitize_terminal_text(source)
+        sanitized = sanitize_text(source)
 
         self.assertEqual(sanitized, "a\tb\nc\rd\\x07e\\x1bf")
         self.assertNotIn("\x07", sanitized)

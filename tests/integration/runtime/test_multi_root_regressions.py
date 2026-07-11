@@ -9,7 +9,7 @@ from collections import Counter
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.render import render_dual_page
+from tests.render_capture import render_dual_page
 from lazyviewer.render.ansi import ANSI_ESCAPE_RE
 from lazyviewer.runtime import app as app_runtime
 from lazyviewer.search.content import ContentMatch
@@ -20,53 +20,53 @@ def _render_tree_left_rows(state, *, max_lines: int = 12, width: int = 140, left
     """Render one frame and return visible left-pane rows (without status row)."""
     writes: list[bytes] = []
     with mock.patch(
-        "lazyviewer.render.os.write",
+        "tests.render_capture.os.write",
         side_effect=lambda _fd, data: writes.append(data) or len(data),
     ):
         render_dual_page(
-            text_lines=state.lines,
-            text_start=state.start,
-            tree_entries=state.tree_entries,
-            tree_start=state.tree_start,
-            tree_selected=state.selected_idx,
+            text_lines=state.preview.lines,
+            text_start=state.preview.scroll,
+            tree_entries=state.workspace.entries,
+            tree_start=state.workspace.scroll,
+            tree_selected=state.workspace.selected,
             max_lines=max_lines,
-            current_path=state.current_path,
-            tree_root=state.tree_root,
-            tree_roots=state.tree_roots,
-            expanded=state.tree_render_expanded,
+            current_path=state.workspace.current_path,
+            tree_root=state.workspace.active_root,
+            tree_roots=state.workspace.roots,
+            expanded=state.workspace.render_expanded,
             width=width,
             left_width=left_width,
-            text_x=state.text_x,
-            wrap_text=state.wrap_text,
-            browser_visible=state.browser_visible,
-            show_hidden=state.show_hidden,
+            text_x=state.preview.horizontal_scroll,
+            wrap_text=state.preview.wrap,
+            browser_visible=state.layout.browser_visible,
+            show_hidden=state.workspace.show_hidden,
             show_help=False,
-            tree_filter_active=state.tree_filter_active,
-            tree_filter_row_visible=state.tree_filter_prompt_row_visible,
-            tree_filter_mode=state.tree_filter_mode,
-            tree_filter_query=state.tree_filter_query,
-            tree_filter_editing=state.tree_filter_editing,
+            tree_filter_active=state.filter.active,
+            tree_filter_row_visible=state.filter.prompt_row_visible,
+            tree_filter_mode=state.filter.mode,
+            tree_filter_query=state.filter.query,
+            tree_filter_editing=state.filter.editing,
             tree_filter_cursor_visible=False,
-            tree_filter_match_count=state.tree_filter_match_count,
-            tree_filter_truncated=state.tree_filter_truncated,
-            tree_filter_loading=state.tree_filter_loading,
+            tree_filter_match_count=state.filter.match_count,
+            tree_filter_truncated=state.filter.truncated,
+            tree_filter_loading=state.filter.loading,
             tree_filter_spinner_frame=0,
             tree_filter_prefix="p>",
             tree_filter_placeholder="type to filter files",
-            picker_active=state.picker_active,
-            picker_mode=state.picker_mode,
-            picker_query=state.picker_query,
-            picker_items=state.picker_match_labels,
-            picker_selected=state.picker_selected,
-            picker_focus=state.picker_focus,
-            picker_list_start=state.picker_list_start,
-            picker_message=state.picker_message,
-            git_status_overlay=state.git_status_overlay,
+            picker_active=state.picker.active,
+            picker_mode=state.picker.mode,
+            picker_query=state.picker.query,
+            picker_items=state.picker.match_labels,
+            picker_selected=state.picker.selected,
+            picker_focus=state.picker.focus,
+            picker_list_start=state.picker.list_start,
+            picker_message=state.picker.message,
+            git_status_overlay=state.git.status,
             tree_search_query="",
             text_search_query="",
             text_search_current_line=0,
             text_search_current_column=0,
-            preview_is_git_diff=state.preview_is_git_diff,
+            preview_is_git_diff=state.preview.is_git_diff,
         )
     plain = ANSI_ESCAPE_RE.sub("", b"".join(writes).decode("utf-8", errors="replace"))
     rows = [line for line in plain.split("\r\n") if line]
@@ -76,64 +76,64 @@ def _render_tree_left_rows(state, *, max_lines: int = 12, width: int = 140, left
 
 def _render_full_frame_rows(state) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Render full frame rows (ANSI + plain) for deterministic replay checks."""
-    width = max(1, int(state.left_width) + 1 + int(state.right_width))
-    if not state.browser_visible:
-        width = max(1, int(state.right_width))
+    width = max(1, int(state.layout.left_width) + 1 + int(state.layout.right_width))
+    if not state.layout.browser_visible:
+        width = max(1, int(state.layout.right_width))
     writes: list[bytes] = []
     with mock.patch(
-        "lazyviewer.render.os.write",
+        "tests.render_capture.os.write",
         side_effect=lambda _fd, data: writes.append(data) or len(data),
     ):
         render_dual_page(
-            text_lines=state.lines,
-            text_start=state.start,
-            tree_entries=state.tree_entries,
-            tree_start=state.tree_start,
-            tree_selected=state.selected_idx,
-            max_lines=max(1, int(state.usable)),
-            current_path=state.current_path,
-            tree_root=state.tree_root,
-            tree_roots=state.tree_roots,
-            expanded=state.tree_render_expanded,
+            text_lines=state.preview.lines,
+            text_start=state.preview.scroll,
+            tree_entries=state.workspace.entries,
+            tree_start=state.workspace.scroll,
+            tree_selected=state.workspace.selected,
+            max_lines=max(1, int(state.layout.usable_rows)),
+            current_path=state.workspace.current_path,
+            tree_root=state.workspace.active_root,
+            tree_roots=state.workspace.roots,
+            expanded=state.workspace.render_expanded,
             width=width,
-            left_width=state.left_width,
-            text_x=state.text_x,
-            wrap_text=state.wrap_text,
-            browser_visible=state.browser_visible,
-            show_hidden=state.show_hidden,
-            show_help=state.show_help,
-            show_tree_sizes=state.show_tree_sizes,
-            status_message=state.status_message,
-            tree_filter_active=state.tree_filter_active,
-            tree_filter_row_visible=state.tree_filter_prompt_row_visible,
-            tree_filter_mode=state.tree_filter_mode,
-            tree_filter_query=state.tree_filter_query,
-            tree_filter_editing=state.tree_filter_editing,
+            left_width=state.layout.left_width,
+            text_x=state.preview.horizontal_scroll,
+            wrap_text=state.preview.wrap,
+            browser_visible=state.layout.browser_visible,
+            show_hidden=state.workspace.show_hidden,
+            show_help=state.layout.show_help,
+            show_tree_sizes=state.workspace.show_sizes,
+            status_message=state.interface.status_message,
+            tree_filter_active=state.filter.active,
+            tree_filter_row_visible=state.filter.prompt_row_visible,
+            tree_filter_mode=state.filter.mode,
+            tree_filter_query=state.filter.query,
+            tree_filter_editing=state.filter.editing,
             tree_filter_cursor_visible=False,
-            tree_filter_match_count=state.tree_filter_match_count,
-            tree_filter_truncated=state.tree_filter_truncated,
-            tree_filter_loading=state.tree_filter_loading,
+            tree_filter_match_count=state.filter.match_count,
+            tree_filter_truncated=state.filter.truncated,
+            tree_filter_loading=state.filter.loading,
             tree_filter_spinner_frame=0,
             tree_filter_prefix="p>",
             tree_filter_placeholder="type to filter files",
-            picker_active=state.picker_active,
-            picker_mode=state.picker_mode,
-            picker_query=state.picker_query,
-            picker_items=state.picker_match_labels,
-            picker_selected=state.picker_selected,
-            picker_focus=state.picker_focus,
-            picker_list_start=state.picker_list_start,
-            picker_message=state.picker_message,
-            git_status_overlay=state.git_status_overlay,
+            picker_active=state.picker.active,
+            picker_mode=state.picker.mode,
+            picker_query=state.picker.query,
+            picker_items=state.picker.match_labels,
+            picker_selected=state.picker.selected,
+            picker_focus=state.picker.focus,
+            picker_list_start=state.picker.list_start,
+            picker_message=state.picker.message,
+            git_status_overlay=state.git.status,
             tree_search_query="",
             text_search_query="",
             text_search_current_line=0,
             text_search_current_column=0,
-            preview_is_git_diff=state.preview_is_git_diff,
-            source_selection_anchor=state.source_selection_anchor,
-            source_selection_focus=state.source_selection_focus,
-            workspace_expanded=state.workspace_expanded,
-            theme=state.theme,
+            preview_is_git_diff=state.preview.is_git_diff,
+            source_selection_anchor=state.preview.selection_anchor,
+            source_selection_focus=state.preview.selection_focus,
+            workspace_expanded=state.workspace.expanded_by_root,
+            theme=state.layout.theme,
         )
     frame = b"".join(writes).decode("utf-8", errors="replace")
     if frame.startswith("\033[H\033[J"):
@@ -156,7 +156,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
 
         with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
             "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-        ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+        ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
             "lazyviewer.runtime.app.os.isatty", return_value=True
         ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
             "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
@@ -176,10 +176,10 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
 
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
-                snapshots["roots"] = list(state.tree_roots)
+                snapshots["roots"] = list(state.workspace.roots)
                 snapshots["depth0_rows"] = [
                     (entry.path.resolve(), entry.workspace_section)
-                    for entry in state.tree_entries
+                    for entry in state.workspace.entries
                     if entry.is_dir and entry.depth == 0
                 ]
 
@@ -203,9 +203,9 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 callbacks = kwargs["callbacks"]
                 state = kwargs["state"]
                 nested_idx = next(
-                    idx for idx, entry in enumerate(state.tree_entries) if entry.path.resolve() == nested.resolve()
+                    idx for idx, entry in enumerate(state.workspace.entries) if entry.path.resolve() == nested.resolve()
                 )
-                state.selected_idx = nested_idx
+                state.workspace.selected = nested_idx
                 callbacks.handle_normal_key("a", 120)
                 snapshots["rows"] = _render_tree_left_rows(state)
 
@@ -229,19 +229,19 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 callbacks = kwargs["callbacks"]
                 state = kwargs["state"]
                 nested_idx = next(
-                    idx for idx, entry in enumerate(state.tree_entries) if entry.path.resolve() == nested.resolve()
+                    idx for idx, entry in enumerate(state.workspace.entries) if entry.path.resolve() == nested.resolve()
                 )
-                state.selected_idx = nested_idx
+                state.workspace.selected = nested_idx
                 callbacks.handle_normal_key("a", 120)
 
                 snapshots["nested_dir_depths"] = [
                     entry.depth
-                    for entry in state.tree_entries
+                    for entry in state.workspace.entries
                     if entry.is_dir and entry.path.resolve() == nested.resolve()
                 ]
                 snapshots["nested_file_depths"] = [
                     entry.depth
-                    for entry in state.tree_entries
+                    for entry in state.workspace.entries
                     if (not entry.is_dir) and entry.path.resolve() == child_file.resolve()
                 ]
 
@@ -261,19 +261,19 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 state = kwargs["state"]
                 root_idx = next(
                     idx
-                    for idx, entry in enumerate(state.tree_entries)
+                    for idx, entry in enumerate(state.workspace.entries)
                     if entry.is_dir and entry.depth == 0 and entry.path.resolve() == root
                 )
-                state.selected_idx = root_idx
+                state.workspace.selected = root_idx
                 callbacks.handle_normal_key("a", 120)
 
-                snapshots["roots"] = [path.resolve() for path in state.tree_roots]
+                snapshots["roots"] = [path.resolve() for path in state.workspace.roots]
                 snapshots["depth0_sections"] = [
                     entry.workspace_section
-                    for entry in state.tree_entries
+                    for entry in state.workspace.entries
                     if entry.is_dir and entry.depth == 0 and entry.path.resolve() == root
                 ]
-                selected = state.tree_entries[state.selected_idx]
+                selected = state.workspace.entries[state.workspace.selected]
                 snapshots["selected_path"] = selected.path.resolve()
                 snapshots["selected_depth"] = selected.depth
                 snapshots["selected_section"] = selected.workspace_section
@@ -299,33 +299,33 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 callbacks = kwargs["callbacks"]
                 state = kwargs["state"]
                 nested_idx = next(
-                    idx for idx, entry in enumerate(state.tree_entries) if entry.path.resolve() == nested.resolve()
+                    idx for idx, entry in enumerate(state.workspace.entries) if entry.path.resolve() == nested.resolve()
                 )
-                state.selected_idx = nested_idx
+                state.workspace.selected = nested_idx
                 callbacks.handle_normal_key("a", 120)
 
                 active_nested_idx = next(
                     idx
-                    for idx, entry in enumerate(state.tree_entries)
+                    for idx, entry in enumerate(state.workspace.entries)
                     if entry.is_dir and entry.depth == 0 and entry.path.resolve() == nested.resolve()
                 )
-                state.selected_idx = active_nested_idx
+                state.workspace.selected = active_nested_idx
                 snapshots["file_rows_before"] = [
                     entry.depth
-                    for entry in state.tree_entries
+                    for entry in state.workspace.entries
                     if not entry.is_dir and entry.path.resolve() == child_file.resolve()
                 ]
 
                 callbacks.handle_normal_key("ENTER", 120)
                 snapshots["file_rows_after_close"] = [
                     entry.depth
-                    for entry in state.tree_entries
+                    for entry in state.workspace.entries
                     if not entry.is_dir and entry.path.resolve() == child_file.resolve()
                 ]
                 callbacks.handle_normal_key("ENTER", 120)
                 snapshots["file_rows_after_reopen"] = [
                     entry.depth
-                    for entry in state.tree_entries
+                    for entry in state.workspace.entries
                     if not entry.is_dir and entry.path.resolve() == child_file.resolve()
                 ]
 
@@ -347,7 +347,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
             def file_depths(state) -> list[int]:
                 return [
                     entry.depth
-                    for entry in state.tree_entries
+                    for entry in state.workspace.entries
                     if not entry.is_dir and entry.path.resolve() == child_file.resolve()
                 ]
 
@@ -360,7 +360,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 workspace_root_resolved = workspace_root.resolve()
                 return next(
                     idx
-                    for idx, entry in enumerate(state.tree_entries)
+                    for idx, entry in enumerate(state.workspace.entries)
                     if entry.is_dir
                     and entry.depth == depth
                     and entry.path.resolve() == nested.resolve()
@@ -373,26 +373,26 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 state = kwargs["state"]
 
                 parent_nested_idx = find_nested_dir_index(state, depth=1, workspace_root=root)
-                state.selected_idx = parent_nested_idx
+                state.workspace.selected = parent_nested_idx
                 callbacks.handle_normal_key("a", 120)
 
                 parent_nested_idx = find_nested_dir_index(state, depth=1, workspace_root=root)
-                state.selected_idx = parent_nested_idx
+                state.workspace.selected = parent_nested_idx
                 callbacks.handle_normal_key("ENTER", 120)
                 snapshots["both_open"] = file_depths(state)
 
                 nested_root_idx = find_nested_dir_index(state, depth=0, workspace_root=nested)
-                state.selected_idx = nested_root_idx
+                state.workspace.selected = nested_root_idx
                 callbacks.handle_normal_key("ENTER", 120)
                 snapshots["nested_root_closed"] = file_depths(state)
 
                 parent_nested_idx = find_nested_dir_index(state, depth=1, workspace_root=root)
-                state.selected_idx = parent_nested_idx
+                state.workspace.selected = parent_nested_idx
                 callbacks.handle_normal_key("ENTER", 120)
                 snapshots["both_closed"] = file_depths(state)
 
                 nested_root_idx = find_nested_dir_index(state, depth=0, workspace_root=nested)
-                state.selected_idx = nested_root_idx
+                state.workspace.selected = nested_root_idx
                 callbacks.handle_normal_key("ENTER", 120)
                 snapshots["only_nested_root_open"] = file_depths(state)
 
@@ -413,7 +413,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
             snapshots: dict[str, object] = {}
 
             def selected_scope(state) -> tuple[int, Path, Path | None]:
-                entry = state.tree_entries[state.selected_idx]
+                entry = state.workspace.entries[state.workspace.selected]
                 return (
                     entry.depth,
                     entry.path.resolve(),
@@ -429,7 +429,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 workspace_root_resolved = workspace_root.resolve()
                 return next(
                     idx
-                    for idx, entry in enumerate(state.tree_entries)
+                    for idx, entry in enumerate(state.workspace.entries)
                     if entry.is_dir
                     and entry.depth == depth
                     and entry.path.resolve() == nested.resolve()
@@ -441,17 +441,17 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 callbacks = kwargs["callbacks"]
                 state = kwargs["state"]
                 parent_nested_idx = find_nested_dir_index(state, depth=1, workspace_root=root)
-                state.selected_idx = parent_nested_idx
+                state.workspace.selected = parent_nested_idx
                 callbacks.handle_normal_key("a", 120)
 
                 parent_nested_idx = find_nested_dir_index(state, depth=1, workspace_root=root)
-                state.selected_idx = parent_nested_idx
+                state.workspace.selected = parent_nested_idx
                 snapshots["before_parent_toggle"] = selected_scope(state)
                 callbacks.handle_normal_key("ENTER", 120)
                 snapshots["after_parent_toggle"] = selected_scope(state)
 
                 nested_root_idx = find_nested_dir_index(state, depth=0, workspace_root=nested)
-                state.selected_idx = nested_root_idx
+                state.workspace.selected = nested_root_idx
                 snapshots["before_nested_root_toggle"] = selected_scope(state)
                 callbacks.handle_normal_key("ENTER", 120)
                 snapshots["after_nested_root_toggle"] = selected_scope(state)
@@ -485,7 +485,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 workspace_root_resolved = workspace_root.resolve()
                 return next(
                     idx
-                    for idx, entry in enumerate(state.tree_entries)
+                    for idx, entry in enumerate(state.workspace.entries)
                     if entry.is_dir
                     and entry.depth == depth
                     and entry.path.resolve() == nested.resolve()
@@ -494,7 +494,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 )
 
             def selected_scope(state) -> tuple[Path, Path | None]:
-                entry = state.tree_entries[state.selected_idx]
+                entry = state.workspace.entries[state.workspace.selected]
                 return (
                     entry.path.resolve(),
                     entry.workspace_root.resolve() if entry.workspace_root is not None else None,
@@ -503,21 +503,21 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
             def workspace_expanded_snapshot(state) -> list[set[Path]]:
                 return [
                     {expanded.resolve() for expanded in expanded_paths}
-                    for expanded_paths in state.workspace_expanded
+                    for expanded_paths in state.workspace.expanded_by_root
                 ]
 
             def assert_invariants(state) -> None:
-                roots = [root.resolve() for root in state.tree_roots]
-                self.assertEqual(len(state.workspace_expanded), len(roots))
+                roots = [root.resolve() for root in state.workspace.roots]
+                self.assertEqual(len(state.workspace.expanded_by_root), len(roots))
                 union: set[Path] = set()
-                for scope_root, expanded_paths in zip(roots, state.workspace_expanded):
+                for scope_root, expanded_paths in zip(roots, state.workspace.expanded_by_root):
                     for expanded_path in expanded_paths:
                         self.assertTrue(expanded_path.resolve().is_relative_to(scope_root))
                     union.update(expanded_paths)
-                self.assertEqual(state.expanded, union)
+                self.assertEqual(state.workspace.expanded, union)
 
                 row_keys = []
-                for entry in state.tree_entries:
+                for entry in state.workspace.entries:
                     self.assertIsNotNone(entry.workspace_section)
                     assert entry.workspace_section is not None
                     self.assertTrue(0 <= entry.workspace_section < len(roots))
@@ -561,10 +561,10 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 scope: Path,
             ) -> None:
                 idx = find_nested_dir_index(state, depth=depth, workspace_root=scope)
-                state.selected_idx = idx
+                state.workspace.selected = idx
                 before_selection = selected_scope(state)
                 before_expanded = workspace_expanded_snapshot(state)
-                selected_entry = state.tree_entries[state.selected_idx]
+                selected_entry = state.workspace.entries[state.workspace.selected]
                 target_section = selected_entry.workspace_section
                 self.assertIsNotNone(target_section)
                 assert target_section is not None
@@ -588,7 +588,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 assert_invariants(state)
 
                 parent_nested_idx = find_nested_dir_index(state, depth=1, workspace_root=root)
-                state.selected_idx = parent_nested_idx
+                state.workspace.selected = parent_nested_idx
                 callbacks.handle_normal_key("a", 120)
 
                 assert_invariants(state)
@@ -599,7 +599,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 run_toggle_assertions(state, callbacks, depth=0, scope=nested)
 
                 snapshots["final"] = workspace_expanded_snapshot(state)
-                snapshots["final_roots"] = [root_path.resolve() for root_path in state.tree_roots]
+                snapshots["final_roots"] = [root_path.resolve() for root_path in state.workspace.roots]
 
             self._run_with_fake_loop(root, fake_run_main_loop)
 
@@ -618,7 +618,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
             def nested_file_depths(state) -> list[int]:
                 return [
                     entry.depth
-                    for entry in state.tree_entries
+                    for entry in state.workspace.entries
                     if not entry.is_dir and entry.path.resolve() == child_file.resolve()
                 ]
 
@@ -626,29 +626,29 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 callbacks = kwargs["callbacks"]
                 state = kwargs["state"]
                 nested_idx = next(
-                    idx for idx, entry in enumerate(state.tree_entries) if entry.path.resolve() == nested.resolve()
+                    idx for idx, entry in enumerate(state.workspace.entries) if entry.path.resolve() == nested.resolve()
                 )
-                state.selected_idx = nested_idx
+                state.workspace.selected = nested_idx
                 callbacks.handle_normal_key("a", 120)
                 snapshots["before"] = nested_file_depths(state)
 
                 parent_root_idx = next(
                     idx
-                    for idx, entry in enumerate(state.tree_entries)
+                    for idx, entry in enumerate(state.workspace.entries)
                     if entry.is_dir and entry.depth == 0 and entry.path.resolve() == root.resolve()
                 )
-                row = (parent_root_idx - state.tree_start) + 1
-                col = 1 + (state.tree_entries[parent_root_idx].depth * 2)
+                row = (parent_root_idx - state.workspace.scroll) + 1
+                col = 1 + (state.workspace.entries[parent_root_idx].depth * 2)
                 callbacks.tree_pane.handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{col}:{row}")
                 snapshots["after_close"] = nested_file_depths(state)
 
                 parent_root_idx = next(
                     idx
-                    for idx, entry in enumerate(state.tree_entries)
+                    for idx, entry in enumerate(state.workspace.entries)
                     if entry.is_dir and entry.depth == 0 and entry.path.resolve() == root.resolve()
                 )
-                row = (parent_root_idx - state.tree_start) + 1
-                col = 1 + (state.tree_entries[parent_root_idx].depth * 2)
+                row = (parent_root_idx - state.workspace.scroll) + 1
+                col = 1 + (state.workspace.entries[parent_root_idx].depth * 2)
                 callbacks.tree_pane.handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{col}:{row}")
                 snapshots["after_reopen"] = nested_file_depths(state)
 
@@ -675,22 +675,22 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
             snapshots: dict[str, object] = {}
 
             def section_snapshot(state) -> list[set[Path]]:
-                return [{path.resolve() for path in expanded_paths} for expanded_paths in state.workspace_expanded]
+                return [{path.resolve() for path in expanded_paths} for expanded_paths in state.workspace.expanded_by_root]
 
             def assert_invariants(state) -> None:
-                self.assertTrue(state.tree_roots)
-                self.assertTrue(state.tree_entries)
-                self.assertTrue(0 <= state.selected_idx < len(state.tree_entries))
+                self.assertTrue(state.workspace.roots)
+                self.assertTrue(state.workspace.entries)
+                self.assertTrue(0 <= state.workspace.selected < len(state.workspace.entries))
 
-                roots = normalized_workspace_roots(state.tree_roots, state.tree_root)
-                state_roots = [path.resolve() for path in state.tree_roots]
+                roots = normalized_workspace_roots(state.workspace.roots, state.workspace.active_root)
+                state_roots = [path.resolve() for path in state.workspace.roots]
                 self.assertEqual(state_roots, roots)
-                depth0_entries = [entry for entry in state.tree_entries if entry.is_dir and entry.depth == 0]
+                depth0_entries = [entry for entry in state.workspace.entries if entry.is_dir and entry.depth == 0]
                 self.assertEqual(
                     [entry.path.resolve() for entry in depth0_entries],
                     roots,
                 )
-                self.assertEqual(len(state.workspace_expanded), len(roots))
+                self.assertEqual(len(state.workspace.expanded_by_root), len(roots))
                 self.assertEqual(len(depth0_entries), len(roots))
                 for section_idx, depth0_entry in enumerate(depth0_entries):
                     self.assertEqual(depth0_entry.workspace_section, section_idx)
@@ -700,17 +700,17 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     self.assertEqual(depth0_entry.path.resolve(), roots[section_idx])
 
                 expanded_union: set[Path] = set()
-                for scope_root, expanded_paths in zip(roots, state.workspace_expanded):
+                for scope_root, expanded_paths in zip(roots, state.workspace.expanded_by_root):
                     for expanded_path in expanded_paths:
                         expanded_path_resolved = expanded_path.resolve()
                         self.assertTrue(expanded_path_resolved.is_relative_to(scope_root))
                         expanded_union.add(expanded_path_resolved)
-                self.assertEqual(state.expanded, expanded_union)
+                self.assertEqual(state.workspace.expanded, expanded_union)
 
                 roots_set = set(roots)
                 row_keys = []
                 previous_section = -1
-                for entry in state.tree_entries:
+                for entry in state.workspace.entries:
                     self.assertEqual(entry.kind, "path")
                     self.assertIsNotNone(entry.workspace_root)
                     self.assertIsNotNone(entry.workspace_section)
@@ -735,7 +735,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     )
                 self.assertEqual(len(row_keys), len(set(row_keys)))
 
-                current_path = state.current_path.resolve()
+                current_path = state.workspace.current_path.resolve()
                 self.assertTrue(any(current_path.is_relative_to(root_path) for root_path in roots))
 
             def fake_run_main_loop(**kwargs) -> None:
@@ -753,7 +753,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 def random_dir_index(depth: int | None = None) -> int | None:
                     candidates = [
                         idx
-                        for idx, entry in enumerate(state.tree_entries)
+                        for idx, entry in enumerate(state.workspace.entries)
                         if entry.is_dir and (depth is None or entry.depth == depth)
                     ]
                     if not candidates:
@@ -761,18 +761,18 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     return candidates[rng.randrange(len(candidates))]
 
                 def random_file_index() -> int | None:
-                    candidates = [idx for idx, entry in enumerate(state.tree_entries) if not entry.is_dir]
+                    candidates = [idx for idx, entry in enumerate(state.workspace.entries) if not entry.is_dir]
                     if not candidates:
                         return None
                     return candidates[rng.randrange(len(candidates))]
 
                 def random_entry_index() -> int | None:
-                    if not state.tree_entries:
+                    if not state.workspace.entries:
                         return None
-                    return rng.randrange(len(state.tree_entries))
+                    return rng.randrange(len(state.workspace.entries))
 
                 def ensure_filter_closed() -> None:
-                    if state.tree_filter_active:
+                    if state.filter.active:
                         tree_filter_controller.close_tree_filter(clear_query=True, restore_origin=False)
 
                 def assert_search_undo_roundtrip(origin_path: Path, target_path: Path) -> None:
@@ -780,25 +780,25 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                         return
                     moved_back = navigation.jump_back_in_history()
                     self.assertTrue(moved_back)
-                    self.assertEqual(state.current_path.resolve(), origin_path)
+                    self.assertEqual(state.workspace.current_path.resolve(), origin_path)
                     moved_forward = navigation.jump_forward_in_history()
                     self.assertTrue(moved_forward)
-                    self.assertEqual(state.current_path.resolve(), target_path)
+                    self.assertEqual(state.workspace.current_path.resolve(), target_path)
 
                 def key_toggle_random_directory() -> bool:
                     idx = random_dir_index()
                     if idx is None:
                         return False
-                    selected_before = state.tree_entries[idx]
+                    selected_before = state.workspace.entries[idx]
                     selected_path = selected_before.path.resolve()
                     self.assertIsNotNone(selected_before.workspace_section)
                     assert selected_before.workspace_section is not None
                     selected_section = selected_before.workspace_section
                     before_sections = section_snapshot(state)
                     before_has = selected_path in before_sections[selected_section]
-                    state.selected_idx = idx
+                    state.workspace.selected = idx
                     callbacks.handle_normal_key("ENTER", 120)
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertEqual(selected_after.path.resolve(), selected_path)
                     self.assertEqual(selected_after.workspace_section, selected_section)
                     after_sections = section_snapshot(state)
@@ -814,18 +814,18 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     idx = random_dir_index()
                     if idx is None:
                         return False
-                    selected_before = state.tree_entries[idx]
+                    selected_before = state.workspace.entries[idx]
                     selected_path = selected_before.path.resolve()
                     self.assertIsNotNone(selected_before.workspace_section)
                     assert selected_before.workspace_section is not None
                     selected_section = selected_before.workspace_section
                     before_sections = section_snapshot(state)
                     before_has = selected_path in before_sections[selected_section]
-                    state.selected_idx = idx
-                    row = (idx - state.tree_start) + 1
-                    col = 1 + (state.tree_entries[idx].depth * 2)
+                    state.workspace.selected = idx
+                    row = (idx - state.workspace.scroll) + 1
+                    col = 1 + (state.workspace.entries[idx].depth * 2)
                     callbacks.tree_pane.handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{col}:{row}")
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertEqual(selected_after.path.resolve(), selected_path)
                     self.assertEqual(selected_after.workspace_section, selected_section)
                     after_sections = section_snapshot(state)
@@ -841,20 +841,20 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
 
                 def add_random_directory_root_and_assert() -> bool:
                     ensure_filter_closed()
-                    if len(state.tree_roots) >= max_random_tree_roots:
+                    if len(state.workspace.roots) >= max_random_tree_roots:
                         return False
                     idx = random_dir_index()
                     if idx is None:
                         return False
-                    selected_before = state.tree_entries[idx]
+                    selected_before = state.workspace.entries[idx]
                     new_root = selected_before.path.resolve()
-                    before_tree_roots = [path.resolve() for path in state.tree_roots]
-                    state.selected_idx = idx
+                    before_tree_roots = [path.resolve() for path in state.workspace.roots]
+                    state.workspace.selected = idx
                     callbacks.handle_normal_key("a", 120)
-                    after_tree_roots = [path.resolve() for path in state.tree_roots]
+                    after_tree_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(len(after_tree_roots), len(before_tree_roots) + 1)
                     self.assertEqual(after_tree_roots[-1], new_root)
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertEqual(selected_after.path.resolve(), new_root)
                     self.assertEqual(selected_after.depth, 0)
                     self.assertEqual(selected_after.workspace_section, len(after_tree_roots) - 1)
@@ -862,21 +862,21 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
 
                 def add_random_file_parent_root_and_assert() -> bool:
                     ensure_filter_closed()
-                    if len(state.tree_roots) >= max_random_tree_roots:
+                    if len(state.workspace.roots) >= max_random_tree_roots:
                         return False
                     idx = random_file_index()
                     if idx is None:
                         return False
-                    selected_before = state.tree_entries[idx]
+                    selected_before = state.workspace.entries[idx]
                     selected_file = selected_before.path.resolve()
                     new_root = selected_file.parent.resolve()
-                    before_tree_roots = [path.resolve() for path in state.tree_roots]
-                    state.selected_idx = idx
+                    before_tree_roots = [path.resolve() for path in state.workspace.roots]
+                    state.workspace.selected = idx
                     callbacks.handle_normal_key("a", 120)
-                    after_tree_roots = [path.resolve() for path in state.tree_roots]
+                    after_tree_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(len(after_tree_roots), len(before_tree_roots) + 1)
                     self.assertEqual(after_tree_roots[-1], new_root)
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertEqual(selected_after.path.resolve(), new_root)
                     self.assertEqual(selected_after.depth, 0)
                     self.assertEqual(selected_after.workspace_section, len(after_tree_roots) - 1)
@@ -884,30 +884,30 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
 
                 def remove_random_depth0_root_and_assert() -> bool:
                     ensure_filter_closed()
-                    if len(state.tree_roots) <= 1:
+                    if len(state.workspace.roots) <= 1:
                         return False
                     idx = random_dir_index(depth=0)
                     if idx is None:
                         return False
-                    selected_entry = state.tree_entries[idx]
+                    selected_entry = state.workspace.entries[idx]
                     selected_root = selected_entry.path.resolve()
                     self.assertIsNotNone(selected_entry.workspace_section)
                     assert selected_entry.workspace_section is not None
                     selected_section = selected_entry.workspace_section
-                    before_tree_roots = [path.resolve() for path in state.tree_roots]
+                    before_tree_roots = [path.resolve() for path in state.workspace.roots]
                     before_counts = Counter(before_tree_roots)
                     expected_after = before_tree_roots[:selected_section] + before_tree_roots[selected_section + 1 :]
 
-                    state.selected_idx = idx
+                    state.workspace.selected = idx
                     callbacks.handle_normal_key("d", 120)
 
-                    after_tree_roots = [path.resolve() for path in state.tree_roots]
+                    after_tree_roots = [path.resolve() for path in state.workspace.roots]
                     after_counts = Counter(after_tree_roots)
                     self.assertEqual(after_tree_roots, expected_after)
                     self.assertEqual(len(after_tree_roots), len(before_tree_roots) - 1)
                     self.assertEqual(after_counts[selected_root], before_counts[selected_root] - 1)
 
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertIsNotNone(selected_after.workspace_section)
                     assert selected_after.workspace_section is not None
                     self.assertTrue(0 <= selected_after.workspace_section < len(after_tree_roots))
@@ -918,27 +918,27 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
 
                 def remove_random_entry_section_and_assert() -> bool:
                     ensure_filter_closed()
-                    if len(state.tree_roots) <= 1:
+                    if len(state.workspace.roots) <= 1:
                         return False
                     idx = random_entry_index()
                     if idx is None:
                         return False
-                    selected_before = state.tree_entries[idx]
+                    selected_before = state.workspace.entries[idx]
                     self.assertIsNotNone(selected_before.workspace_section)
                     assert selected_before.workspace_section is not None
                     selected_section = selected_before.workspace_section
-                    before_tree_roots = [path.resolve() for path in state.tree_roots]
+                    before_tree_roots = [path.resolve() for path in state.workspace.roots]
                     expected_after = before_tree_roots[:selected_section] + before_tree_roots[selected_section + 1 :]
                     if not expected_after:
                         return False
 
-                    state.selected_idx = idx
+                    state.workspace.selected = idx
                     callbacks.handle_normal_key("d", 120)
-                    after_tree_roots = [path.resolve() for path in state.tree_roots]
+                    after_tree_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(after_tree_roots, expected_after)
                     self.assertEqual(len(after_tree_roots), len(before_tree_roots) - 1)
 
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertIsNotNone(selected_after.workspace_section)
                     assert selected_after.workspace_section is not None
                     self.assertTrue(0 <= selected_after.workspace_section < len(after_tree_roots))
@@ -949,17 +949,17 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
 
                 def delete_only_root_noop_and_assert() -> bool:
                     ensure_filter_closed()
-                    if len(state.tree_roots) != 1:
+                    if len(state.workspace.roots) != 1:
                         return False
                     idx = random_entry_index()
                     if idx is None:
                         return False
-                    before_roots = [path.resolve() for path in state.tree_roots]
-                    state.selected_idx = idx
+                    before_roots = [path.resolve() for path in state.workspace.roots]
+                    state.workspace.selected = idx
                     callbacks.handle_normal_key("d", 120)
-                    after_roots = [path.resolve() for path in state.tree_roots]
+                    after_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(after_roots, before_roots)
-                    self.assertIn("cannot delete", state.status_message)
+                    self.assertIn("cannot delete", state.interface.status_message)
                     return True
 
                 def reroot_parent_from_random_depth0_root_and_assert_section() -> bool:
@@ -967,22 +967,22 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     idx = random_dir_index(depth=0)
                     if idx is None:
                         return False
-                    selected_before = state.tree_entries[idx]
+                    selected_before = state.workspace.entries[idx]
                     selected_root = selected_before.path.resolve()
                     self.assertIsNotNone(selected_before.workspace_section)
                     assert selected_before.workspace_section is not None
                     before_section = selected_before.workspace_section
-                    before_roots = [path.resolve() for path in state.tree_roots]
+                    before_roots = [path.resolve() for path in state.workspace.roots]
                     parent_root = selected_root.parent.resolve()
                     if parent_root == selected_root:
                         return False
                     expected_after = list(before_roots)
                     expected_after[before_section] = parent_root
-                    state.selected_idx = idx
+                    state.workspace.selected = idx
                     callbacks.handle_normal_key("R", 120)
-                    after_roots = [path.resolve() for path in state.tree_roots]
+                    after_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(after_roots, expected_after)
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertIsNotNone(selected_after.workspace_section)
                     assert selected_after.workspace_section is not None
                     self.assertEqual(selected_after.workspace_section, before_section)
@@ -993,19 +993,19 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     idx = random_dir_index()
                     if idx is None:
                         return False
-                    selected_before = state.tree_entries[idx]
+                    selected_before = state.workspace.entries[idx]
                     selected_target = selected_before.path.resolve()
                     self.assertIsNotNone(selected_before.workspace_section)
                     assert selected_before.workspace_section is not None
                     before_section = selected_before.workspace_section
-                    before_roots = [path.resolve() for path in state.tree_roots]
+                    before_roots = [path.resolve() for path in state.workspace.roots]
                     expected_after = list(before_roots)
                     expected_after[before_section] = selected_target
-                    state.selected_idx = idx
+                    state.workspace.selected = idx
                     callbacks.handle_normal_key("r", 120)
-                    after_roots = [path.resolve() for path in state.tree_roots]
+                    after_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(after_roots, expected_after)
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertIsNotNone(selected_after.workspace_section)
                     assert selected_after.workspace_section is not None
                     self.assertEqual(selected_after.workspace_section, before_section)
@@ -1018,30 +1018,30 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     idx = next(
                         (
                             row_idx
-                            for row_idx, entry in enumerate(state.tree_entries)
+                            for row_idx, entry in enumerate(state.workspace.entries)
                             if entry.depth > 0
                         ),
                         None,
                     )
                     if idx is None:
                         return False
-                    selected_before = state.tree_entries[idx]
+                    selected_before = state.workspace.entries[idx]
                     self.assertIsNotNone(selected_before.workspace_section)
                     assert selected_before.workspace_section is not None
                     target_section = selected_before.workspace_section
                     selected_path = selected_before.path.resolve()
-                    before_roots = [path.resolve() for path in state.tree_roots]
+                    before_roots = [path.resolve() for path in state.workspace.roots]
                     section_root = before_roots[target_section]
                     parent_root = section_root.parent.resolve()
                     if parent_root == section_root:
                         return False
                     expected_after = list(before_roots)
                     expected_after[target_section] = parent_root
-                    state.selected_idx = idx
+                    state.workspace.selected = idx
                     callbacks.handle_normal_key("R", 120)
-                    after_roots = [path.resolve() for path in state.tree_roots]
+                    after_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(after_roots, expected_after)
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertIsNotNone(selected_after.workspace_section)
                     assert selected_after.workspace_section is not None
                     self.assertEqual(selected_after.workspace_section, target_section)
@@ -1053,20 +1053,20 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     idx = random_file_index()
                     if idx is None:
                         return False
-                    selected_before = state.tree_entries[idx]
+                    selected_before = state.workspace.entries[idx]
                     selected_target = selected_before.path.resolve()
                     target_root = selected_target.parent.resolve()
                     self.assertIsNotNone(selected_before.workspace_section)
                     assert selected_before.workspace_section is not None
                     before_section = selected_before.workspace_section
-                    before_roots = [path.resolve() for path in state.tree_roots]
+                    before_roots = [path.resolve() for path in state.workspace.roots]
                     expected_after = list(before_roots)
                     expected_after[before_section] = target_root
-                    state.selected_idx = idx
+                    state.workspace.selected = idx
                     callbacks.handle_normal_key("r", 120)
-                    after_roots = [path.resolve() for path in state.tree_roots]
+                    after_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(after_roots, expected_after)
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertIsNotNone(selected_after.workspace_section)
                     assert selected_after.workspace_section is not None
                     self.assertEqual(selected_after.workspace_section, before_section)
@@ -1074,26 +1074,26 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     return True
 
                 def duplicate_random_depth0_root_and_assert() -> bool:
-                    if len(state.tree_roots) >= max_random_tree_roots:
+                    if len(state.workspace.roots) >= max_random_tree_roots:
                         return False
                     idx = random_dir_index(depth=0)
                     if idx is None:
                         return False
-                    selected_root = state.tree_entries[idx].path.resolve()
-                    before_tree_roots = [path.resolve() for path in state.tree_roots]
+                    selected_root = state.workspace.entries[idx].path.resolve()
+                    before_tree_roots = [path.resolve() for path in state.workspace.roots]
                     before_depth0 = [
                         entry.path.resolve()
-                        for entry in state.tree_entries
+                        for entry in state.workspace.entries
                         if entry.is_dir and entry.depth == 0
                     ]
 
-                    state.selected_idx = idx
+                    state.workspace.selected = idx
                     callbacks.handle_normal_key("a", 120)
 
-                    after_tree_roots = [path.resolve() for path in state.tree_roots]
+                    after_tree_roots = [path.resolve() for path in state.workspace.roots]
                     after_depth0 = [
                         entry.path.resolve()
-                        for entry in state.tree_entries
+                        for entry in state.workspace.entries
                         if entry.is_dir and entry.depth == 0
                     ]
                     self.assertEqual(len(after_tree_roots), len(before_tree_roots) + 1)
@@ -1110,7 +1110,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                         before_depth0_counts[selected_root] + 1,
                     )
 
-                    selected_entry = state.tree_entries[state.selected_idx]
+                    selected_entry = state.workspace.entries[state.workspace.selected]
                     self.assertTrue(selected_entry.is_dir)
                     self.assertEqual(selected_entry.depth, 0)
                     self.assertEqual(selected_entry.path.resolve(), selected_root)
@@ -1124,21 +1124,21 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     idx = random_dir_index()
                     if idx is None:
                         return False
-                    selected_before = state.tree_entries[idx]
+                    selected_before = state.workspace.entries[idx]
                     selected_path = selected_before.path.resolve()
                     self.assertIsNotNone(selected_before.workspace_section)
                     assert selected_before.workspace_section is not None
                     selected_section = selected_before.workspace_section
                     before_sections = section_snapshot(state)
-                    before_roots = [path.resolve() for path in state.tree_roots]
-                    state.selected_idx = idx
+                    before_roots = [path.resolve() for path in state.workspace.roots]
+                    state.workspace.selected = idx
                     callbacks.handle_normal_key("ENTER", 120)
                     callbacks.handle_normal_key("ENTER", 120)
                     after_sections = section_snapshot(state)
-                    after_roots = [path.resolve() for path in state.tree_roots]
+                    after_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(after_sections, before_sections)
                     self.assertEqual(after_roots, before_roots)
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertEqual(selected_after.path.resolve(), selected_path)
                     self.assertEqual(selected_after.workspace_section, selected_section)
                     return True
@@ -1148,22 +1148,22 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     idx = random_entry_index()
                     if idx is None:
                         return False
-                    selected_before = state.tree_entries[idx]
+                    selected_before = state.workspace.entries[idx]
                     add_target_root = (
                         selected_before.path.resolve()
                         if selected_before.is_dir
                         else selected_before.path.resolve().parent.resolve()
                     )
-                    before_roots = [path.resolve() for path in state.tree_roots]
-                    state.selected_idx = idx
+                    before_roots = [path.resolve() for path in state.workspace.roots]
+                    state.workspace.selected = idx
                     callbacks.handle_normal_key("a", 120)
-                    after_add_roots = [path.resolve() for path in state.tree_roots]
+                    after_add_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(len(after_add_roots), len(before_roots) + 1)
                     self.assertEqual(after_add_roots[-1], add_target_root)
                     last_root_idx = next(
                         (
                             row_idx
-                            for row_idx, entry in enumerate(state.tree_entries)
+                            for row_idx, entry in enumerate(state.workspace.entries)
                             if entry.is_dir
                             and entry.depth == 0
                             and entry.workspace_section == len(after_add_roots) - 1
@@ -1173,9 +1173,9 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     )
                     if last_root_idx is None:
                         return False
-                    state.selected_idx = last_root_idx
+                    state.workspace.selected = last_root_idx
                     callbacks.handle_normal_key("d", 120)
-                    after_delete_roots = [path.resolve() for path in state.tree_roots]
+                    after_delete_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(after_delete_roots, before_roots)
                     return True
 
@@ -1184,25 +1184,25 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     idx = random_dir_index(depth=0)
                     if idx is None:
                         return False
-                    selected_before = state.tree_entries[idx]
+                    selected_before = state.workspace.entries[idx]
                     selected_root = selected_before.path.resolve()
                     self.assertIsNotNone(selected_before.workspace_section)
                     assert selected_before.workspace_section is not None
                     selected_section = selected_before.workspace_section
-                    before_roots = [path.resolve() for path in state.tree_roots]
+                    before_roots = [path.resolve() for path in state.workspace.roots]
                     parent_root = selected_root.parent.resolve()
                     if parent_root == selected_root:
                         return False
-                    state.selected_idx = idx
+                    state.workspace.selected = idx
                     callbacks.handle_normal_key("R", 120)
-                    after_reroot_parent = [path.resolve() for path in state.tree_roots]
+                    after_reroot_parent = [path.resolve() for path in state.workspace.roots]
                     expected_after_parent = list(before_roots)
                     expected_after_parent[selected_section] = parent_root
                     self.assertEqual(after_reroot_parent, expected_after_parent)
                     callbacks.handle_normal_key("r", 120)
-                    after_roundtrip = [path.resolve() for path in state.tree_roots]
+                    after_roundtrip = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(after_roundtrip, before_roots)
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertEqual(selected_after.path.resolve(), selected_root)
                     self.assertEqual(selected_after.workspace_section, selected_section)
                     self.assertEqual(selected_after.depth, 0)
@@ -1213,19 +1213,19 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     original_root_entry_idx = next(
                         (
                             idx
-                            for idx, entry in enumerate(state.tree_entries)
+                            for idx, entry in enumerate(state.workspace.entries)
                             if entry.is_dir and entry.depth == 0 and entry.workspace_section == 0
                         ),
                         None,
                     )
                     if original_root_entry_idx is None:
                         return False
-                    original_root = state.tree_entries[original_root_entry_idx].path.resolve()
+                    original_root = state.workspace.entries[original_root_entry_idx].path.resolve()
 
                     nested_dir_idx = next(
                         (
                             idx
-                            for idx, entry in enumerate(state.tree_entries)
+                            for idx, entry in enumerate(state.workspace.entries)
                             if entry.is_dir
                             and entry.workspace_section == 0
                             and entry.path.resolve() != original_root
@@ -1235,13 +1235,13 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     if nested_dir_idx is None:
                         return False
 
-                    state.selected_idx = nested_dir_idx
+                    state.workspace.selected = nested_dir_idx
                     callbacks.handle_normal_key("a", 120)
 
                     original_root_entry_idx = next(
                         (
                             idx
-                            for idx, entry in enumerate(state.tree_entries)
+                            for idx, entry in enumerate(state.workspace.entries)
                             if entry.is_dir
                             and entry.depth == 0
                             and entry.workspace_section == 0
@@ -1252,13 +1252,13 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     if original_root_entry_idx is None:
                         return False
 
-                    before_tree_roots = [path.resolve() for path in state.tree_roots]
+                    before_tree_roots = [path.resolve() for path in state.workspace.roots]
                     before_counts = Counter(before_tree_roots)
                     expected_after = before_tree_roots[1:]
-                    state.selected_idx = original_root_entry_idx
+                    state.workspace.selected = original_root_entry_idx
                     callbacks.handle_normal_key("d", 120)
 
-                    after_tree_roots = [path.resolve() for path in state.tree_roots]
+                    after_tree_roots = [path.resolve() for path in state.workspace.roots]
                     after_counts = Counter(after_tree_roots)
                     self.assertEqual(after_tree_roots, expected_after)
                     self.assertEqual(after_counts[original_root], before_counts[original_root] - 1)
@@ -1269,36 +1269,36 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     root0_idx = next(
                         (
                             idx
-                            for idx, entry in enumerate(state.tree_entries)
+                            for idx, entry in enumerate(state.workspace.entries)
                             if entry.is_dir and entry.depth == 0 and entry.workspace_section == 0
                         ),
                         None,
                     )
                     if root0_idx is None:
                         return False
-                    root0 = state.tree_entries[root0_idx].path.resolve()
+                    root0 = state.workspace.entries[root0_idx].path.resolve()
                     child_idx = next(
                         (
                             idx
-                            for idx, entry in enumerate(state.tree_entries)
+                            for idx, entry in enumerate(state.workspace.entries)
                             if entry.is_dir and entry.workspace_section == 0 and entry.path.resolve() != root0
                         ),
                         None,
                     )
                     if child_idx is None:
                         return False
-                    child_root = state.tree_entries[child_idx].path.resolve()
-                    before_roots = [path.resolve() for path in state.tree_roots]
-                    state.selected_idx = child_idx
+                    child_root = state.workspace.entries[child_idx].path.resolve()
+                    before_roots = [path.resolve() for path in state.workspace.roots]
+                    state.workspace.selected = child_idx
                     callbacks.handle_normal_key("a", 120)
-                    after_roots = [path.resolve() for path in state.tree_roots]
+                    after_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(len(after_roots), len(before_roots) + 1)
                     self.assertEqual(after_roots[-1], child_root)
                     return True
 
                 def reroot_key_on_nonzero_section_stays_in_same_section(key: str) -> bool:
                     ensure_filter_closed()
-                    nonzero_sections = sorted({idx for idx in range(len(state.tree_roots)) if idx > 0})
+                    nonzero_sections = sorted({idx for idx in range(len(state.workspace.roots)) if idx > 0})
                     if not nonzero_sections:
                         return False
                     target_section = nonzero_sections[-1]
@@ -1306,7 +1306,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                         idx = next(
                             (
                                 row_idx
-                                for row_idx, entry in enumerate(state.tree_entries)
+                                for row_idx, entry in enumerate(state.workspace.entries)
                                 if entry.is_dir and entry.workspace_section == target_section and entry.depth > 0
                             ),
                             None,
@@ -1317,16 +1317,16 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                         idx = next(
                             (
                                 row_idx
-                                for row_idx, entry in enumerate(state.tree_entries)
+                                for row_idx, entry in enumerate(state.workspace.entries)
                                 if entry.is_dir and entry.depth == 0 and entry.workspace_section == target_section
                             ),
                             None,
                         )
                     if idx is None:
                         return False
-                    selected_before = state.tree_entries[idx]
+                    selected_before = state.workspace.entries[idx]
                     selected_path = selected_before.path.resolve()
-                    before_roots = [path.resolve() for path in state.tree_roots]
+                    before_roots = [path.resolve() for path in state.workspace.roots]
                     if key == "R" and selected_path.parent == selected_path:
                         return False
                     expected_after = list(before_roots)
@@ -1334,11 +1334,11 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                         expected_after[target_section] = selected_path.parent.resolve()
                     else:
                         expected_after[target_section] = selected_path
-                    state.selected_idx = idx
+                    state.workspace.selected = idx
                     callbacks.handle_normal_key(key, 120)
-                    after_roots = [path.resolve() for path in state.tree_roots]
+                    after_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(after_roots, expected_after)
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertIsNotNone(selected_after.workspace_section)
                     assert selected_after.workspace_section is not None
                     self.assertEqual(selected_after.workspace_section, target_section)
@@ -1354,14 +1354,14 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     candidate_idx = next(
                         (
                             row_idx
-                            for row_idx, entry in enumerate(state.tree_entries)
+                            for row_idx, entry in enumerate(state.workspace.entries)
                             if entry.is_dir and entry.depth > 0
                         ),
                         None,
                     )
                     if candidate_idx is None:
                         return False
-                    state.selected_idx = candidate_idx
+                    state.workspace.selected = candidate_idx
                     callbacks.handle_normal_key("ENTER", 120)
                     return random_file_index() is not None
 
@@ -1370,13 +1370,13 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     file_idx = random_file_index()
                     if file_idx is None:
                         return False
-                    target_file = state.tree_entries[file_idx].path.resolve()
-                    origin_path = state.current_path.resolve()
+                    target_file = state.workspace.entries[file_idx].path.resolve()
+                    origin_path = state.workspace.current_path.resolve()
                     query = target_file.name
 
                     tree_filter_panel.toggle_mode("files")
-                    self.assertTrue(state.tree_filter_active)
-                    self.assertEqual(state.tree_filter_mode, "files")
+                    self.assertTrue(state.filter.active)
+                    self.assertEqual(state.filter.mode, "files")
                     tree_filter_controller.apply_tree_filter_query(
                         query,
                         preview_selection=False,
@@ -1385,7 +1385,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     target_idx = next(
                         (
                             idx
-                            for idx, entry in enumerate(state.tree_entries)
+                            for idx, entry in enumerate(state.workspace.entries)
                             if (not entry.is_dir) and entry.path.resolve() == target_file
                         ),
                         None,
@@ -1393,10 +1393,10 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     if target_idx is None:
                         tree_filter_controller.close_tree_filter(clear_query=True)
                         return False
-                    state.selected_idx = target_idx
+                    state.workspace.selected = target_idx
                     tree_filter_panel.activate_selection()
-                    self.assertFalse(state.tree_filter_active)
-                    self.assertEqual(state.current_path.resolve(), target_file)
+                    self.assertFalse(state.filter.active)
+                    self.assertEqual(state.workspace.current_path.resolve(), target_file)
                     assert_search_undo_roundtrip(origin_path, target_file)
                     return True
 
@@ -1405,13 +1405,13 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     file_idx = random_file_index()
                     if file_idx is None:
                         return False
-                    target_file = state.tree_entries[file_idx].path.resolve()
-                    origin_path = state.current_path.resolve()
+                    target_file = state.workspace.entries[file_idx].path.resolve()
+                    origin_path = state.workspace.current_path.resolve()
 
                     tree_filter_panel.toggle_mode("content")
-                    self.assertTrue(state.tree_filter_active)
-                    self.assertEqual(state.tree_filter_mode, "content")
-                    state.tree_filter_query = target_file.name
+                    self.assertTrue(state.filter.active)
+                    self.assertEqual(state.filter.mode, "content")
+                    state.filter.query = target_file.name
                     tree_filter_controller.rebuild_tree_entries(
                         preferred_path=target_file,
                         force_first_file=True,
@@ -1430,7 +1430,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     hit_idx = next(
                         (
                             idx
-                            for idx, entry in enumerate(state.tree_entries)
+                            for idx, entry in enumerate(state.workspace.entries)
                             if entry.kind == "search_hit" and entry.path.resolve() == target_file
                         ),
                         None,
@@ -1438,15 +1438,15 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     if hit_idx is None:
                         tree_filter_controller.close_tree_filter(clear_query=True)
                         return False
-                    state.selected_idx = hit_idx
+                    state.workspace.selected = hit_idx
                     tree_filter_panel.activate_selection()
-                    self.assertTrue(state.tree_filter_active)
-                    self.assertEqual(state.tree_filter_mode, "content")
-                    self.assertFalse(state.tree_filter_editing)
-                    self.assertEqual(state.current_path.resolve(), target_file)
+                    self.assertTrue(state.filter.active)
+                    self.assertEqual(state.filter.mode, "content")
+                    self.assertFalse(state.filter.editing)
+                    self.assertEqual(state.workspace.current_path.resolve(), target_file)
                     assert_search_undo_roundtrip(origin_path, target_file)
                     tree_filter_controller.close_tree_filter(clear_query=True)
-                    self.assertFalse(state.tree_filter_active)
+                    self.assertFalse(state.filter.active)
                     return True
 
                 operations = (
@@ -1491,9 +1491,9 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                         if operation():
                             executed += 1
                             successful_since_invariant += 1
-                            self.assertTrue(state.tree_entries)
-                            self.assertTrue(0 <= state.selected_idx < len(state.tree_entries))
-                            self.assertEqual(len(state.workspace_expanded), len(state.tree_roots))
+                            self.assertTrue(state.workspace.entries)
+                            self.assertTrue(0 <= state.workspace.selected < len(state.workspace.entries))
+                            self.assertEqual(len(state.workspace.expanded_by_root), len(state.workspace.roots))
                             if successful_since_invariant >= full_invariant_cadence:
                                 assert_invariants(state)
                                 successful_since_invariant = 0
@@ -1523,10 +1523,10 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
             snapshots: list[dict[str, object]] = []
 
             def section_snapshot(state) -> list[set[Path]]:
-                return [{path.resolve() for path in expanded_paths} for expanded_paths in state.workspace_expanded]
+                return [{path.resolve() for path in expanded_paths} for expanded_paths in state.workspace.expanded_by_root]
 
             def entry_selector_for_index(state, index: int) -> dict[str, object]:
-                entry = state.tree_entries[index]
+                entry = state.workspace.entries[index]
                 self.assertIsNotNone(entry.workspace_section)
                 self.assertIsNotNone(entry.workspace_root)
                 assert entry.workspace_section is not None
@@ -1549,7 +1549,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 target_kind = str(selector["kind"])
                 matches = [
                     idx
-                    for idx, entry in enumerate(state.tree_entries)
+                    for idx, entry in enumerate(state.workspace.entries)
                     if str(entry.path.resolve()) == target_path
                     and entry.workspace_section == target_section
                     and str(entry.workspace_root.resolve()) == target_workspace_root
@@ -1567,15 +1567,15 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
             def state_signature(state) -> dict[str, object]:
                 frame_ansi_rows, frame_plain_rows = _render_full_frame_rows(state)
                 return {
-                    "tree_roots": tuple(str(path.resolve()) for path in state.tree_roots),
+                    "tree_roots": tuple(str(path.resolve()) for path in state.workspace.roots),
                     "workspace_expanded": tuple(
                         tuple(sorted(str(path.resolve()) for path in expanded_paths))
-                        for expanded_paths in state.workspace_expanded
+                        for expanded_paths in state.workspace.expanded_by_root
                     ),
-                    "expanded": tuple(sorted(str(path.resolve()) for path in state.expanded)),
-                    "selected_idx": int(state.selected_idx),
-                    "selected_entry": entry_selector_for_index(state, state.selected_idx),
-                    "current_path": str(state.current_path.resolve()),
+                    "expanded": tuple(sorted(str(path.resolve()) for path in state.workspace.expanded)),
+                    "selected_idx": int(state.workspace.selected),
+                    "selected_entry": entry_selector_for_index(state, state.workspace.selected),
+                    "current_path": str(state.workspace.current_path.resolve()),
                     "tree_entries": tuple(
                         (
                             str(entry.path.resolve()),
@@ -1587,41 +1587,41 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                             int(entry.line) if entry.line is not None else None,
                             int(entry.column) if entry.column is not None else None,
                         )
-                        for entry in state.tree_entries
+                        for entry in state.workspace.entries
                     ),
-                    "tree_start": int(state.tree_start),
-                    "tree_filter_active": bool(state.tree_filter_active),
-                    "tree_filter_mode": str(state.tree_filter_mode),
-                    "tree_filter_query": str(state.tree_filter_query),
-                    "tree_filter_editing": bool(state.tree_filter_editing),
+                    "tree_start": int(state.workspace.scroll),
+                    "tree_filter_active": bool(state.filter.active),
+                    "tree_filter_mode": str(state.filter.mode),
+                    "tree_filter_query": str(state.filter.query),
+                    "tree_filter_editing": bool(state.filter.editing),
                     "frame_ansi_rows": frame_ansi_rows,
                     "frame_plain_rows": frame_plain_rows,
                 }
 
             def assert_invariants(state) -> None:
-                self.assertTrue(state.tree_roots)
-                self.assertTrue(state.tree_entries)
-                self.assertTrue(0 <= state.selected_idx < len(state.tree_entries))
+                self.assertTrue(state.workspace.roots)
+                self.assertTrue(state.workspace.entries)
+                self.assertTrue(0 <= state.workspace.selected < len(state.workspace.entries))
 
-                roots = normalized_workspace_roots(state.tree_roots, state.tree_root)
-                self.assertEqual([path.resolve() for path in state.tree_roots], roots)
-                self.assertEqual(len(state.workspace_expanded), len(roots))
+                roots = normalized_workspace_roots(state.workspace.roots, state.workspace.active_root)
+                self.assertEqual([path.resolve() for path in state.workspace.roots], roots)
+                self.assertEqual(len(state.workspace.expanded_by_root), len(roots))
                 self.assertEqual(
-                    [entry.path.resolve() for entry in state.tree_entries if entry.is_dir and entry.depth == 0],
+                    [entry.path.resolve() for entry in state.workspace.entries if entry.is_dir and entry.depth == 0],
                     roots,
                 )
-                for scope_root, expanded_paths in zip(roots, state.workspace_expanded):
+                for scope_root, expanded_paths in zip(roots, state.workspace.expanded_by_root):
                     for expanded_path in expanded_paths:
                         resolved_expanded = expanded_path.resolve()
                         self.assertTrue(resolved_expanded.is_relative_to(scope_root))
                         self.assertTrue(resolved_expanded.is_relative_to(root))
                 self.assertEqual(
-                    {path.resolve() for path in state.expanded},
+                    {path.resolve() for path in state.workspace.expanded},
                     set().union(*section_snapshot(state)),
                 )
 
                 row_keys = []
-                for entry in state.tree_entries:
+                for entry in state.workspace.entries:
                     self.assertEqual(entry.kind, "path")
                     self.assertIsNotNone(entry.workspace_root)
                     self.assertIsNotNone(entry.workspace_section)
@@ -1641,10 +1641,10 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                         )
                     )
                 self.assertEqual(len(row_keys), len(set(row_keys)))
-                self.assertTrue(state.current_path.resolve().is_relative_to(root))
+                self.assertTrue(state.workspace.current_path.resolve().is_relative_to(root))
 
             def ensure_filter_closed(state, callbacks) -> None:
-                if state.tree_filter_active:
+                if state.filter.active:
                     callbacks.tree_pane.filter.close_tree_filter(clear_query=True, restore_origin=False)
 
             def assert_search_undo_roundtrip(state, callbacks, origin_path: Path, target_path: Path) -> None:
@@ -1653,23 +1653,23 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                 navigation = callbacks.tree_pane.navigation
                 moved_back = navigation.jump_back_in_history()
                 self.assertTrue(moved_back)
-                self.assertEqual(state.current_path.resolve(), origin_path)
+                self.assertEqual(state.workspace.current_path.resolve(), origin_path)
                 moved_forward = navigation.jump_forward_in_history()
                 self.assertTrue(moved_forward)
-                self.assertEqual(state.current_path.resolve(), target_path)
+                self.assertEqual(state.workspace.current_path.resolve(), target_path)
 
             def apply_step(state, callbacks, step: dict[str, object]) -> None:
                 op = str(step["op"])
                 selector = step.get("selector")
                 if selector is not None:
                     assert isinstance(selector, dict)
-                    state.selected_idx = find_index_for_selector(state, selector)
+                    state.workspace.selected = find_index_for_selector(state, selector)
 
                 if op in {"toggle_enter", "toggle_mouse", "add_root", "delete_root", "reroot_parent", "reroot_selected"}:
                     ensure_filter_closed(state, callbacks)
 
                 if op == "toggle_enter":
-                    selected_before = state.tree_entries[state.selected_idx]
+                    selected_before = state.workspace.entries[state.workspace.selected]
                     selected_path = selected_before.path.resolve()
                     self.assertTrue(selected_before.is_dir)
                     self.assertIsNotNone(selected_before.workspace_section)
@@ -1678,7 +1678,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     before_sections = section_snapshot(state)
                     before_has = selected_path in before_sections[selected_section]
                     callbacks.handle_normal_key("ENTER", 120)
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertEqual(selected_after.path.resolve(), selected_path)
                     self.assertEqual(selected_after.workspace_section, selected_section)
                     after_sections = section_snapshot(state)
@@ -1690,7 +1690,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     return
 
                 if op == "toggle_mouse":
-                    selected_before = state.tree_entries[state.selected_idx]
+                    selected_before = state.workspace.entries[state.workspace.selected]
                     selected_path = selected_before.path.resolve()
                     self.assertTrue(selected_before.is_dir)
                     self.assertIsNotNone(selected_before.workspace_section)
@@ -1698,10 +1698,10 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     selected_section = selected_before.workspace_section
                     before_sections = section_snapshot(state)
                     before_has = selected_path in before_sections[selected_section]
-                    row = (state.selected_idx - state.tree_start) + 1
+                    row = (state.workspace.selected - state.workspace.scroll) + 1
                     col = 1 + (selected_before.depth * 2)
                     callbacks.tree_pane.handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{col}:{row}")
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertEqual(selected_after.path.resolve(), selected_path)
                     self.assertEqual(selected_after.workspace_section, selected_section)
                     after_sections = section_snapshot(state)
@@ -1713,113 +1713,113 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     return
 
                 if op == "add_root":
-                    selected_before = state.tree_entries[state.selected_idx]
+                    selected_before = state.workspace.entries[state.workspace.selected]
                     target_root = (
                         selected_before.path.resolve()
                         if selected_before.is_dir
                         else selected_before.path.resolve().parent.resolve()
                     )
-                    before_roots = [path.resolve() for path in state.tree_roots]
+                    before_roots = [path.resolve() for path in state.workspace.roots]
                     callbacks.handle_normal_key("a", 120)
-                    after_roots = [path.resolve() for path in state.tree_roots]
+                    after_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(len(after_roots), len(before_roots) + 1)
                     self.assertEqual(after_roots[-1], target_root)
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertEqual(selected_after.path.resolve(), target_root)
                     self.assertEqual(selected_after.depth, 0)
                     self.assertEqual(selected_after.workspace_section, len(after_roots) - 1)
                     return
 
                 if op == "delete_root":
-                    selected_before = state.tree_entries[state.selected_idx]
+                    selected_before = state.workspace.entries[state.workspace.selected]
                     self.assertIsNotNone(selected_before.workspace_section)
                     assert selected_before.workspace_section is not None
                     selected_section = selected_before.workspace_section
-                    before_roots = [path.resolve() for path in state.tree_roots]
+                    before_roots = [path.resolve() for path in state.workspace.roots]
                     callbacks.handle_normal_key("d", 120)
-                    after_roots = [path.resolve() for path in state.tree_roots]
+                    after_roots = [path.resolve() for path in state.workspace.roots]
                     if len(before_roots) == 1:
                         self.assertEqual(after_roots, before_roots)
-                        self.assertIn("cannot delete", state.status_message)
+                        self.assertIn("cannot delete", state.interface.status_message)
                     else:
                         expected_after = before_roots[:selected_section] + before_roots[selected_section + 1 :]
                         self.assertEqual(after_roots, expected_after)
-                        selected_after = state.tree_entries[state.selected_idx]
+                        selected_after = state.workspace.entries[state.workspace.selected]
                         self.assertIsNotNone(selected_after.workspace_section)
                         assert selected_after.workspace_section is not None
                         self.assertTrue(0 <= selected_after.workspace_section < len(after_roots))
                     return
 
                 if op == "reroot_parent":
-                    selected_before = state.tree_entries[state.selected_idx]
+                    selected_before = state.workspace.entries[state.workspace.selected]
                     selected_path = selected_before.path.resolve()
                     self.assertIsNotNone(selected_before.workspace_section)
                     assert selected_before.workspace_section is not None
                     section = selected_before.workspace_section
-                    before_roots = [path.resolve() for path in state.tree_roots]
+                    before_roots = [path.resolve() for path in state.workspace.roots]
                     section_root = before_roots[section]
                     parent_root = section_root.parent.resolve()
                     expected_after = list(before_roots)
                     expected_after[section] = parent_root
                     callbacks.handle_normal_key("R", 120)
-                    after_roots = [path.resolve() for path in state.tree_roots]
+                    after_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(after_roots, expected_after)
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertEqual(selected_after.path.resolve(), selected_path)
                     self.assertEqual(selected_after.workspace_section, section)
                     return
 
                 if op == "reroot_selected":
-                    selected_before = state.tree_entries[state.selected_idx]
+                    selected_before = state.workspace.entries[state.workspace.selected]
                     selected_path = selected_before.path.resolve()
                     target_root = selected_path if selected_before.is_dir else selected_path.parent.resolve()
                     self.assertIsNotNone(selected_before.workspace_section)
                     assert selected_before.workspace_section is not None
                     section = selected_before.workspace_section
-                    before_roots = [path.resolve() for path in state.tree_roots]
+                    before_roots = [path.resolve() for path in state.workspace.roots]
                     expected_after = list(before_roots)
                     expected_after[section] = target_root
                     callbacks.handle_normal_key("r", 120)
-                    after_roots = [path.resolve() for path in state.tree_roots]
+                    after_roots = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(after_roots, expected_after)
-                    selected_after = state.tree_entries[state.selected_idx]
+                    selected_after = state.workspace.entries[state.workspace.selected]
                     self.assertEqual(selected_after.path.resolve(), selected_path)
                     self.assertEqual(selected_after.workspace_section, section)
                     return
 
                 if op == "add_delete_roundtrip":
-                    selected_before = state.tree_entries[state.selected_idx]
+                    selected_before = state.workspace.entries[state.workspace.selected]
                     target_root = (
                         selected_before.path.resolve()
                         if selected_before.is_dir
                         else selected_before.path.resolve().parent.resolve()
                     )
-                    before_roots = [path.resolve() for path in state.tree_roots]
+                    before_roots = [path.resolve() for path in state.workspace.roots]
                     callbacks.handle_normal_key("a", 120)
-                    after_add = [path.resolve() for path in state.tree_roots]
+                    after_add = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(len(after_add), len(before_roots) + 1)
                     self.assertEqual(after_add[-1], target_root)
                     last_root_idx = next(
                         idx
-                        for idx, entry in enumerate(state.tree_entries)
+                        for idx, entry in enumerate(state.workspace.entries)
                         if entry.is_dir
                         and entry.depth == 0
                         and entry.workspace_section == len(after_add) - 1
                         and entry.path.resolve() == target_root
                     )
-                    state.selected_idx = last_root_idx
+                    state.workspace.selected = last_root_idx
                     callbacks.handle_normal_key("d", 120)
-                    after_delete = [path.resolve() for path in state.tree_roots]
+                    after_delete = [path.resolve() for path in state.workspace.roots]
                     self.assertEqual(after_delete, before_roots)
                     return
 
                 if op == "ctrl_p_jump":
                     target_path = Path(str(step["target_path"])).resolve()
-                    origin_path = state.current_path.resolve()
+                    origin_path = state.workspace.current_path.resolve()
                     query = str(step["query"])
                     callbacks.tree_pane.filter_panel.toggle_mode("files")
-                    self.assertTrue(state.tree_filter_active)
-                    self.assertEqual(state.tree_filter_mode, "files")
+                    self.assertTrue(state.filter.active)
+                    self.assertEqual(state.filter.mode, "files")
                     callbacks.tree_pane.filter.apply_tree_filter_query(
                         query,
                         preview_selection=False,
@@ -1827,24 +1827,24 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     )
                     target_idx = next(
                         idx
-                        for idx, entry in enumerate(state.tree_entries)
+                        for idx, entry in enumerate(state.workspace.entries)
                         if (not entry.is_dir) and entry.path.resolve() == target_path
                     )
-                    state.selected_idx = target_idx
+                    state.workspace.selected = target_idx
                     callbacks.tree_pane.filter_panel.activate_selection()
-                    self.assertFalse(state.tree_filter_active)
-                    self.assertEqual(state.current_path.resolve(), target_path)
+                    self.assertFalse(state.filter.active)
+                    self.assertEqual(state.workspace.current_path.resolve(), target_path)
                     assert_search_undo_roundtrip(state, callbacks, origin_path, target_path)
                     return
 
                 if op == "slash_jump":
                     target_path = Path(str(step["target_path"])).resolve()
-                    origin_path = state.current_path.resolve()
+                    origin_path = state.workspace.current_path.resolve()
                     query = str(step["query"])
                     callbacks.tree_pane.filter_panel.toggle_mode("content")
-                    self.assertTrue(state.tree_filter_active)
-                    self.assertEqual(state.tree_filter_mode, "content")
-                    state.tree_filter_query = query
+                    self.assertTrue(state.filter.active)
+                    self.assertEqual(state.filter.mode, "content")
+                    state.filter.query = query
                     callbacks.tree_pane.filter.rebuild_tree_entries(
                         preferred_path=target_path,
                         force_first_file=True,
@@ -1862,36 +1862,36 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     )
                     hit_idx = next(
                         idx
-                        for idx, entry in enumerate(state.tree_entries)
+                        for idx, entry in enumerate(state.workspace.entries)
                         if entry.kind == "search_hit" and entry.path.resolve() == target_path
                     )
-                    state.selected_idx = hit_idx
+                    state.workspace.selected = hit_idx
                     callbacks.tree_pane.filter_panel.activate_selection()
-                    self.assertTrue(state.tree_filter_active)
-                    self.assertEqual(state.tree_filter_mode, "content")
-                    self.assertFalse(state.tree_filter_editing)
-                    self.assertEqual(state.current_path.resolve(), target_path)
+                    self.assertTrue(state.filter.active)
+                    self.assertEqual(state.filter.mode, "content")
+                    self.assertFalse(state.filter.editing)
+                    self.assertEqual(state.workspace.current_path.resolve(), target_path)
                     assert_search_undo_roundtrip(state, callbacks, origin_path, target_path)
                     callbacks.tree_pane.filter.close_tree_filter(clear_query=True, restore_origin=False)
-                    self.assertFalse(state.tree_filter_active)
+                    self.assertFalse(state.filter.active)
                     return
 
                 raise AssertionError(f"unknown replay operation: {op}")
 
             def build_step(state, callbacks, rng: random.Random) -> dict[str, object] | None:
                 def dir_indices() -> list[int]:
-                    return [idx for idx, entry in enumerate(state.tree_entries) if entry.is_dir]
+                    return [idx for idx, entry in enumerate(state.workspace.entries) if entry.is_dir]
 
                 def visible_dir_indices() -> list[int]:
                     tree_rows = callbacks.tree_pane.filter.tree_view_rows()
                     return [
                         idx
-                        for idx, entry in enumerate(state.tree_entries)
-                        if entry.is_dir and state.tree_start <= idx < state.tree_start + tree_rows
+                        for idx, entry in enumerate(state.workspace.entries)
+                        if entry.is_dir and state.workspace.scroll <= idx < state.workspace.scroll + tree_rows
                     ]
 
                 def file_indices() -> list[int]:
-                    return [idx for idx, entry in enumerate(state.tree_entries) if not entry.is_dir]
+                    return [idx for idx, entry in enumerate(state.workspace.entries) if not entry.is_dir]
 
                 operation_name = rng.choice(
                     (
@@ -1922,15 +1922,15 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     return {"op": operation_name, "selector": entry_selector_for_index(state, idx)}
 
                 if operation_name in {"add_root", "delete_root", "reroot_selected", "add_delete_roundtrip"}:
-                    if not state.tree_entries:
+                    if not state.workspace.entries:
                         return None
-                    idx = rng.randrange(len(state.tree_entries))
+                    idx = rng.randrange(len(state.workspace.entries))
                     return {"op": operation_name, "selector": entry_selector_for_index(state, idx)}
 
                 if operation_name == "reroot_parent":
                     candidates: list[int] = []
-                    roots = [path.resolve() for path in state.tree_roots]
-                    for idx, entry in enumerate(state.tree_entries):
+                    roots = [path.resolve() for path in state.workspace.roots]
+                    for idx, entry in enumerate(state.workspace.entries):
                         if entry.workspace_section is None:
                             continue
                         section = entry.workspace_section
@@ -1953,7 +1953,7 @@ class AppRuntimeMultiRootRegressionTests(unittest.TestCase):
                     if not files:
                         return None
                     idx = rng.choice(files)
-                    target_path = state.tree_entries[idx].path.resolve()
+                    target_path = state.workspace.entries[idx].path.resolve()
                     query = target_path.name
                     return {
                         "op": operation_name,

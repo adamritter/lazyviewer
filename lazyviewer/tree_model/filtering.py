@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from ..search.content import ContentMatch
-from .build import safe_file_size
+from ..workspace.tree import safe_file_size
 from .types import TreeEntry
 
 

@@ -6,33 +6,23 @@ Also checks newly created ignored paths are filtered without manual cache resets
 
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
-from lazyviewer.search.fuzzy import clear_project_files_cache, collect_project_files, to_project_relative
+from lazyviewer.workspace import collect_root_file_labels
 from lazyviewer.gitignore import clear_gitignore_cache
-from lazyviewer.source_pane import SourcePane
+from lazyviewer.preview import DirectoryDocument, PreviewRequest, PreviewService
 from lazyviewer.tree_model import build_tree_entries
-
-ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
-
-
-def strip_ansi(text: str) -> str:
-    return ANSI_RE.sub("", text)
-
 
 @unittest.skipIf(shutil.which("git") is None, "git is required for gitignore integration tests")
 class GitignoreIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
-        clear_project_files_cache()
         clear_gitignore_cache()
 
     def tearDown(self) -> None:
-        clear_project_files_cache()
         clear_gitignore_cache()
 
     def _init_repo(self, root: Path) -> None:
@@ -49,8 +39,7 @@ class GitignoreIntegrationTests(unittest.TestCase):
             root = Path(tmp)
             self._init_repo(root)
 
-            files = collect_project_files(root, show_hidden=True, skip_gitignored=True)
-            labels = {to_project_relative(path, root) for path in files}
+            labels = set(collect_root_file_labels(root, show_hidden=True, skip_gitignored=True))
 
             self.assertIn("visible.txt", labels)
             self.assertIn(".hidden.txt", labels)
@@ -80,24 +69,26 @@ class GitignoreIntegrationTests(unittest.TestCase):
             self.assertNotIn("ignored_dir", labels)
             self.assertNotIn("ignored_dir/inside.txt", labels)
 
-    def test_build_directory_preview_skips_gitignored_when_requested(self) -> None:
+    def test_preview_service_skips_gitignored_when_requested(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._init_repo(root)
 
-            rendered, _truncated = SourcePane.build_directory_preview(
+            document = PreviewService().load(PreviewRequest.create(
                 root,
+                workspace_revision="test",
                 show_hidden=True,
-                max_depth=3,
-                max_entries=200,
                 skip_gitignored=True,
-            )
-            plain = strip_ansi(rendered)
+                directory_max_depth=3,
+                directory_max_entries=200,
+            ))
+            self.assertIsInstance(document, DirectoryDocument)
+            labels = {row.path.name for row in document.rows}
 
-            self.assertIn("visible.txt", plain)
-            self.assertIn(".hidden.txt", plain)
-            self.assertNotIn("ignored.txt", plain)
-            self.assertNotIn("ignored_dir", plain)
+            self.assertIn("visible.txt", labels)
+            self.assertIn(".hidden.txt", labels)
+            self.assertNotIn("ignored.txt", labels)
+            self.assertNotIn("ignored_dir", labels)
 
     def test_newly_created_ignored_dirs_are_filtered_without_manual_cache_clear(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

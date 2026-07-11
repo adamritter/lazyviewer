@@ -11,10 +11,9 @@ from lazyviewer.source_pane.diff import _ADDED_BG_SGR, _apply_line_background
 from lazyviewer.render import (
     build_status_line,
     help_panel_row_count,
-    render_dual_page,
 )
 from lazyviewer.tree_model import TreeEntry
-
+from tests.render_capture import render_dual_page
 
 class RenderStatusCoreTests(unittest.TestCase):
     def test_help_panel_row_count_leaves_content_space(self) -> None:
@@ -50,7 +49,7 @@ class RenderStatusCoreTests(unittest.TestCase):
             writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=["x" * 40],
                 text_start=0,
@@ -81,7 +80,7 @@ class RenderStatusCoreTests(unittest.TestCase):
             writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=["x" * 80],
                 text_start=0,
@@ -112,7 +111,7 @@ class RenderStatusCoreTests(unittest.TestCase):
             writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=["line 1", "line 2"],
                 text_start=0,
@@ -143,7 +142,7 @@ class RenderStatusCoreTests(unittest.TestCase):
             writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=["line 1", "line 2"],
                 text_start=0,
@@ -176,7 +175,7 @@ class RenderStatusCoreTests(unittest.TestCase):
             return len(data)
 
         diff_line = _apply_line_background("abcdef", _ADDED_BG_SGR)
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=[diff_line],
                 text_start=0,
@@ -211,7 +210,7 @@ class RenderStatusCoreTests(unittest.TestCase):
             return len(data)
 
         diff_line = _apply_line_background("abcdef", _ADDED_BG_SGR)
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=[diff_line],
                 text_start=0,
@@ -245,7 +244,7 @@ class RenderStatusCoreTests(unittest.TestCase):
             writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=["line 1", "line 2", "line 3", "line 4"],
                 text_start=0,
@@ -278,7 +277,7 @@ class RenderStatusCoreTests(unittest.TestCase):
             writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=["line 1", "line 2", "line 3", "line 4"],
                 text_start=0,
@@ -313,7 +312,7 @@ class RenderStatusCoreTests(unittest.TestCase):
             writes.append(data)
             return len(data)
 
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=["line 1", "line 2", "line 3", "line 4"],
                 text_start=0,
@@ -357,7 +356,7 @@ class RenderStatusCoreTests(unittest.TestCase):
             mock.patch("lazyviewer.render.help.HELP_PANEL_TREE_LINES", tree_help),
             mock.patch("lazyviewer.render.help.HELP_PANEL_TEXT_LINES", text_help),
             mock.patch("lazyviewer.render.help.HELP_PANEL_TEXT_ONLY_LINES", text_only_help),
-            mock.patch("lazyviewer.render.os.write", side_effect=capture),
+            mock.patch("tests.render_capture.os.write", side_effect=capture),
         ):
             render_dual_page(
                 text_lines=["line 1", "line 2", "line 3"],
@@ -412,7 +411,7 @@ class RenderStatusCoreTests(unittest.TestCase):
         root = Path("/tmp").resolve()
         nested = (root / "nested").resolve()
         tree_entries = [TreeEntry(path=nested, depth=0, is_dir=True)]
-        with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+        with mock.patch("tests.render_capture.os.write", side_effect=capture):
             render_dual_page(
                 text_lines=["line 1"],
                 text_start=0,

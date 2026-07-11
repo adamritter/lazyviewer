@@ -1,20 +1,15 @@
-"""Tree-row projection built from ``file_tree_model`` domain entries."""
+"""Tree-row projection built from canonical workspace domain entries."""
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from pathlib import Path
 
-from ..file_tree_model.fs import (
-    DirectoryChild,
+from ..workspace.tree import (
+    DirectoryEntry,
+    FileEntry,
     build_file_tree,
-    list_directory_children,
-    maybe_gitignore_matcher,
-    safe_file_size,
-    safe_mtime_ns,
 )
-from ..file_tree_model.types import DirectoryEntry, FileEntry
 from .types import TreeEntry
 
 

@@ -7,8 +7,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.source_pane.rendering import sticky_symbol_headers_for_position
-from lazyviewer.render import render_dual_page
+from lazyviewer.source_pane.sticky import sticky_symbol_headers_for_position
+from tests.render_capture import render_dual_page
 
 def _sticky_case(
     source: str,
@@ -52,7 +52,7 @@ class RenderStatusStickyTestsPart1(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "demo.py"
             path.write_text(source, encoding="utf-8")
-            with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            with mock.patch("tests.render_capture.os.write", side_effect=capture):
                 render_dual_page(
                     text_lines=text_lines,
                     text_start=2,
@@ -97,7 +97,7 @@ class RenderStatusStickyTestsPart1(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "demo.py"
             path.write_text(source, encoding="utf-8")
-            with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            with mock.patch("tests.render_capture.os.write", side_effect=capture):
                 render_dual_page(
                     text_lines=text_lines,
                     text_start=4,
@@ -155,7 +155,7 @@ class RenderStatusStickyTestsPart1(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "demo.py"
             path.write_text(source, encoding="utf-8")
-            with mock.patch("lazyviewer.render.os.write", side_effect=capture):
+            with mock.patch("tests.render_capture.os.write", side_effect=capture):
                 render_dual_page(
                     text_lines=text_lines,
                     text_start=4,
@@ -210,7 +210,7 @@ class RenderStatusStickyTestsPart1(unittest.TestCase):
         text_lines = diff_lines
         diff_lookup_calls = {"count": 0}
 
-        import lazyviewer.source_pane.rendering as preview_rendering_mod
+        import lazyviewer.source_pane.sticky as preview_rendering_mod
 
         original_source_line_raw_text = preview_rendering_mod.source_line_raw_text
 
@@ -233,10 +233,10 @@ class RenderStatusStickyTestsPart1(unittest.TestCase):
             path = Path(tmp) / "big.py"
             path.write_text(source, encoding="utf-8")
             with mock.patch(
-                "lazyviewer.source_pane.rendering.source_line_raw_text",
+                "lazyviewer.source_pane.sticky.source_line_raw_text",
                 side_effect=counting_source_line_raw_text,
             ), mock.patch(
-                "lazyviewer.render.os.write", side_effect=capture
+                "tests.render_capture.os.write", side_effect=capture
             ):
                 render_dual_page(
                     text_lines=text_lines,
@@ -290,7 +290,7 @@ class RenderStatusStickyTestsPart1(unittest.TestCase):
                 writes_scrolled_2.append(data)
                 return len(data)
 
-            with mock.patch("lazyviewer.render.os.write", side_effect=capture_top):
+            with mock.patch("tests.render_capture.os.write", side_effect=capture_top):
                 render_dual_page(
                     text_lines=text_lines,
                     text_start=0,
@@ -309,7 +309,7 @@ class RenderStatusStickyTestsPart1(unittest.TestCase):
                     show_hidden=False,
                 )
 
-            with mock.patch("lazyviewer.render.os.write", side_effect=capture_scrolled_1):
+            with mock.patch("tests.render_capture.os.write", side_effect=capture_scrolled_1):
                 render_dual_page(
                     text_lines=text_lines,
                     text_start=1,
@@ -328,7 +328,7 @@ class RenderStatusStickyTestsPart1(unittest.TestCase):
                     show_hidden=False,
                 )
 
-            with mock.patch("lazyviewer.render.os.write", side_effect=capture_scrolled_2):
+            with mock.patch("tests.render_capture.os.write", side_effect=capture_scrolled_2):
                 render_dual_page(
                     text_lines=text_lines,
                     text_start=2,

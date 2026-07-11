@@ -6,7 +6,6 @@ These tests ensure runtime callbacks and state orchestration stay coherent.
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import tempfile
@@ -15,16 +14,6 @@ import unittest
 from unittest import mock
 
 from lazyviewer.runtime import app as app_runtime
-from lazyviewer.render.ansi import ANSI_ESCAPE_RE
-from lazyviewer.runtime.screen import (
-    _centered_scroll_start,
-    _first_git_change_screen_line,
-    _tree_order_key_for_relative_path,
-)
-from lazyviewer.git_status import GIT_STATUS_CHANGED
-from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.render import help_panel_row_count, render_dual_page
-from lazyviewer.search.content import ContentMatch
 
 
 def _callback(kwargs: dict[str, object], name: str):
@@ -87,16 +76,16 @@ class AppRuntimeSessionTestsPart2(unittest.TestCase):
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
                 handle_normal_key = _callback(kwargs, "handle_normal_key")
-                before = {entry.path.resolve() for entry in state.tree_entries}
+                before = {entry.path.resolve() for entry in state.workspace.entries}
                 snapshots["before_has_created"] = created.resolve() in before
                 handle_normal_key("e", 120)
-                after = {entry.path.resolve() for entry in state.tree_entries}
+                after = {entry.path.resolve() for entry in state.workspace.entries}
                 snapshots["after_has_created"] = created.resolve() in after
-                snapshots["current_path"] = state.current_path.resolve()
+                snapshots["current_path"] = state.workspace.current_path.resolve()
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.launch_editor", side_effect=fake_launch_editor
             ), mock.patch("lazyviewer.runtime.app.os.isatty", return_value=True), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
@@ -169,26 +158,26 @@ class AppRuntimeSessionTestsPart2(unittest.TestCase):
                 tick_source_selection_drag = _callback(kwargs, "tick_source_selection_drag")
 
                 def assert_state_coherent() -> None:
-                    self.assertTrue(state.tree_entries)
-                    self.assertGreaterEqual(state.selected_idx, 0)
-                    self.assertLess(state.selected_idx, len(state.tree_entries))
-                    self.assertGreaterEqual(state.tree_start, 0)
-                    self.assertLessEqual(state.tree_start, max(0, len(state.tree_entries) - 1))
-                    self.assertGreaterEqual(state.start, 0)
-                    self.assertGreaterEqual(state.max_start, 0)
-                    self.assertLessEqual(state.start, state.max_start)
-                    self.assertGreaterEqual(state.text_x, 0)
-                    self.assertTrue(state.current_path.resolve().exists())
+                    self.assertTrue(state.workspace.entries)
+                    self.assertGreaterEqual(state.workspace.selected, 0)
+                    self.assertLess(state.workspace.selected, len(state.workspace.entries))
+                    self.assertGreaterEqual(state.workspace.scroll, 0)
+                    self.assertLessEqual(state.workspace.scroll, max(0, len(state.workspace.entries) - 1))
+                    self.assertGreaterEqual(state.preview.scroll, 0)
+                    self.assertGreaterEqual(state.preview.max_scroll, 0)
+                    self.assertLessEqual(state.preview.scroll, state.preview.max_scroll)
+                    self.assertGreaterEqual(state.preview.horizontal_scroll, 0)
+                    self.assertTrue(state.workspace.current_path.resolve().exists())
 
                 refresh_git_status_overlay(force=True)
                 assert_state_coherent()
                 transitions = 0
 
                 for idx in range(90):
-                    handle_tree_mouse_wheel(f"MOUSE_WHEEL_DOWN:{state.left_width + 2}:1")
-                    handle_tree_mouse_wheel(f"MOUSE_WHEEL_UP:{state.left_width + 2}:1")
-                    handle_tree_mouse_wheel(f"MOUSE_WHEEL_RIGHT:{state.left_width + 2}:1")
-                    handle_tree_mouse_wheel(f"MOUSE_WHEEL_LEFT:{state.left_width + 2}:1")
+                    handle_tree_mouse_wheel(f"MOUSE_WHEEL_DOWN:{state.layout.left_width + 2}:1")
+                    handle_tree_mouse_wheel(f"MOUSE_WHEEL_UP:{state.layout.left_width + 2}:1")
+                    handle_tree_mouse_wheel(f"MOUSE_WHEEL_RIGHT:{state.layout.left_width + 2}:1")
+                    handle_tree_mouse_wheel(f"MOUSE_WHEEL_LEFT:{state.layout.left_width + 2}:1")
                     handle_normal_key("DOWN", 120)
                     handle_normal_key("UP", 120)
                     transitions += 6
@@ -224,11 +213,11 @@ class AppRuntimeSessionTestsPart2(unittest.TestCase):
                         transitions += 6
 
                     if idx == 30:
-                        if not state.browser_visible:
+                        if not state.layout.browser_visible:
                             handle_normal_key("t", 120)
                             transitions += 1
-                        right_start_col = state.left_width + 2
-                        right_edge_col = right_start_col + state.right_width - 1
+                        right_start_col = state.layout.left_width + 2
+                        right_edge_col = right_start_col + state.layout.right_width - 1
                         handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 3}:2")
                         handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_edge_col}:2")
                         if tick_source_selection_drag is not None:
@@ -241,14 +230,14 @@ class AppRuntimeSessionTestsPart2(unittest.TestCase):
                     assert_state_coherent()
 
                 snapshots["transitions"] = transitions
-                snapshots["final_start"] = state.start
-                snapshots["final_text_x"] = state.text_x
-                snapshots["final_path"] = state.current_path.resolve()
+                snapshots["final_start"] = state.preview.scroll
+                snapshots["final_text_x"] = state.preview.horizontal_scroll
+                snapshots["final_path"] = state.workspace.current_path.resolve()
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=fake_search_content
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
+                "lazyviewer.search.service.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch(
                 "lazyviewer.runtime.app._copy_text_to_clipboard", return_value=True
             ), mock.patch(

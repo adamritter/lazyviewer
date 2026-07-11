@@ -7,9 +7,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.tree_model import clear_doc_summary_cache
-from lazyviewer.tree_model.doc_summary import cached_top_file_doc_summary
-import lazyviewer.tree_model.doc_summary as doc_summary
+from lazyviewer.workspace import clear_doc_summary_cache
+from lazyviewer.workspace.doc_summary import cached_top_file_doc_summary
+import lazyviewer.workspace.doc_summary as doc_summary
 
 
 class DocSummaryCacheTests(unittest.TestCase):

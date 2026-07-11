@@ -6,17 +6,32 @@ All access is defensive: malformed or missing config falls back safely.
 
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
 
-from platformdirs import user_config_dir
-
-from .navigation import JumpLocation, is_named_mark_key
+from ..session.navigation import JumpLocation, is_named_mark_key
 
 APP_NAME = "lazyviewer"
 CONFIG_FILENAME = "config.json"
-DEFAULT_CONFIG_PATH = Path(user_config_dir(APP_NAME, appauthor=False)) / CONFIG_FILENAME
 LEGACY_CONFIG_PATH = Path.home() / ".config" / "lazyviewer.json"
+
+
+def _resolve_default_config_path() -> Path:
+    """Resolve the native config path, tolerating source-run environments.
+
+    When ``lazyviewer.py`` is executed directly from a checkout, declared
+    package dependencies may not be installed into that interpreter. Fall back
+    to the conventional XDG-style location instead of failing at import time.
+    """
+    try:
+        platformdirs = importlib.import_module("platformdirs")
+    except ModuleNotFoundError:
+        return Path.home() / ".config" / APP_NAME / CONFIG_FILENAME
+    return Path(platformdirs.user_config_dir(APP_NAME, appauthor=False)) / CONFIG_FILENAME
+
+
+DEFAULT_CONFIG_PATH = _resolve_default_config_path()
 CONFIG_PATH = DEFAULT_CONFIG_PATH
 
 

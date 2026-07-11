@@ -6,10 +6,8 @@ Rendering helpers here are presentation-only and side-effect free.
 
 from __future__ import annotations
 
-import os
-import sys
-
 from .ansi import clip_ansi_line
+from .frame import Frame
 from ..ui_theme import DEFAULT_THEME, UITheme
 
 HELP_PANEL_TREE_LINES: tuple[str, ...] = (
@@ -179,7 +177,7 @@ def help_panel_row_count(
     return min(required_rows, max_lines - 1)
 
 
-def render_help_page(width: int, height: int, theme: UITheme | None = None) -> None:
+def render_help_page(width: int, height: int, theme: UITheme | None = None) -> Frame:
     """Render the full-screen modal help page directly to stdout."""
     active_theme = theme or DEFAULT_THEME
     out: list[str] = []
@@ -267,4 +265,4 @@ def render_help_page(width: int, height: int, theme: UITheme | None = None) -> N
         out.append(text)
         out.append(active_theme.reset)
 
-    os.write(sys.stdout.fileno(), "".join(out).encode("utf-8", errors="replace"))
+    return Frame("".join(out))

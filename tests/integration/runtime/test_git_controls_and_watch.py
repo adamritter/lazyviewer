@@ -6,7 +6,6 @@ These tests ensure runtime callbacks and state orchestration stay coherent.
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import tempfile
@@ -15,16 +14,6 @@ import unittest
 from unittest import mock
 
 from lazyviewer.runtime import app as app_runtime
-from lazyviewer.render.ansi import ANSI_ESCAPE_RE
-from lazyviewer.runtime.screen import (
-    _centered_scroll_start,
-    _first_git_change_screen_line,
-    _tree_order_key_for_relative_path,
-)
-from lazyviewer.git_status import GIT_STATUS_CHANGED
-from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.render import help_panel_row_count, render_dual_page
-from lazyviewer.search.content import ContentMatch
 
 
 def _callback(kwargs: dict[str, object], name: str):
@@ -85,24 +74,22 @@ class AppRuntimeGitTestsPart2(unittest.TestCase):
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
                 maybe_refresh_git_watch = _callback(kwargs, "maybe_refresh_git_watch")
-                snapshots["before_commit"] = state.rendered
+                snapshots["before_commit"] = state.preview.rendered
 
                 subprocess.run(["git", "add", "-A"], cwd=root, check=True)
                 subprocess.run(["git", "commit", "-q", "-m", "after-edit"], cwd=root, check=True)
                 maybe_refresh_git_watch()
 
-                snapshots["after_commit"] = state.rendered
+                snapshots["after_commit"] = state.preview.rendered
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
                 "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
             ), mock.patch("lazyviewer.runtime.app.load_show_hidden", return_value=False), mock.patch(
                 "lazyviewer.runtime.app.load_left_pane_percent", return_value=None
-            ), mock.patch(
-                "lazyviewer.runtime.app.GIT_WATCH_POLL_SECONDS", 0.0
             ), mock.patch(
                 "lazyviewer.runtime.app.GIT_STATUS_REFRESH_SECONDS", 0.0
             ):
@@ -144,7 +131,7 @@ class AppRuntimeGitTestsPart2(unittest.TestCase):
 
                 def current_labels() -> set[str]:
                     labels: set[str] = set()
-                    for entry in state.tree_entries:
+                    for entry in state.workspace.entries:
                         resolved = entry.path.resolve()
                         if resolved == root:
                             labels.add(".")
@@ -158,7 +145,7 @@ class AppRuntimeGitTestsPart2(unittest.TestCase):
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch("lazyviewer.runtime.app.sys.stdin.fileno", return_value=0), mock.patch(
                 "lazyviewer.runtime.app.sys.stdout.fileno", return_value=1
@@ -200,16 +187,16 @@ class AppRuntimeGitTestsPart2(unittest.TestCase):
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
                 handle_normal_key = _callback(kwargs, "handle_normal_key")
-                snapshots["before_ctrl_o"] = state.git_features_enabled
+                snapshots["before_ctrl_o"] = state.git.enabled
                 handle_normal_key("CTRL_O", 120)
-                snapshots["after_ctrl_o"] = state.git_features_enabled
+                snapshots["after_ctrl_o"] = state.git.enabled
                 handle_normal_key("CTRL_G", 120)
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.shutil.which", return_value="/usr/local/bin/lazygit"
-            ), mock.patch("lazyviewer.runtime.app.subprocess.run") as lazygit_run, mock.patch(
+            ), mock.patch("lazyviewer.runtime.app_helpers.subprocess.run") as lazygit_run, mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0

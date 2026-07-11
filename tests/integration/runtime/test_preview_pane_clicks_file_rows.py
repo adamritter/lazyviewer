@@ -6,9 +6,6 @@ These tests ensure runtime callbacks and state orchestration stay coherent.
 
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 import unittest
@@ -16,15 +13,7 @@ from unittest import mock
 
 from lazyviewer.runtime import app as app_runtime
 from lazyviewer.render.ansi import ANSI_ESCAPE_RE
-from lazyviewer.runtime.screen import (
-    _centered_scroll_start,
-    _first_git_change_screen_line,
-    _tree_order_key_for_relative_path,
-)
 from lazyviewer.git_status import GIT_STATUS_CHANGED
-from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.render import help_panel_row_count, render_dual_page
-from lazyviewer.search.content import ContentMatch
 
 
 def _callback(kwargs: dict[str, object], name: str):
@@ -77,11 +66,11 @@ class AppRuntimePreviewClickTestsPart2(unittest.TestCase):
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
                 handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
-                right_start_col = state.left_width + 2
+                right_start_col = state.layout.left_width + 2
 
                 target_row = None
-                for idx, line in enumerate(state.lines):
-                    plain = app_runtime.ANSI_ESCAPE_RE.sub("", line)
+                for idx, line in enumerate(state.preview.lines):
+                    plain = ANSI_ESCAPE_RE.sub("", line)
                     if "README.md" in plain:
                         target_row = idx + 1
                         break
@@ -91,12 +80,12 @@ class AppRuntimePreviewClickTestsPart2(unittest.TestCase):
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 3}:{target_row}")
                 handle_tree_mouse_click(f"MOUSE_LEFT_UP:{right_start_col + 3}:{target_row}")
 
-                snapshots["current_path"] = state.current_path.resolve()
-                snapshots["selected_path"] = state.tree_entries[state.selected_idx].path.resolve()
+                snapshots["current_path"] = state.workspace.current_path.resolve()
+                snapshots["selected_path"] = state.workspace.entries[state.workspace.selected].path.resolve()
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
@@ -135,11 +124,11 @@ class AppRuntimePreviewClickTestsPart2(unittest.TestCase):
             def fake_run_main_loop(**kwargs) -> None:
                 state = kwargs["state"]
                 handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
-                right_start_col = state.left_width + 2
+                right_start_col = state.layout.left_width + 2
 
                 target_row = None
-                for idx, line in enumerate(state.lines):
-                    plain = app_runtime.ANSI_ESCAPE_RE.sub("", line)
+                for idx, line in enumerate(state.preview.lines):
+                    plain = ANSI_ESCAPE_RE.sub("", line)
                     if "└─ app_runtime.py" in plain or "├─ app_runtime.py" in plain:
                         if "lazyviewer" in plain:
                             # This line is likely the nested one in narrow panes.
@@ -153,12 +142,12 @@ class AppRuntimePreviewClickTestsPart2(unittest.TestCase):
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 3}:{target_row}")
                 handle_tree_mouse_click(f"MOUSE_LEFT_UP:{right_start_col + 3}:{target_row}")
 
-                snapshots["current_path"] = state.current_path.resolve()
-                snapshots["selected_path"] = state.tree_entries[state.selected_idx].path.resolve()
+                snapshots["current_path"] = state.workspace.current_path.resolve()
+                snapshots["selected_path"] = state.workspace.entries[state.workspace.selected].path.resolve()
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
@@ -196,13 +185,13 @@ class AppRuntimePreviewClickTestsPart2(unittest.TestCase):
                 state = kwargs["state"]
                 handle_tree_mouse_click = _callback(kwargs, "handle_tree_mouse_click")
                 refresh_git_status_overlay = _callback(kwargs, "refresh_git_status_overlay")
-                right_start_col = state.left_width + 2
+                right_start_col = state.layout.left_width + 2
 
                 refresh_git_status_overlay(force=True)
 
                 target_row = None
-                for idx, line in enumerate(state.lines):
-                    plain = app_runtime.ANSI_ESCAPE_RE.sub("", line)
+                for idx, line in enumerate(state.preview.lines):
+                    plain = ANSI_ESCAPE_RE.sub("", line)
                     if "app_runtime.py" in plain and "[M]" in plain and ("│  " in plain or "   " in plain):
                         target_row = idx + 1
                         break
@@ -212,14 +201,14 @@ class AppRuntimePreviewClickTestsPart2(unittest.TestCase):
                 handle_tree_mouse_click(f"MOUSE_LEFT_DOWN:{right_start_col + 3}:{target_row}")
                 handle_tree_mouse_click(f"MOUSE_LEFT_UP:{right_start_col + 3}:{target_row}")
 
-                snapshots["current_path"] = state.current_path.resolve()
-                snapshots["selected_path"] = state.tree_entries[state.selected_idx].path.resolve()
+                snapshots["current_path"] = state.workspace.current_path.resolve()
+                snapshots["selected_path"] = state.workspace.entries[state.workspace.selected].path.resolve()
 
             overlay = {target_file.resolve(): GIT_STATUS_CHANGED, nested_dir.resolve(): GIT_STATUS_CHANGED}
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.runtime.app.collect_git_status_overlay", return_value=overlay
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
+                "lazyviewer.workspace.service.collect_git_status_overlay", return_value=overlay
             ), mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from ..runtime.state import AppState
+from ..session import SessionState
 
 
-def effective_max_start(state: AppState, visible_rows: int) -> int:
+def effective_max_start(state: SessionState, visible_rows: int) -> int:
     """Return max valid vertical scroll offset for current rendered lines."""
-    return max(0, len(state.lines) - max(1, visible_rows))
+    return max(0, len(state.preview.lines) - max(1, visible_rows))
 
 
 def parse_mouse_col_row(mouse_key: str) -> tuple[int | None, int | None]:

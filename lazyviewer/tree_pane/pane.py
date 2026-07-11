@@ -1,43 +1,44 @@
-"""Tree pane runtime façade used by the application layer."""
+"""Tree-pane controller composition."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 import time
 
-from ..runtime.state import AppState
+from ..session import SessionState
+from ..ports import (
+    PreviewSelectedEntry,
+    RebuildScreenLines,
+    RefreshGitStatus,
+    RefreshPreview,
+)
 from .events import TreePaneMouseHandlers
 from .panels.filter import TreeFilterController
 from .panels.picker import NavigationController
-from .sync import PreviewSelection, TreeRefreshSync
-from .watch import WatchRefreshContext, refresh_git_status_overlay
+from ..search import SearchService
 
 
 class TreePane:
     """App-owned tree pane object exposing filter, navigation, and mouse ops."""
 
-    WatchRefreshContext = WatchRefreshContext
-    PreviewSelection = PreviewSelection
-    TreeRefreshSync = TreeRefreshSync
-    refresh_git_status_overlay = staticmethod(refresh_git_status_overlay)
-
     def __init__(
         self,
         *,
-        state: AppState,
+        state: SessionState,
         command_palette_items: tuple[tuple[str, str], ...],
         visible_content_rows: Callable[[], int],
-        rebuild_screen_lines: Callable[..., None],
-        preview_selected_entry: Callable[..., None],
+        rebuild_screen_lines: RebuildScreenLines,
+        preview_selected_entry: PreviewSelectedEntry,
         schedule_tree_filter_index_warmup: Callable[[], None],
         mark_tree_watch_dirty: Callable[[], None],
         reset_git_watch_context: Callable[[], None],
-        refresh_git_status_overlay: Callable[..., None],
-        refresh_rendered_for_current_path: Callable[..., None],
+        refresh_git_status_overlay: RefreshGitStatus,
+        refresh_rendered_for_current_path: RefreshPreview,
         copy_text_to_clipboard: Callable[[str], bool],
         double_click_seconds: float,
         monotonic: Callable[[], float] = time.monotonic,
         on_tree_filter_state_change: Callable[[], None] | None = None,
+        search_service: SearchService,
     ) -> None:
         self.state = state
         self.filter = TreeFilterController(
@@ -50,6 +51,7 @@ class TreePane:
             jump_to_path=lambda target: self.navigation.jump_to_path(target),
             jump_to_line=lambda line_number: self.navigation.jump_to_line(line_number),
             on_tree_filter_state_change=on_tree_filter_state_change,
+            search_service=search_service,
         )
         self.navigation = NavigationController(
             state=state,

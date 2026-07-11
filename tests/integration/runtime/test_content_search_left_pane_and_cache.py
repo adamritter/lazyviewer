@@ -7,23 +7,13 @@ These tests ensure runtime callbacks and state orchestration stay coherent.
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 import unittest
 from unittest import mock
 
 from lazyviewer.runtime import app as app_runtime
-from lazyviewer.render.ansi import ANSI_ESCAPE_RE
-from lazyviewer.runtime.screen import (
-    _centered_scroll_start,
-    _first_git_change_screen_line,
-    _tree_order_key_for_relative_path,
-)
-from lazyviewer.git_status import GIT_STATUS_CHANGED
-from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.render import help_panel_row_count, render_dual_page
+from lazyviewer.render import help_panel_row_count
 from lazyviewer.search.content import ContentMatch
 
 
@@ -97,31 +87,31 @@ class AppRuntimeContentSearchTestsPart2(unittest.TestCase):
 
                 open_tree_filter("content")
                 apply_tree_filter_query("line", preview_selection=True, select_first_file=True)
-                before_help_start = state.start
+                before_help_start = state.preview.scroll
 
                 handle_normal_key("?", 120)
 
-                selected_entry = state.tree_entries[state.selected_idx]
+                selected_entry = state.workspace.entries[state.workspace.selected]
                 selected_line = (selected_entry.line or 1) - 1
                 help_rows = help_panel_row_count(
-                    state.usable,
-                    state.show_help,
-                    browser_visible=state.browser_visible,
-                    tree_filter_active=state.tree_filter_active,
-                    tree_filter_mode=state.tree_filter_mode,
-                    tree_filter_editing=state.tree_filter_editing,
+                    state.layout.usable_rows,
+                    state.layout.show_help,
+                    browser_visible=state.layout.browser_visible,
+                    tree_filter_active=state.filter.active,
+                    tree_filter_mode=state.filter.mode,
+                    tree_filter_editing=state.filter.editing,
                 )
-                visible_rows = max(1, state.usable - help_rows)
+                visible_rows = max(1, state.layout.usable_rows - help_rows)
                 snapshots["before_help_start"] = before_help_start
-                snapshots["after_help_start"] = state.start
+                snapshots["after_help_start"] = state.preview.scroll
                 snapshots["selected_line"] = selected_line
                 snapshots["visible_rows"] = visible_rows
-                snapshots["show_help"] = state.show_help
+                snapshots["show_help"] = state.layout.show_help
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=fake_search_content
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
+                "lazyviewer.search.service.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch("lazyviewer.runtime.app.os.isatty", return_value=True), mock.patch(
                 "lazyviewer.runtime.app.sys.stdin.fileno", return_value=0
             ), mock.patch(
@@ -171,22 +161,22 @@ class AppRuntimeContentSearchTestsPart2(unittest.TestCase):
                 close_tree_filter = _callback(kwargs, "close_tree_filter")
                 save_left_pane_width = _callback(kwargs, "save_left_pane_width")
 
-                snapshots["initial_left"] = state.left_width
-                save_left_pane_width(100, state.left_width)
+                snapshots["initial_left"] = state.layout.left_width
+                save_left_pane_width(100, state.layout.left_width)
 
                 open_tree_filter("content")
                 apply_tree_filter_query("needle", preview_selection=False, select_first_file=True)
-                snapshots["content_left"] = state.left_width
-                save_left_pane_width(100, state.left_width)
+                snapshots["content_left"] = state.layout.left_width
+                save_left_pane_width(100, state.layout.left_width)
 
                 close_tree_filter(clear_query=True)
-                snapshots["restored_left"] = state.left_width
-                save_left_pane_width(100, state.left_width)
+                snapshots["restored_left"] = state.layout.left_width
+                save_left_pane_width(100, state.layout.left_width)
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=fake_search_content
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
+                "lazyviewer.search.service.search_project_content_rg", side_effect=fake_search_content
             ), mock.patch("lazyviewer.runtime.app.shutil.get_terminal_size", return_value=os.terminal_size((100, 24))), mock.patch(
                 "lazyviewer.runtime.app.load_left_pane_percent", return_value=30.0
             ), mock.patch(
@@ -240,8 +230,8 @@ class AppRuntimeContentSearchTestsPart2(unittest.TestCase):
 
             with mock.patch("lazyviewer.runtime.app.run_main_loop", side_effect=fake_run_main_loop), mock.patch(
                 "lazyviewer.runtime.app.TerminalController", _FakeTerminalController
-            ), mock.patch("lazyviewer.runtime.app.collect_project_file_labels", return_value=[]), mock.patch(
-                "lazyviewer.tree_pane.panels.filter.matching.search_project_content_rg", side_effect=fake_search_content
+            ), mock.patch("lazyviewer.runtime.app.WorkspaceIndexWarmup.schedule", return_value=None), mock.patch(
+                "lazyviewer.search.service.search_project_content_rg", side_effect=fake_search_content
             ) as search_mock, mock.patch(
                 "lazyviewer.runtime.app.os.isatty", return_value=True
             ), mock.patch(

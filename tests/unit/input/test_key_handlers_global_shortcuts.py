@@ -6,47 +6,40 @@ Keeps keybinding regressions isolated from full runtime integration tests.
 
 from __future__ import annotations
 
-import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from lazyviewer.input import (
     NormalKeyContext,
     handle_normal_key,
-    handle_picker_key,
 )
-from lazyviewer.runtime.navigation import JumpLocation
-from lazyviewer.runtime.state import AppState
+from lazyviewer.tree_pane.panels.picker.panel import PickerPanel
+from lazyviewer.session.navigation import JumpLocation
+from lazyviewer.session import LayoutState, PreviewViewState, SessionState, WorkspaceViewState
 from lazyviewer.tree_model import TreeEntry
 
 
-def _make_state() -> AppState:
+def handle_picker_key(key, state, seconds, **operations):
+    return PickerPanel(SimpleNamespace(state=state, **operations)).handle_key(key, seconds)
+
+
+def _make_state() -> SessionState:
     root = Path("/tmp").resolve()
-    return AppState(
-        current_path=root,
-        tree_root=root,
-        expanded={root},
-        show_hidden=False,
-        tree_entries=[TreeEntry(path=root, depth=0, is_dir=True)],
-        selected_idx=0,
-        rendered="",
-        lines=[],
-        start=0,
-        tree_start=0,
-        text_x=0,
-        wrap_text=False,
-        left_width=24,
-        right_width=80,
-        usable=24,
-        max_start=0,
-        last_right_width=80,
+    return SessionState(
+        workspace=WorkspaceViewState(
+            current_path=root, active_root=root, expanded={root}, show_hidden=False,
+            entries=[TreeEntry(path=root, depth=0, is_dir=True)], selected=0,
+        ),
+        preview=PreviewViewState(rendered="", lines=[]),
+        layout=LayoutState(left_width=24, right_width=80, usable_rows=24, last_right_width=80),
     )
 
 class KeyHandlersBehaviorTestsPart1(unittest.TestCase):
     def _invoke(
         self,
         *,
-        state: AppState,
+        state: SessionState,
         key: str,
         toggle_git_features,
         jump_to_next_git_modified,
@@ -58,10 +51,11 @@ class KeyHandlersBehaviorTestsPart1(unittest.TestCase):
         visible_rows: int = 20,
     ) -> bool:
         if launch_editor_for_path is None:
-            launch_editor_for_path = lambda _path: None
+            def launch_editor_for_path(_path):
+                return None
         context = NormalKeyContext(
             state=state,
-            current_jump_location=lambda: JumpLocation(path=state.current_path, start=state.start, text_x=state.text_x),
+            current_jump_location=lambda: JumpLocation(path=state.workspace.current_path, start=state.preview.scroll, text_x=state.preview.horizontal_scroll),
             record_jump_if_changed=lambda _origin: None,
             open_symbol_picker=open_symbol_picker,
             reroot_to_parent=lambda: None,
@@ -167,9 +161,9 @@ class KeyHandlersBehaviorTestsPart1(unittest.TestCase):
 
     def test_ctrl_c_closes_picker(self) -> None:
         state = _make_state()
-        state.picker_active = True
-        state.picker_mode = "commands"
-        state.picker_query = "abc"
+        state.picker.active = True
+        state.picker.mode = "commands"
+        state.picker.query = "abc"
         close_calls = {"count": 0}
 
         handled, should_quit = handle_picker_key(
@@ -189,7 +183,7 @@ class KeyHandlersBehaviorTestsPart1(unittest.TestCase):
 
     def test_n_is_ignored_when_git_features_disabled(self) -> None:
         state = _make_state()
-        state.git_features_enabled = False
+        state.git.enabled = False
         called = {"count": 0}
 
         should_quit = self._invoke(

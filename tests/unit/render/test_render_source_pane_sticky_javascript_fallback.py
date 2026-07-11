@@ -7,9 +7,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from lazyviewer.source_pane.rendering import sticky_symbol_headers_for_position
+from lazyviewer.source_pane.sticky import sticky_symbol_headers_for_position
 from lazyviewer.source_pane.symbols import MISSING_PARSER_ERROR
-from lazyviewer.render import render_dual_page
+from tests.render_capture import render_dual_page
 
 def _sticky_case(
     source: str,
@@ -61,7 +61,7 @@ class RenderStatusStickyTestsPart4(unittest.TestCase):
                     "lazyviewer.source_pane.symbols._load_parser",
                     return_value=(None, MISSING_PARSER_ERROR),
                 ),
-                mock.patch("lazyviewer.render.os.write", side_effect=capture),
+                mock.patch("tests.render_capture.os.write", side_effect=capture),
             ):
                 render_dual_page(
                     text_lines=text_lines,
