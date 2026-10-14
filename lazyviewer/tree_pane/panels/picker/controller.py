@@ -537,10 +537,11 @@ class NavigationController:
         self.state.dirty = True
 
     def toggle_tree_pane(self) -> None:
-        """Toggle tree-pane visibility and reflow wrapped source when needed."""
+        """Toggle tree visibility and update the source viewport width."""
         self.state.browser_visible = not self.state.browser_visible
-        if self.state.wrap_text:
-            self.rebuild_screen_lines(columns=self.current_term_columns())
+        # Unwrapped lazy syntax also depends on the viewport width: keeping
+        # the old rows would leave newly exposed columns permanently unstyled.
+        self.rebuild_screen_lines(columns=self.current_term_columns())
         self.state.dirty = True
 
     def toggle_wrap_mode(self) -> None:

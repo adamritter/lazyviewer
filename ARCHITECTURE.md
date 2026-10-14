@@ -412,6 +412,13 @@ Features:
   - tokenizer fallback,
   - raw source as final fallback.
 
+Interactive previews opt into `source_pane/lazy_syntax.py`: complete raw text stays
+available for line mapping, searching, and copying, while the renderer requests
+styled rows on demand. A suspended Pygments token iterator retains multiline
+lexer state and advances only as far as the requested source line. The rendered
+prefix is cached across scrolling and unchanged file visits. Wrapped views and
+git-diff rows reuse that source state. Noninteractive output keeps eager coloring.
+
 ## 10.5 Line mapping + overlays
 
 - `source.py`: maps between display rows and logical source lines (including wrapped and diff previews).
@@ -562,6 +569,7 @@ All reads/writes are defensive (malformed or missing config is non-fatal).
 
 Multiple bounded caches reduce repeated heavy work:
 
+- source syntax LRU (`source_pane/lazy_syntax.py`), bounded by document count and source characters, validated by content and style,
 - directory preview LRU (`source_pane/directory.py`),
 - diff preview LRU (`source_pane/diff.py`),
 - symbol context LRU (`source_pane/symbols.py`),
@@ -632,3 +640,30 @@ A simplified dependency direction:
 - leaf modules use lower-level utilities (`render.ansi`, `git_status`, `gitignore`, `search` models)
 
 This keeps runtime orchestration centralized while allowing leaf modules to stay focused and testable.
+
+
+## Interactive preview latency
+
+The initial directory preview is built synchronously with a viewport-sized entry
+budget. Directory scans sort names/types before collecting metadata, then stat
+only candidates that can be emitted. Existing stat data is passed to the summary
+cache. Background directory work is reserved for idle prefetch/growth, so a ready
+initial preview no longer waits for the input polling timeout.
+
+Interactive syntax rendering has a small per-frame time budget. Lexer progress is
+retained both vertically and within long/minified lines. A frame immediately
+shows complete readable source; any remaining color work continues in subsequent
+frames. Full source export remains eager. The main loop defers automatic cyclic
+GC during input bursts and collects while idle; ordinary reference counting is
+unchanged and the caller's GC state is restored on exit.
+
+Files over 64 KiB use 32 KiB text windows in the interactive viewer. The status
+line identifies the loaded byte range. Scrolling near the loaded end reads the
+next page; `G` and `g` seek directly to the end/start. Noninteractive output is not
+limited. This prevents multi-hundred-megabyte logs from blocking navigation or
+allocating their full contents. Git diff preview is retained for smaller files;
+large windows show source rather than constructing a full-file diff.
+
+`git_repository.py` shares metadata-validated repository discovery between diff
+and ignore handling, including negative results, while checking for nearer
+nested Git markers on each lookup.

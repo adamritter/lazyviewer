@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import threading
 
+from .git_repository import resolve_repository
+
 
 GITIGNORE_MATCHER_CACHE_MAX = 64
 GITIGNORE_MATCHER_CACHE_TTL_SECONDS = 2.0
@@ -90,22 +92,9 @@ def _load_matcher(root: Path) -> GitIgnoreMatcher | None:
         return None
 
     root = root.resolve()
-    try:
-        top_proc = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            check=True,
-        )
-    except Exception:
+    repo_root, _ = resolve_repository(root, 0.2)
+    if repo_root is None:
         return None
-
-    top_level = top_proc.stdout.strip()
-    if not top_level:
-        return None
-
-    repo_root = Path(top_level).resolve()
     if not _is_within(root, repo_root):
         return None
 

@@ -6,10 +6,14 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ....source_pane.symbols import collect_symbols
-
 if TYPE_CHECKING:
     from .controller import NavigationController
+
+
+def collect_symbols(path):
+    """Load outline extraction when the user opens the symbol picker."""
+    from ....source_pane.symbols import collect_symbols as collect
+    return collect(path)
 
 
 class PickerPanel:

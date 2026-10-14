@@ -51,7 +51,9 @@ class PreviewBehaviorTestsPart1(unittest.TestCase):
             plain = strip_ansi(rendered)
 
             self.assertTrue(truncated)
-            self.assertIn("... truncated after 1 entries ...", plain)
+            self.assertNotIn("truncated", plain)
+            self.assertIn("a.txt", plain)
+            self.assertNotIn("b.txt", plain)
             self.assertNotIn(".hidden.txt", plain)
 
     def test_build_directory_preview_includes_dotfiles_when_enabled(self) -> None:

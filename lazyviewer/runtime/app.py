@@ -14,6 +14,10 @@ import time
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .directory_prefetch import DirectoryPreviewPrefetchResult
 
 from ..render.ansi import ANSI_ESCAPE_RE, build_screen_lines
 from .app_bootstrap import AppStateBootstrap
@@ -27,15 +31,9 @@ from .app_helpers import (
     toggle_git_features as _toggle_git_features,
 )
 from .command_palette import COMMAND_PALETTE_ITEMS
-from .git_jumps import (
-    GitModifiedJumpNavigator,
-)
 from ..source_pane import SourcePane
+from ..source_pane.lazy_syntax import defer_syntax_initialization
 from .application import App
-from .directory_prefetch import (
-    DirectoryPreviewPrefetchResult,
-    DirectoryPreviewPrefetchScheduler,
-)
 from .index_warmup import TreeFilterIndexWarmupScheduler
 from .layout import PagerLayout
 from .config import (
@@ -74,6 +72,7 @@ CONTENT_SEARCH_LEFT_PANE_MIN_PERCENT = 50.0
 CONTENT_SEARCH_LEFT_PANE_FALLBACK_DELTA_PERCENT = 8.0
 
 
+@defer_syntax_initialization()
 def run_pager(
     content: str,
     path: Path,
@@ -197,9 +196,7 @@ def run_pager(
         visible_content_rows,
         refresh_rendered_for_current_path,
     )
-    directory_prefetch_scheduler = DirectoryPreviewPrefetchScheduler(
-        build_rendered_for_path=SourcePane.build_rendered_for_path,
-    )
+    directory_prefetch_scheduler = None
     prefetch_requested_context: tuple[Path, bool, bool, bool] | None = None
     prefetch_requested_entries = 0
     pending_async_preview_context: tuple[Path, bool, bool, bool] | None = None
@@ -210,8 +207,14 @@ def run_pager(
         dir_max_entries: int,
     ) -> None:
         """Schedule one background directory preview request for target/context."""
+        nonlocal directory_prefetch_scheduler
         nonlocal prefetch_requested_context
         nonlocal prefetch_requested_entries
+        if directory_prefetch_scheduler is None:
+            from .directory_prefetch import DirectoryPreviewPrefetchScheduler
+            directory_prefetch_scheduler = DirectoryPreviewPrefetchScheduler(
+                build_rendered_for_path=SourcePane.build_rendered_for_path,
+            )
         resolved_target = target.resolve()
         context = (
             resolved_target,
@@ -246,30 +249,28 @@ def run_pager(
         reset_scroll: bool = True,
         reset_dir_budget: bool = False,
     ) -> None:
-        """Queue directory preview in background without blocking UI input."""
+        """Build the bounded first page now; reserve workers for idle growth.
+
+        A completed worker used to wait for the 120 ms input timeout before its
+        result appeared. A screenful now takes only a few milliseconds, so the
+        actual directory content can accompany the selection's first frame.
+        """
         nonlocal pending_async_preview_context
         nonlocal pending_async_preview_reset_scroll
-        resolved_target = target.resolve()
-        if not resolved_target.is_dir():
+        nonlocal prefetch_requested_context
+        nonlocal prefetch_requested_entries
+        if not target.is_dir():
             return
-        if reset_dir_budget or state.dir_preview_path != resolved_target:
-            state.dir_preview_max_entries = SourcePane.initial_directory_preview_max_entries(
-                visible_content_rows()
-            )
-        pending_async_preview_context = (
-            resolved_target,
-            state.show_hidden,
-            state.show_tree_sizes,
-            state.git_features_enabled,
+        pending_async_preview_context = None
+        pending_async_preview_reset_scroll = False
+        refresh_rendered_for_current_path(
+            reset_scroll=reset_scroll, reset_dir_budget=reset_dir_budget,
         )
-        pending_async_preview_reset_scroll = bool(reset_scroll)
-        if reset_scroll:
-            state.start = 0
-            state.text_x = 0
-        schedule_directory_preview_request(
-            resolved_target,
-            state.dir_preview_max_entries,
+        prefetch_requested_context = (
+            target.resolve(), state.show_hidden, state.show_tree_sizes, state.git_features_enabled,
         )
+        prefetch_requested_entries = state.dir_preview_max_entries
+        state.dirty = True
 
     def maybe_poll_directory_preview_results() -> bool:
         """Apply completed directory-preview background jobs for current context."""
@@ -277,6 +278,8 @@ def run_pager(
         nonlocal prefetch_requested_entries
         nonlocal pending_async_preview_context
         nonlocal pending_async_preview_reset_scroll
+        if directory_prefetch_scheduler is None:
+            return False
         changed = False
         resolved_target = state.current_path.resolve()
         context = (
@@ -327,7 +330,13 @@ def run_pager(
 
         return changed
 
+    startup_index_pending = True
+
     def maybe_prefetch_directory_preview() -> bool:
+        nonlocal startup_index_pending
+        if startup_index_pending:
+            startup_index_pending = False
+            schedule_tree_filter_index_warmup()
         changed = maybe_poll_directory_preview_results()
         resolved_target = state.current_path.resolve()
         if not resolved_target.is_dir():
@@ -414,19 +423,24 @@ def run_pager(
 
     current_jump_location = tree_pane_runtime.navigation.current_jump_location
     record_jump_if_changed = tree_pane_runtime.navigation.record_jump_if_changed
-    git_modified_jump_navigator = GitModifiedJumpNavigator(
-        state=state,
-        visible_content_rows=visible_content_rows,
-        refresh_git_status_overlay=refresh_git_status_overlay,
-        current_jump_location=current_jump_location,
-        jump_to_path=tree_pane_runtime.navigation.jump_to_path,
-        record_jump_if_changed=record_jump_if_changed,
-        clear_status_message=partial(_clear_status_message, state),
-        set_status_message=partial(_set_status_message, state),
-    )
-    jump_to_next_git_modified = git_modified_jump_navigator.jump_to_next_git_modified
+    git_modified_jump_navigator = None
 
-    schedule_tree_filter_index_warmup()
+    def jump_to_next_git_modified(direction: int) -> bool:
+        nonlocal git_modified_jump_navigator
+        if git_modified_jump_navigator is None:
+            from .git_jumps import GitModifiedJumpNavigator
+            git_modified_jump_navigator = GitModifiedJumpNavigator(
+                state=state,
+                visible_content_rows=visible_content_rows,
+                refresh_git_status_overlay=refresh_git_status_overlay,
+                current_jump_location=current_jump_location,
+                jump_to_path=tree_pane_runtime.navigation.jump_to_path,
+                record_jump_if_changed=record_jump_if_changed,
+                clear_status_message=partial(_clear_status_message, state),
+                set_status_message=partial(_set_status_message, state),
+            )
+        return git_modified_jump_navigator.jump_to_next_git_modified(direction)
+
     watch_refresh.tree_signature = build_tree_watch_signature(
         state.tree_root,
         state.expanded,
@@ -451,6 +465,11 @@ def run_pager(
         sync_selected_target_after_tree_refresh,
         mark_tree_watch_dirty,
     )
+
+    def after_first_frame() -> None:
+        if not no_color:
+            from ..source_pane.lazy_syntax import start_interactive_syntax_warmup
+            start_interactive_syntax_warmup()
 
     loop_timing = RuntimeLoopTiming(
         double_click_seconds=DOUBLE_CLICK_SECONDS,
@@ -481,5 +500,6 @@ def run_pager(
         jump_to_next_git_modified=jump_to_next_git_modified,
         save_left_pane_width=save_left_pane_width_for_mode,
         run_main_loop_fn=run_main_loop,
+        after_first_frame=after_first_frame,
     )
     app.run()

@@ -16,6 +16,8 @@ import sys
 from pathlib import Path
 
 from .syntax import colorize_source, read_text, sanitize_terminal_text
+from .lazy_syntax import lazy_source
+from .paged_text import PagedText
 from .diff import build_unified_diff_preview_for_path
 from .directory import (
     DIR_PREVIEW_DEFAULT_DEPTH,
@@ -23,8 +25,10 @@ from .directory import (
     build_directory_preview,
 )
 
+
 BINARY_PROBE_BYTES = 4_096
 COLORIZE_MAX_FILE_BYTES = 256_000
+PLAIN_TEXT_SUFFIXES = {".txt", ".log", ".csv", ".tsv", ".hex", ".map", ".lst"}
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
@@ -102,6 +106,7 @@ class RenderedPath:
         dir_git_status_overlay: dict[Path, int] | None = None,
         dir_show_size_labels: bool = True,
         colorize_source_fn: Callable[[str, Path, str], str] | None = None,
+        lazy_syntax: bool = False,
     ) -> RenderedPath:
         """Build preview content for a file or directory target.
 
@@ -142,14 +147,23 @@ class RenderedPath:
             except Exception:
                 image_path = target
             return cls.image_preview(target, image_path)
-        if b"\x00" in sample:
+        binary_controls = len(sample.translate(None, b"\t\n\f\r" + bytes(range(32, 256))))
+        erased_flash = bool(sample) and sample.count(b"\xff") > len(sample) // 2
+        if b"\x00" in sample or binary_controls > max(8, len(sample) // 10) or erased_flash:
             return cls.binary_file(target, file_size)
+
+        if lazy_syntax and file_size > 64 * 1024:
+            try:
+                return cls.source_text(PagedText(target, file_size, style=None if no_color or target.suffix.lower() in PLAIN_TEXT_SUFFIXES else style))
+            except OSError as exc:
+                return cls.read_error(target, exc)
 
         if prefer_git_diff:
             diff_preview = build_unified_diff_preview_for_path(
                 target,
                 colorize=not no_color and os.isatty(sys.stdout.fileno()),
                 style=style,
+                lazy_syntax=lazy_syntax,
             )
             if diff_preview:
                 return cls.git_diff_preview(diff_preview)
@@ -165,6 +179,10 @@ class RenderedPath:
 
         active_colorize_source = colorize_source_fn or colorize_source
         if os.isatty(sys.stdout.fileno()):
+            if lazy_syntax:
+                if target.suffix.lower() in PLAIN_TEXT_SUFFIXES:
+                    return cls.source_text(source)
+                return cls.source_text(lazy_source(source, target, style))
             return cls.source_text(active_colorize_source(source, target, style))
         return cls.source_text(source)
 
@@ -193,6 +211,7 @@ class RenderedPathPreview:
         prefer_git_diff: bool = True,
         dir_git_status_overlay: dict[Path, int] | None = None,
         dir_show_size_labels: bool = True,
+        lazy_syntax: bool = False,
     ) -> RenderedPath:
         return RenderedPath.from_path(
             target,
@@ -206,4 +225,5 @@ class RenderedPathPreview:
             dir_git_status_overlay=dir_git_status_overlay,
             dir_show_size_labels=dir_show_size_labels,
             colorize_source_fn=RenderedPathPreview.colorize_source,
+            lazy_syntax=lazy_syntax,
         )

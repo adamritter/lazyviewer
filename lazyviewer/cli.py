@@ -122,7 +122,8 @@ def main(default_path: Path | None = None) -> None:
             raise SystemExit(f"Path not found: {candidate}")
 
     path = raw_paths[0]
-    source = "" if path.is_dir() else read_text(path)
+    interactive = not args.nopager and sys.stdin.isatty()
+    source = "" if path.is_dir() or interactive else read_text(path)
     run_pager(
         source,
         path,

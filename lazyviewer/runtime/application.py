@@ -43,6 +43,7 @@ class App:
         jump_to_next_git_modified: Callable[[int], bool],
         save_left_pane_width: Callable[[int, int], None],
         run_main_loop_fn: Callable[..., None],
+        after_first_frame: Callable[[], None] | None = None,
     ) -> None:
         self.state = state
         self.terminal = terminal
@@ -66,6 +67,7 @@ class App:
         self.launch_editor_for_path = launch_editor_for_path
         self.jump_to_next_git_modified = jump_to_next_git_modified
         self.save_left_pane_width = save_left_pane_width
+        self.after_first_frame = after_first_frame
         self._run_main_loop = run_main_loop_fn
         self._normal_key_handler = NormalKeyHandler(self)
 

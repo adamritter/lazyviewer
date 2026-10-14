@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable
 from collections import OrderedDict
 from pathlib import Path
@@ -506,6 +505,8 @@ class TreeFilterController:
             )
             return labels_by_section
 
+        from concurrent.futures import ThreadPoolExecutor
+
         max_workers = min(8, len(roots))
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="lazyviewer-file-index") as executor:
             futures = [
@@ -610,6 +611,8 @@ class TreeFilterController:
                 stream_truncated=stream_truncated.is_set(),
             )
             return merged_matches, merged_truncated, merged_error
+
+        from concurrent.futures import ThreadPoolExecutor
 
         max_workers = min(8, len(normalized_roots))
         root_results: list[tuple[dict[Path, list[filter_matching.ContentMatch]], bool, str | None]] = [

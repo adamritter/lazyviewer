@@ -7,6 +7,7 @@ This loop is intentionally wiring-heavy; feature logic lives in pane/panel objec
 from __future__ import annotations
 
 import shutil
+import gc
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from dataclasses import dataclass
 from ..input import read_key
 from ..render import RenderContext, render_dual_page_context
 from .state import AppState
+from .gc_control import defer_cyclic_gc
 from .terminal import TerminalController
 from ..tree_model import clamp_left_width
 
@@ -30,26 +32,11 @@ class RuntimeLoopTiming:
     tree_filter_spinner_frame_seconds: float
 
 
-@dataclass(frozen=True)
-class RuntimeLoopCallbacks:
-    """UI-root contract used by ``run_main_loop`` in tests and adapters."""
-
-    tree_pane: object
-    source_pane: object
-    layout: object
-    maybe_refresh_tree_watch: Callable[[], None]
-    maybe_refresh_git_watch: Callable[[], None]
-    refresh_git_status_overlay: Callable[..., None]
-    handle_normal_key: Callable[[str, int], bool]
-    save_left_pane_width: Callable[[int, int], None]
-    handle_tree_mouse_wheel: Callable[[str], bool] | None = None
-    handle_tree_mouse_click: Callable[[str], bool] | None = None
-    handle_picker_key: Callable[[str, float], tuple[bool, bool]] | None = None
-    handle_tree_filter_key: Callable[[str], bool] | None = None
-    tick_source_selection_drag: Callable[[], None] | None = None
-    tick_tree_filter_search: Callable[[float], bool] | None = None
-    maybe_poll_directory_preview_results: Callable[[], bool] | None = None
-    maybe_prefetch_directory_preview: Callable[[], bool] | None = None
+def __getattr__(name):
+    if name == "RuntimeLoopCallbacks":
+        from .loop_callbacks import RuntimeLoopCallbacks
+        return RuntimeLoopCallbacks
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def run_main_loop(
@@ -130,11 +117,13 @@ def run_main_loop(
     save_left_pane_width = callbacks.save_left_pane_width
     maybe_poll_directory_preview_results = getattr(callbacks, "maybe_poll_directory_preview_results", None)
     maybe_prefetch_directory_preview = getattr(callbacks, "maybe_prefetch_directory_preview", None)
+    after_first_frame = getattr(callbacks, "after_first_frame", None)
     kitty_image_state: tuple[str, int, int, int, int] | None = None
     tree_filter_cursor_visible = True
     tree_filter_spinner_frame = 0
     last_input_at = time.monotonic()
     last_idle_directory_prefetch_at = 0.0
+    last_gc_at = time.monotonic()
 
     def adjust_left_pane_width(term_columns: int, delta: int) -> None:
         """Resize tree pane width, persist it, and reflow text if needed."""
@@ -149,7 +138,7 @@ def run_main_loop(
             rebuild_screen_lines(columns=term_columns)
         state.dirty = True
 
-    with terminal.raw_mode():
+    with terminal.raw_mode(), defer_cyclic_gc() as gc_was_enabled:
         while True:
             if tick_tree_filter_search is not None:
                 tick_tree_filter_search(0.0)
@@ -231,6 +220,9 @@ def run_main_loop(
                 if next_spinner_frame != tree_filter_spinner_frame:
                     tree_filter_spinner_frame = next_spinner_frame
                     state.dirty = True
+
+            if getattr(state.lines, "needs_highlighting", False):
+                state.dirty = True
 
             if state.dirty:
                 preview_image_path = current_preview_image_path()
@@ -316,6 +308,7 @@ def run_main_loop(
                     source_selection_anchor=state.source_selection_anchor,
                     source_selection_focus=state.source_selection_focus,
                     theme=state.theme,
+                    source_progress=getattr(state.rendered, "progress_label", ""),
                 )
                 render_dual_page_context(render_context)
                 desired_image_state: tuple[str, int, int, int, int] | None = None
@@ -343,13 +336,22 @@ def run_main_loop(
                         )
                     kitty_image_state = desired_image_state
                 state.dirty = False
+                if after_first_frame is not None:
+                    callback, after_first_frame = after_first_frame, None
+                    callback()
 
             try:
-                key = read_key(stdin_fd, timeout_ms=120)
+                key = read_key(stdin_fd, timeout_ms=5 if getattr(state.lines, "needs_highlighting", False) else 120)
             except KeyboardInterrupt:
                 # Ignore SIGINT-style interrupts so terminal copy shortcuts do not exit the app.
                 continue
             if key == "":
+                idle_now = time.monotonic()
+                if (gc_was_enabled and idle_now-last_input_at >= 0.5
+                        and idle_now-last_gc_at >= 1.0
+                        and gc.get_count()[0] >= gc.get_threshold()[0]):
+                    gc.collect()
+                    last_gc_at = idle_now
                 maybe_refresh_tree_watch()
                 maybe_refresh_git_watch()
                 refresh_git_status_overlay()

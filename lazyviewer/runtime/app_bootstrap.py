@@ -114,7 +114,8 @@ class AppStateBootstrap:
         right_width = max(1, term.columns - left_width - 1)
         initial_dir_max_entries = min(
             self.dir_preview_initial_max_entries,
-            max(1, usable - 4),
+            # The preview has a root heading and one blank separator row.
+            max(1, usable - 2),
         )
         initial_render = self.build_rendered_for_path(
             current_path,
@@ -125,6 +126,7 @@ class AppStateBootstrap:
             dir_skip_gitignored=self.skip_gitignored_for_hidden_mode(show_hidden),
             prefer_git_diff=self.git_features_default_enabled,
             dir_show_size_labels=self.tree_size_labels_default_enabled,
+            lazy_syntax=True,
         )
         rendered = initial_render.text
         lines = build_screen_lines(rendered, right_width, wrap=False)

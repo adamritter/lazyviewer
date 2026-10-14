@@ -169,6 +169,26 @@ def _loop_callbacks(
 
 
 class RuntimeLoopBehaviorTests(unittest.TestCase):
+    def test_post_frame_preparation_runs_once_after_render_before_input(self):
+        state = _make_state()
+        order = []
+        keys = iter(['j', 'q'])
+        def read(*args, **kwargs):
+            order.append('input')
+            return next(keys)
+        def handle(key, columns):
+            state.dirty = True
+            return key == 'q'
+        with mock.patch('lazyviewer.runtime.loop.shutil.get_terminal_size',
+                        return_value=mock.Mock(columns=120, lines=40)), \
+             mock.patch('lazyviewer.runtime.loop.read_key', side_effect=read), \
+             mock.patch('lazyviewer.runtime.loop.render_dual_page_context',
+                        side_effect=lambda context: order.append('frame')):
+            run_main_loop(state, _FakeTerminal(), 0, _loop_timing(),
+                          _loop_callbacks(handle_normal_key=handle,
+                                          after_first_frame=lambda: order.append('prepare')))
+        self.assertEqual(order, ['frame', 'prepare', 'input', 'frame', 'input'])
+
     def test_runtime_loop_requests_mouse_reporting_enabled(self) -> None:
         state = _make_state()
         terminal = _FakeTerminal()

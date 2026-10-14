@@ -57,6 +57,8 @@ def list_directory_children(
     git_status_overlay: dict[Path, int] | None = None,
     doc_summary_for_path: Callable[[Path, int | None], str | None] | None = None,
     include_doc_summaries: bool = False,
+    limit: int | None = None,
+    paths_resolved: bool = False,
 ) -> tuple[list[DirectoryChild], Exception | None, int | None]:
     """List visible children with stat/git/doc metadata and sorted order.
 
@@ -64,7 +66,7 @@ def list_directory_children(
     set when the directory cannot be scanned.
     """
     try:
-        resolved_directory = directory.resolve()
+        resolved_directory = directory if paths_resolved else directory.resolve()
     except Exception:
         resolved_directory = directory
 
@@ -76,7 +78,17 @@ def list_directory_children(
 
     try:
         with os.scandir(directory) as entries:
+            candidates = []
             for child in entries:
+                if not show_hidden and child.name.startswith("."):
+                    continue
+                candidates.append(child)
+            # Directory previews only need a screenful. Sort names/types first;
+            # do not stat hundreds of siblings that cannot appear in this view.
+            candidates.sort(key=lambda entry: (not entry.is_dir(follow_symlinks=False), entry.name.lower()))
+            for child in candidates:
+                if limit is not None and len(children) >= limit:
+                    break
                 name = child.name
                 if not show_hidden and name.startswith("."):
                     continue

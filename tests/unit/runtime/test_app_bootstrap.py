@@ -10,25 +10,21 @@ from types import SimpleNamespace
 from unittest import mock
 
 from lazyviewer.runtime.app_bootstrap import AppStateBootstrap
+from lazyviewer.source_pane import SourcePane
 from lazyviewer.tree_model import TreeEntry
 
 
 class AppStateBootstrapTests(unittest.TestCase):
-    def test_build_state_limits_initial_directory_preview_entries_to_viewport(self) -> None:
+    def test_first_directory_preview_fills_viewport_before_prefetch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             captured: dict[str, int] = {}
+            for index in range(60):
+                (root / f"file_{index:03d}.txt").write_text("preview\n")
 
-            def build_rendered_for_path(*_args, **kwargs):
+            def build_rendered_for_path(*args, **kwargs):
                 captured["dir_max_entries"] = int(kwargs["dir_max_entries"])
-                return SimpleNamespace(
-                    text=f"{root}/\n",
-                    truncated=True,
-                    is_directory=True,
-                    image_path=None,
-                    image_format=None,
-                    is_git_diff_preview=False,
-                )
+                return SourcePane.build_rendered_for_path(*args, **kwargs)
 
             bootstrap = AppStateBootstrap(
                 skip_gitignored_for_hidden_mode=lambda show_hidden: not show_hidden,
@@ -52,8 +48,11 @@ class AppStateBootstrapTests(unittest.TestCase):
             ):
                 state = bootstrap.build_state(path=root, style="monokai", no_color=True)
 
-            self.assertEqual(captured["dir_max_entries"], 25)
-            self.assertEqual(state.dir_preview_max_entries, 25)
+            self.assertEqual(captured["dir_max_entries"], 27)
+            self.assertEqual(state.dir_preview_max_entries, 27)
+            self.assertEqual(len(state.lines), state.usable)
+            self.assertIn("file_026.txt", state.lines[-1])
+            self.assertTrue(state.dir_preview_truncated)
 
     def test_build_state_initializes_multiple_workspace_roots_from_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

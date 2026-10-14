@@ -12,7 +12,12 @@ from pathlib import Path
 
 from ..render.ansi import ANSI_ESCAPE_RE
 from .syntax import read_text
-from ..source_pane.symbols import SymbolEntry, collect_sticky_symbol_headers, next_symbol_start_line
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .symbols_types import SymbolEntry
+
+
 from .diffmap import diff_source_line_for_display_index
 from .source import (
     next_nonblank_source_line,
@@ -22,6 +27,19 @@ from .source import (
     sticky_source_lines,
 )
 from .text import format_sticky_header_line
+
+
+def collect_sticky_symbol_headers(path, visible_start_line, max_headers=1):
+    """Load symbol extraction only when hidden headers can exist."""
+    if visible_start_line <= 1:
+        return []
+    from .symbols import collect_sticky_symbol_headers as collect
+    return collect(path, visible_start_line, max_headers=max_headers)
+
+
+def next_symbol_start_line(path, after_line):
+    from .symbols import next_symbol_start_line as next_line
+    return next_line(path, after_line)
 
 
 def leading_indent_columns(text: str) -> int:

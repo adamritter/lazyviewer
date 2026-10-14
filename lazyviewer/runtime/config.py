@@ -7,15 +7,26 @@ All access is defensive: malformed or missing config falls back safely.
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
-
-from platformdirs import user_config_dir
 
 from .navigation import JumpLocation, is_named_mark_key
 
 APP_NAME = "lazyviewer"
 CONFIG_FILENAME = "config.json"
-DEFAULT_CONFIG_PATH = Path(user_config_dir(APP_NAME, appauthor=False)) / CONFIG_FILENAME
+
+
+def _default_config_directory() -> Path:
+    # On Linux platformdirs resolves exactly this XDG setting. Avoid importing
+    # its other platform implementations on every interactive startup.
+    if sys.platform.startswith("linux"):
+        return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / APP_NAME
+    from platformdirs import user_config_dir
+    return Path(user_config_dir(APP_NAME, appauthor=False))
+
+
+DEFAULT_CONFIG_PATH = _default_config_directory() / CONFIG_FILENAME
 LEGACY_CONFIG_PATH = Path.home() / ".config" / "lazyviewer.json"
 CONFIG_PATH = DEFAULT_CONFIG_PATH
 

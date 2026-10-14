@@ -516,7 +516,8 @@ def rendered_preview_row(
     if text_idx >= len(text_lines):
         return ""
 
-    full_line = text_lines[text_idx].rstrip("\r\n")
+    line_renderer = getattr(text_lines, "highlighted_line", text_lines.__getitem__)
+    full_line = line_renderer(text_idx).rstrip("\r\n")
     line_plain_length = len(ANSI_ESCAPE_RE.sub("", full_line))
     if wrap_text:
         text_raw = clip_ansi_line(full_line, width)

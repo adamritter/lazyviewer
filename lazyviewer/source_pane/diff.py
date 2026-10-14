@@ -8,17 +8,20 @@ Results are memoized with a git-signature-aware cache key.
 from __future__ import annotations
 
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 import re
 import subprocess
+from ..git_repository import resolve_repository
 
 from .syntax import colorize_source, read_text, sanitize_terminal_text
+from .lazy_syntax import LazyText, LineHighlighter, lazy_source
 from ..file_tree_model.watch import build_git_watch_signature
 
 GIT_DIFF_PREVIEW_CACHE_MAX = 128
 
-_DIFF_PREVIEW_CACHE: OrderedDict[tuple[str, int, int, str, bool, str], str | None] = OrderedDict()
+_DIFF_PREVIEW_CACHE: OrderedDict[tuple[str, int, int, str, bool, str, bool], str | None] = OrderedDict()
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _SGR_RE = re.compile(r"\x1b\[([0-9;]*)m")
 _ADDED_BG_SGR = "48;2;36;74;52"
@@ -38,7 +41,7 @@ class DiffHunk:
     removed_lines: list[str]
 
 
-def _cache_get(key: tuple[str, int, int, str, bool, str]) -> tuple[bool, str | None]:
+def _cache_get(key: tuple[str, int, int, str, bool, str, bool]) -> tuple[bool, str | None]:
     """Lookup diff preview cache entry and refresh LRU order."""
     if key not in _DIFF_PREVIEW_CACHE:
         return False, None
@@ -47,7 +50,7 @@ def _cache_get(key: tuple[str, int, int, str, bool, str]) -> tuple[bool, str | N
     return True, cached
 
 
-def _cache_put(key: tuple[str, int, int, str, bool, str], value: str | None) -> None:
+def _cache_put(key: tuple[str, int, int, str, bool, str, bool], value: str | None) -> None:
     """Insert diff preview cache entry and evict oldest overflow entries."""
     _DIFF_PREVIEW_CACHE[key] = value
     _DIFF_PREVIEW_CACHE.move_to_end(key)
@@ -61,31 +64,7 @@ def clear_diff_preview_cache() -> None:
 
 
 def _resolve_repo_and_git_dir(path: Path, timeout_seconds: float) -> tuple[Path | None, Path | None]:
-    """Resolve repository root and git-dir for a path."""
-    try:
-        proc = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "--show-toplevel", "--git-dir"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-            timeout=timeout_seconds,
-        )
-    except Exception:
-        return None, None
-    if proc.returncode != 0:
-        return None, None
-
-    lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    if len(lines) < 2:
-        return None, None
-
-    repo_root = Path(lines[0]).resolve()
-    git_dir_raw = Path(lines[1])
-    git_dir = git_dir_raw if git_dir_raw.is_absolute() else (repo_root / git_dir_raw)
-    return repo_root, git_dir.resolve()
+    return resolve_repository(path, timeout_seconds)
 
 
 def _run_git(repo_root: Path, args: list[str], timeout_seconds: float) -> subprocess.CompletedProcess[str] | None:
@@ -320,11 +299,54 @@ def _build_annotated_source_preview(
     return "\n".join(output_lines)
 
 
+def _build_lazy_annotated_source_preview(
+    source: str, hunks: list[DiffHunk], target: Path, style: str,
+) -> LazyText:
+    """Keep diff metadata eager, but only color source lines that are displayed."""
+    document = lazy_source(source, target, style)
+    source_lines = source.splitlines()
+    added: set[int] = set()
+    removed: dict[int, list[tuple[LineHighlighter, int]]] = {}
+    for hunk in hunks:
+        added.update(range(hunk.new_start, hunk.new_start+hunk.new_count))
+        if hunk.removed_lines:
+            at = max(1, min(hunk.new_start, len(source_lines)+1))
+            old = LineHighlighter("\n".join(hunk.removed_lines) + "\n", target, style)
+            removed.setdefault(at, []).extend((old, i) for i in range(len(hunk.removed_lines)))
+
+    rows: list[str] = []
+    renderers: list[tuple[str, Callable[[int], str], int]] = []
+
+    def append_removed(at: int) -> None:
+        for old, index in removed.get(at, []):
+            rows.append(_format_marked_line("-", old.lines[index].rstrip("\r\n"), True))
+            renderers.append(("-", old.line, index))
+
+    for index, raw in enumerate(source_lines):
+        append_removed(index+1)
+        marker = "+" if index+1 in added else " "
+        rows.append(_format_marked_line(marker, raw, True))
+        renderers.append((marker, document.render_line, index))
+    append_removed(len(source_lines)+1)
+
+    def render_region(index: int, limit: int | None, deadline: float = float("inf")) -> str | None:
+        marker, render, source_index = renderers[index]
+        region = getattr(getattr(render, "__self__", None), "region", None)
+        styled = region(source_index, limit, deadline) if region is not None else render(source_index)
+        if styled is None:
+            return None
+        result = _format_marked_line(marker, styled.rstrip("\r\n"), True)
+        return result + ("\n" if index < len(renderers)-1 else "")
+
+    return LazyText("\n".join(rows), lambda index: render_region(index, None), render_region)
+
+
 def build_unified_diff_preview_for_path(
     target: Path,
     timeout_seconds: float = 0.2,
     colorize: bool = True,
     style: str = "monokai",
+    lazy_syntax: bool = False,
 ) -> str | None:
     """Return annotated git diff preview for a tracked modified file.
 
@@ -351,7 +373,7 @@ def build_unified_diff_preview_for_path(
         size = 0
 
     git_signature = build_git_watch_signature(git_dir)
-    cache_key = (str(target), mtime_ns, size, git_signature, bool(colorize), style)
+    cache_key = (str(target), mtime_ns, size, git_signature, bool(colorize), style, bool(lazy_syntax))
     found, cached = _cache_get(cache_key)
     if found:
         return cached
@@ -398,6 +420,10 @@ def build_unified_diff_preview_for_path(
         return None
 
     source = sanitize_terminal_text(read_text(target))
+    if lazy_syntax and colorize:
+        rendered = _build_lazy_annotated_source_preview(source, hunks, target, style)
+        _cache_put(cache_key, rendered)
+        return rendered
     source_lines = source.splitlines()
     source_display_lines = _colorize_lines(source_lines, target, style, colorize)
     rendered = _build_annotated_source_preview(

@@ -10,7 +10,9 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
-from lazyviewer.render.ansi import build_screen_lines
+from lazyviewer.render.ansi import ANSI_ESCAPE_RE, build_screen_lines
+from lazyviewer.source_pane.lazy_syntax import lazy_source, clear_syntax_cache
+from lazyviewer.source_pane.highlighting import rendered_preview_row
 from lazyviewer.tree_pane.panels.picker import (
     NavigationController,
     _first_display_index_for_source_line,
@@ -46,6 +48,52 @@ def _make_state(*, wrap_text: bool, rendered: str, visible_rows: int, width: int
 
 
 class RuntimeNavigationWrapTests(unittest.TestCase):
+    def test_fullscreen_recolors_columns_outside_previous_split_view(self) -> None:
+        # Regression from audit_it5271_full_image.py: only the old split-pane
+        # prefix was colored after pressing t, leaving the newly visible suffix
+        # permanently plain even after subsequent frames.
+        source = "    for name, cpu, count in [('configuration_states', 0x1a01c, 7),\n"
+        clear_syntax_cache()
+        document = lazy_source(source, Path('/tmp/audit_it5271_full_image.py'), 'monokai')
+        state = _make_state(wrap_text=False, rendered=document, visible_rows=20, width=40)
+        state.left_width = 59
+
+        def rebuild_screen_lines(*, columns, preserve_scroll=True):
+            width = columns - state.left_width - 1 if state.browser_visible else columns
+            state.lines = build_screen_lines(state.rendered, width, wrap=state.wrap_text)
+
+        def render_row(width):
+            state.lines.begin_frame(budget_seconds=1)
+            return rendered_preview_row(state.lines, 0, width, state.wrap_text,
+                                        state.text_x, '', 0, 0, False, None)
+
+        ops = NavigationController(
+            state=state,
+            command_palette_items=(),
+            rebuild_screen_lines=rebuild_screen_lines,
+            rebuild_tree_entries=lambda **_kwargs: None,
+            preview_selected_entry=lambda **_kwargs: None,
+            schedule_tree_filter_index_warmup=lambda: None,
+            mark_tree_watch_dirty=lambda: None,
+            reset_git_watch_context=lambda: None,
+            refresh_git_status_overlay=lambda **_kwargs: None,
+            visible_content_rows=lambda: 20,
+            refresh_rendered_for_current_path=lambda **_kwargs: None,
+            open_tree_filter=lambda _mode: None,
+        )
+        render_row(40)
+        with mock.patch.object(ops, 'current_term_columns', return_value=100):
+            for _ in range(2):
+                ops.toggle_tree_pane()
+                self.assertFalse(state.browser_visible)
+                for _frame in range(2):
+                    row = render_row(100)
+                    self.assertEqual(ANSI_ESCAPE_RE.sub('', row), source.rstrip('\n'))
+                    self.assertIn('\x1b[34m0x1a01c\x1b[39;49;00m', row)
+                ops.toggle_tree_pane()
+                self.assertTrue(state.browser_visible)
+                self.assertEqual(len(ANSI_ESCAPE_RE.sub('', render_row(40))), 40)
+
     def test_source_line_for_display_index_counts_wrapped_chunks(self) -> None:
         lines = ["abc", "def\n", "ghi", "jkl\n", "tail"]
         self.assertEqual(_source_line_for_display_index(lines, 0), 1)

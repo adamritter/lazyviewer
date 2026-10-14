@@ -26,17 +26,7 @@ def _sanitize_terminal_text(source: str) -> str:
     if _CONTROL_RE.search(source) is None:
         return source
 
-    out: list[str] = []
-    for ch in source:
-        code = ord(ch)
-        if ch in {"\n", "\r", "\t"}:
-            out.append(ch)
-            continue
-        if code < 32 or code == 127 or 0x80 <= code <= 0x9F:
-            out.append(f"\\x{code:02x}")
-            continue
-        out.append(ch)
-    return "".join(out)
+    return _CONTROL_RE.sub(lambda match: f"\\x{ord(match.group(0)):02x}", source)
 
 
 def _normalize_doc_summary(text: str) -> str | None:
@@ -164,9 +154,11 @@ def _doc_summary_cache_key(path: Path, size_bytes: int | None) -> tuple[str, int
     return str(resolved), int(stat.st_mtime_ns), size
 
 
-def cached_top_file_doc_summary(path: Path, size_bytes: int | None) -> str | None:
+def cached_top_file_doc_summary(path: Path, size_bytes: int | None, *, mtime_ns: int | None = None) -> str | None:
     """Return cached top-of-file summary for ``path`` when possible."""
-    cache_key = _doc_summary_cache_key(path, size_bytes)
+    cache_key = ((str(path), int(mtime_ns), int(size_bytes))
+                 if mtime_ns is not None and size_bytes is not None
+                 else _doc_summary_cache_key(path, size_bytes))
     if cache_key is not None:
         with _DOC_SUMMARY_CACHE_LOCK:
             cached = _DOC_SUMMARY_CACHE.get(cache_key, _CACHE_MISS)

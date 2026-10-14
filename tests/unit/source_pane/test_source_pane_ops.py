@@ -78,8 +78,8 @@ class SourcePaneGeometryTests(unittest.TestCase):
         self.assertEqual(width_mock.call_count, len(lines) + len(state.lines))
 
     def test_initial_directory_preview_max_entries_is_viewport_bounded(self) -> None:
-        self.assertEqual(SourcePane.initial_directory_preview_max_entries(30), 26)
-        self.assertEqual(SourcePane.initial_directory_preview_max_entries(4), 1)
+        self.assertEqual(SourcePane.initial_directory_preview_max_entries(30), 28)
+        self.assertEqual(SourcePane.initial_directory_preview_max_entries(4), 2)
 
     def test_directory_preview_growth_step_is_viewport_bounded(self) -> None:
         self.assertEqual(SourcePane.directory_preview_growth_step(1), 16)

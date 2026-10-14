@@ -37,6 +37,8 @@ def clip_ansi_line(text: str, max_cols: int) -> str:
     if max_cols <= 0 or not text:
         return ""
 
+    if text.isascii() and "\x1b" not in text and "\t" not in text:
+        return text[:max_cols]
     out: list[str] = []
     col = 0
     i = 0
@@ -78,6 +80,8 @@ def slice_ansi_line(text: str, start_cols: int, max_cols: int) -> str:
         return ""
     if start_cols < 0:
         start_cols = 0
+    if text.isascii() and "\x1b" not in text and "\t" not in text:
+        return text[start_cols:start_cols+max_cols]
 
     out: list[str] = []
     col = 0
@@ -198,6 +202,8 @@ def build_screen_lines(rendered: str, width: int, wrap: bool = False) -> list[st
     true, each logical line body is wrapped with :func:`wrap_ansi_line` and the
     original newline terminator is appended to the final wrapped chunk.
     """
+    if hasattr(rendered, "screen_lines"):
+        return rendered.screen_lines(width, wrap)
     lines = rendered.splitlines(keepends=True)
     if not lines:
         return [""]

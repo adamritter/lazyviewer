@@ -42,18 +42,7 @@ def sanitize_terminal_text(source: str) -> str:
     if _CONTROL_RE.search(source) is None:
         return source
 
-    out: list[str] = []
-    for ch in source:
-        code = ord(ch)
-        if ch in {"\n", "\r", "\t"}:
-            out.append(ch)
-            continue
-        # C0 controls + DEL + C1 controls.
-        if code < 32 or code == 127 or 0x80 <= code <= 0x9F:
-            out.append(f"\\x{code:02x}")
-            continue
-        out.append(ch)
-    return "".join(out)
+    return _CONTROL_RE.sub(lambda match: f"\\x{ord(match.group(0)):02x}", source)
 
 
 def fallback_highlight(source: str) -> str:

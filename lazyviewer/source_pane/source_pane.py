@@ -9,18 +9,27 @@ from pathlib import Path
 
 from ..runtime.screen import _centered_scroll_start, _first_git_change_screen_line
 from ..runtime.state import AppState
-from .diff import clear_diff_preview_cache
 from .directory import DirectoryPreview
-from .interaction.events import (
-    directory_preview_target_for_display_line as _directory_preview_target_for_display_line,
-)
 from .interaction.geometry import (
     SourcePaneGeometry,
     copy_selected_source_range as _copy_selected_source_range,
 )
-from .interaction.mouse import SourcePaneClickResult, SourcePaneMouseHandlers
 from .path import RenderedPath, RenderedPathPreview
+from .paged_text import PagedText
 from .renderer import SourcePaneRenderer
+
+
+class _MouseType:
+    """Keep compatibility class exports lazy until a mouse action needs them."""
+
+    def __init__(self, name):
+        self.name = name
+
+    def __get__(self, instance, owner):
+        from .interaction import mouse
+        value = getattr(mouse, self.name)
+        setattr(owner, self.name, value)
+        return value
 
 
 class SourcePane:
@@ -36,8 +45,8 @@ class SourcePane:
     COLORIZE_MAX_FILE_BYTES = RenderedPathPreview.COLORIZE_MAX_FILE_BYTES
     PNG_SIGNATURE = RenderedPathPreview.PNG_SIGNATURE
     RenderedPath = RenderedPath
-    SourcePaneClickResult = SourcePaneClickResult
-    SourcePaneMouseHandlers = SourcePaneMouseHandlers
+    SourcePaneClickResult = _MouseType("SourcePaneClickResult")
+    SourcePaneMouseHandlers = _MouseType("SourcePaneMouseHandlers")
     SourcePaneGeometry = SourcePaneGeometry
     SourcePaneRenderer = SourcePaneRenderer
     _DIR_PREVIEW_CACHE = DirectoryPreview._DIR_PREVIEW_CACHE
@@ -58,6 +67,7 @@ class SourcePane:
         prefer_git_diff: bool = True,
         dir_git_status_overlay: dict[Path, int] | None = None,
         dir_show_size_labels: bool = True,
+        lazy_syntax: bool = False,
     ) -> RenderedPath:
         return RenderedPathPreview.build_rendered_for_path(
             target,
@@ -70,6 +80,7 @@ class SourcePane:
             prefer_git_diff=prefer_git_diff,
             dir_git_status_overlay=dir_git_status_overlay,
             dir_show_size_labels=dir_show_size_labels,
+            lazy_syntax=lazy_syntax,
         )
 
     @staticmethod
@@ -98,6 +109,7 @@ class SourcePane:
 
     @staticmethod
     def clear_diff_preview_cache() -> None:
+        from .diff import clear_diff_preview_cache
         clear_diff_preview_cache()
 
     @staticmethod
@@ -119,7 +131,8 @@ class SourcePane:
         state: AppState,
         display_line: int,
     ) -> Path | None:
-        return _directory_preview_target_for_display_line(state, display_line)
+        from .interaction.events import directory_preview_target_for_display_line
+        return directory_preview_target_for_display_line(state, display_line)
 
     @staticmethod
     def refresh_rendered_for_current_path(
@@ -162,6 +175,7 @@ class SourcePane:
             prefer_git_diff=prefer_git_diff,
             dir_git_status_overlay=(state.git_status_overlay if state.git_features_enabled else None),
             dir_show_size_labels=state.show_tree_sizes,
+            lazy_syntax=True,
         )
         SourcePane.apply_rendered_for_path(
             state,
@@ -206,8 +220,9 @@ class SourcePane:
     @staticmethod
     def initial_directory_preview_max_entries(visible_rows: int) -> int:
         """Return initial preview budget bounded by viewport rows and global ceiling."""
-        # Reserve rows for root/header plus the truncated footer marker.
-        bounded_rows = max(1, visible_rows - 4)
+        # Reserve only the root heading and blank separator, so the first
+        # frame fills every visible row without waiting for idle prefetch.
+        bounded_rows = max(1, visible_rows - 2)
         return min(SourcePane.DIR_PREVIEW_INITIAL_MAX_ENTRIES, bounded_rows)
 
     @staticmethod
@@ -224,6 +239,14 @@ class SourcePane:
         refresh_rendered_for_current_path_fn: Callable[..., None],
     ) -> bool:
         """Increase directory-preview entry budget when scrolling near the end."""
+        if isinstance(state.rendered, PagedText):
+            if state.start < max(0, state.max_start - max(1, visible_content_rows() // 3)):
+                return False
+            if not state.rendered.grow():
+                return False
+            state.lines = state.rendered.refreshed_lines()
+            state.max_start = max(0, len(state.lines) - visible_content_rows())
+            return True
         if state.dir_preview_path is None or not state.dir_preview_truncated:
             return False
         if state.current_path.resolve() != state.dir_preview_path:
@@ -340,7 +363,7 @@ class SourcePane:
             visible_content_rows,
             get_terminal_size=get_terminal_size,
         )
-        self.mouse = SourcePaneMouseHandlers(
+        self._mouse_kwargs = dict(
             state=state,
             visible_content_rows=visible_content_rows,
             source_pane_col_bounds=self.geometry.source_pane_col_bounds,
@@ -354,6 +377,13 @@ class SourcePane:
             apply_tree_filter_query=apply_tree_filter_query,
             jump_to_path=jump_to_path,
         )
+
+    def __getattr__(self, name):
+        if name == "mouse":
+            self.mouse = self.SourcePaneMouseHandlers(**self._mouse_kwargs)
+            del self._mouse_kwargs
+            return self.mouse
+        raise AttributeError(f"{type(self).__name__!r} has no attribute {name!r}")
 
     @staticmethod
     def _parse_mouse_col_row(mouse_key: str) -> tuple[int | None, int | None]:
@@ -404,10 +434,10 @@ class SourcePane:
         is_left_down = mouse_key.startswith("MOUSE_LEFT_DOWN:")
         is_left_up = mouse_key.startswith("MOUSE_LEFT_UP:")
         if not (is_left_down or is_left_up):
-            return SourcePaneClickResult(handled=False)
+            return self.SourcePaneClickResult(handled=False)
         col, row = self._parse_mouse_col_row(mouse_key)
         if col is None or row is None:
-            return SourcePaneClickResult(handled=True)
+            return self.SourcePaneClickResult(handled=True)
         return self.mouse.handle_click(
             col=col,
             row=row,
@@ -416,4 +446,6 @@ class SourcePane:
         )
 
     def tick_source_selection_drag(self) -> None:
-        self.mouse.tick_source_selection_drag()
+        mouse = self.__dict__.get("mouse")
+        if mouse is not None:
+            mouse.tick_source_selection_drag()

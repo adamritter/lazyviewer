@@ -14,7 +14,10 @@ if TYPE_CHECKING:
 
 def run_pager(*args, **kwargs):
     """Lazily import pager entrypoint to avoid heavy runtime bootstrap on import."""
-    from .app import run_pager as _run_pager
+    from .gc_control import defer_cyclic_gc
+
+    with defer_cyclic_gc():
+        from .app import run_pager as _run_pager
 
     return _run_pager(*args, **kwargs)
 

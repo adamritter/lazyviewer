@@ -6,7 +6,6 @@ ripgrep-backed content-search entry point used by content filter mode.
 
 from __future__ import annotations
 
-from .content import ContentMatch, search_project_content_rg
 from .fuzzy import (
     STRICT_SUBSTRING_ONLY_MIN_FILES,
     clear_project_files_cache,
@@ -19,6 +18,13 @@ from .fuzzy import (
     fuzzy_score,
     to_project_relative,
 )
+
+def __getattr__(name):
+    if name in {"ContentMatch", "search_project_content_rg"}:
+        from . import content
+        return getattr(content, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "ContentMatch",

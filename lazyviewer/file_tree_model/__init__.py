@@ -18,9 +18,15 @@ from .fs import (
     safe_file_size,
     safe_mtime_ns,
 )
-from .snapshot import FileTreeSnapshot, build_file_tree_snapshot, refresh_file_tree_snapshot
 from .watch import build_git_watch_signature, build_tree_watch_signature, resolve_git_paths
 from .doc_summary import cached_top_file_doc_summary, clear_doc_summary_cache, top_file_doc_summary
+
+def __getattr__(name):
+    if name in {"FileTreeSnapshot", "build_file_tree_snapshot", "refresh_file_tree_snapshot"}:
+        from . import snapshot
+        return getattr(snapshot, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "DirectoryEntry",

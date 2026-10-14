@@ -39,7 +39,7 @@ Repository = "https://github.com/adamritter/lazyviewer"
 Issues = "https://github.com/adamritter/lazyviewer/issues"
 
 [project.scripts]
-lazyviewer = "lazyviewer.cli:main"
+lazyviewer = "lazyviewer:main"
 
 [tool.setuptools]
 include-package-data = false

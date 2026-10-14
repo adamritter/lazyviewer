@@ -8,7 +8,10 @@ appear visually but do not consume source line numbers.
 from __future__ import annotations
 
 from ..render.ansi import ANSI_ESCAPE_RE, clip_ansi_line, slice_ansi_line
-from ..source_pane.symbols import SymbolEntry
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .symbols_types import SymbolEntry
 from .diffmap import (
     diff_preview_logical_line_is_removed,
     diff_preview_uses_plain_markers,
@@ -63,6 +66,8 @@ def source_line_raw_text(
     source_line: int,
     wrap_text: bool,
     preview_is_git_diff: bool = False,
+    *,
+    highlighted: bool = False,
 ) -> str:
     """Return raw text for one logical source line without newline terminator."""
     start_idx = source_line_display_index(
@@ -74,12 +79,14 @@ def source_line_raw_text(
     if start_idx is None:
         return ""
 
+    read_line = (getattr(text_lines, "highlighted_line", text_lines.__getitem__)
+                 if highlighted else text_lines.__getitem__)
     if not wrap_text:
-        return text_lines[start_idx].rstrip("\r\n")
+        return read_line(start_idx).rstrip("\r\n")
 
     parts: list[str] = []
     for idx in range(start_idx, len(text_lines)):
-        part = text_lines[idx]
+        part = read_line(idx)
         if line_has_newline_terminator(part):
             parts.append(part.rstrip("\r\n"))
             break
@@ -209,6 +216,7 @@ def extract_source_line_text(
         source_line,
         wrap_text,
         preview_is_git_diff=preview_is_git_diff,
+        highlighted=True,
     )
     if not source_text:
         return ""

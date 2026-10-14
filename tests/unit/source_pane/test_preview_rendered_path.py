@@ -140,7 +140,9 @@ class PreviewBehaviorTestsPart2(unittest.TestCase):
 
             self.assertTrue(rendered.is_directory)
             self.assertTrue(rendered.truncated)
-            self.assertIn("... truncated after 1 entries ...", plain)
+            self.assertNotIn("truncated", plain)
+            self.assertIn("a.txt", plain)
+            self.assertNotIn("b.txt", plain)
 
     def test_build_rendered_for_path_directory_includes_git_status_badges(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

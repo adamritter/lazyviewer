@@ -11,6 +11,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 import threading
+import os
 
 from ..file_tree_model.doc_summary import cached_top_file_doc_summary, clear_doc_summary_cache
 from ..file_tree_model.fs import list_directory_children, maybe_gitignore_matcher
@@ -51,7 +52,7 @@ def _cache_key_for_directory(
 ) -> tuple[str, bool, int, int, bool, bool, int, int] | None:
     """Build cache key for a directory preview request."""
     try:
-        resolved = root_dir.resolve()
+        resolved = root_dir
         mtime_ns = resolved.stat().st_mtime_ns
     except Exception:
         return None
@@ -71,7 +72,7 @@ def _watched_directory_mtimes_match(watched_directory_mtimes: tuple[tuple[str, i
     """Return whether directory mtimes captured for a cached preview are unchanged."""
     for path_text, cached_mtime_ns in watched_directory_mtimes:
         try:
-            current_mtime_ns = Path(path_text).stat().st_mtime_ns
+            current_mtime_ns = os.stat(path_text).st_mtime_ns
         except Exception:
             return False
         if int(current_mtime_ns) != int(cached_mtime_ns):
@@ -83,7 +84,7 @@ def _watched_file_signatures_match(watched_file_signatures: tuple[tuple[str, int
     """Return whether file mtime/size signatures captured for a cache entry are unchanged."""
     for path_text, cached_mtime_ns, cached_size in watched_file_signatures:
         try:
-            stat = Path(path_text).stat()
+            stat = os.stat(path_text)
         except Exception:
             return False
         if int(stat.st_mtime_ns) != int(cached_mtime_ns):
@@ -192,6 +193,7 @@ def build_directory_preview(
     show_size_labels: bool = True,
 ) -> tuple[str, bool]:
     """Render directory tree preview and return ``(text, truncated)``."""
+    root_dir = root_dir.resolve()
     overlay_signature = _directory_overlay_signature(root_dir, git_status_overlay)
     cache_key = _cache_key_for_directory(
         root_dir,
@@ -217,7 +219,7 @@ def build_directory_preview(
     reset = "\033[0m"
 
     try:
-        root_label = f"{root_dir.resolve()}/"
+        root_label = f"{root_dir}/"
     except Exception:
         root_label = f"{root_dir}/"
     root_badges = format_git_status_badges(root_dir, git_status_overlay)
@@ -238,13 +240,11 @@ def build_directory_preview(
             ignore_matcher=ignore_matcher,
             git_status_overlay=git_status_overlay,
             include_doc_summaries=False,
+            limit=max_entries-emitted,
+            paths_resolved=True,
         )
         if directory_mtime_ns is not None:
-            try:
-                resolved_directory = directory.resolve()
-            except Exception:
-                resolved_directory = directory
-            watched_directory_mtimes[str(resolved_directory)] = int(directory_mtime_ns)
+            watched_directory_mtimes[str(directory)] = int(directory_mtime_ns)
         if scan_error is not None:
             lines_out.append(f"{branch_color}{prefix}└─{reset} {note_color}<error: {scan_error}>{reset}")
             return
@@ -268,14 +268,10 @@ def build_directory_preview(
                 size_label = f"{size_color} [{size_kb} KB]{reset}"
             if not child.is_dir:
                 if child.mtime_ns is not None and child.file_size is not None:
-                    try:
-                        resolved_file = child.path.resolve()
-                    except Exception:
-                        resolved_file = child.path
-                    watched_file_signatures[str(resolved_file)] = (child.mtime_ns, child.file_size)
+                    watched_file_signatures[str(child.path)] = (child.mtime_ns, child.file_size)
                 doc_summary: str | None = None
                 try:
-                    doc_summary = cached_top_file_doc_summary(child.path, child.file_size)
+                    doc_summary = cached_top_file_doc_summary(child.path, child.file_size, mtime_ns=child.mtime_ns)
                 except Exception:
                     doc_summary = None
                 if doc_summary:
@@ -291,9 +287,6 @@ def build_directory_preview(
 
     walk(root_dir, "", 1)
     truncated = emitted >= max_entries
-    if truncated:
-        lines_out.append("")
-        lines_out.append(f"{note_color}... truncated after {max_entries} entries ...{reset}")
 
     preview = "\n".join(lines_out)
     _cache_put(

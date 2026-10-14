@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
-from ..search.content import ContentMatch
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..search.content import ContentMatch
 from .build import safe_file_size
 from .types import TreeEntry
 

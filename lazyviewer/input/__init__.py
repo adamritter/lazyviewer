@@ -8,7 +8,6 @@ from .reader import ESC_SEQUENCE_TIMEOUT_MS, _PENDING_BYTES, read_key
 from .keys import (
     KeyComboBinding,
     KeyComboRegistry,
-    NormalKeyContext,
     NormalKeyHandler,
     handle_normal_key,
     handle_picker_key,
@@ -27,3 +26,10 @@ __all__ = [
     "handle_tree_filter_key",
     "handle_normal_key",
 ]
+
+
+def __getattr__(name):
+    if name == "NormalKeyContext":
+        from .key_context import NormalKeyContext
+        return NormalKeyContext
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

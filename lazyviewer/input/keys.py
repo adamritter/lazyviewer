@@ -8,8 +8,17 @@ from types import SimpleNamespace
 from ..runtime.state import AppState
 from ..tree_pane.panels.filter.panel import FilterPanel
 from ..tree_pane.panels.picker.panel import PickerPanel
-from .key_normal import NormalKeyContext, NormalKeyHandler, handle_normal_key
+from .key_normal import NormalKeyHandler, handle_normal_key
+
+
 from .key_registry import KeyComboBinding, KeyComboRegistry
+
+def __getattr__(name):
+    if name == "NormalKeyContext":
+        from .key_context import NormalKeyContext
+        return NormalKeyContext
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "KeyComboBinding",

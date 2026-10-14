@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,37 +18,15 @@ from .key_common import default_max_horizontal_text_offset, effective_max_start
 from .key_registry import KeyComboBinding, KeyComboRegistry
 
 
-@dataclass(frozen=True)
-class NormalKeyContext:
-    """State and bound operations required for normal-mode key handling."""
+class _NormalKeyContextBase:
+    """Identify legacy contexts without importing their optional dataclass."""
 
-    state: AppState
-    current_jump_location: Callable[[], JumpLocation]
-    record_jump_if_changed: Callable[[JumpLocation], None]
-    open_symbol_picker: Callable[[], None]
-    reroot_to_parent: Callable[[], None]
-    reroot_to_selected_target: Callable[[], None]
-    toggle_hidden_files: Callable[[], None]
-    toggle_tree_pane: Callable[[], None]
-    toggle_wrap_mode: Callable[[], None]
-    toggle_tree_size_labels: Callable[[], None]
-    toggle_help_panel: Callable[[], None]
-    toggle_git_features: Callable[[], None]
-    launch_lazygit: Callable[[], None]
-    handle_tree_mouse_wheel: Callable[[str], bool]
-    handle_tree_mouse_click: Callable[[str], bool]
-    move_tree_selection: Callable[[int], bool]
-    rebuild_tree_entries: Callable[..., None]
-    preview_selected_entry: Callable[..., None]
-    refresh_rendered_for_current_path: Callable[..., None]
-    refresh_git_status_overlay: Callable[..., None]
-    maybe_grow_directory_preview: Callable[[], bool]
-    visible_content_rows: Callable[[], int]
-    rebuild_screen_lines: Callable[..., None]
-    mark_tree_watch_dirty: Callable[[], None]
-    launch_editor_for_path: Callable[[Path], str | None]
-    jump_to_next_git_modified: Callable[[int], bool]
-    max_horizontal_text_offset: Callable[[], int] = default_max_horizontal_text_offset
+
+def __getattr__(name):
+    if name == "NormalKeyContext":
+        from .key_context import NormalKeyContext
+        return NormalKeyContext
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class _ContextHostAdapter:
@@ -105,7 +82,7 @@ class NormalKeyHandler:
     """Reusable normal-mode handler with bound runtime dependencies."""
 
     def __init__(self, host: object) -> None:
-        self.host = _ContextHostAdapter(host) if isinstance(host, NormalKeyContext) else host
+        self.host = _ContextHostAdapter(host) if isinstance(host, _NormalKeyContextBase) else host
 
     def handle(self, key: str, term_columns: int) -> bool:
         """Handle one normal-mode key and return ``True`` when app should quit."""
@@ -607,6 +584,17 @@ def _handle_normal_key(
         handled = browser_exact_bindings.dispatch(key)
         if handled is not None:
             return handled
+
+    # Large files expose bounded byte windows. G/End and g/Home seek directly
+    # instead of reading every intervening page merely to reach the file tail.
+    seek_method = None
+    if count is None and key in {"G", "END"}:
+        seek_method = getattr(state.rendered, "seek_end", None)
+    elif count is None and key in {"g", "HOME"}:
+        seek_method = getattr(state.rendered, "seek_start", None)
+    if seek_method is not None and seek_method():
+        rebuild_screen_lines()
+        state.dirty = True
 
     prev_start = state.start
     prev_text_x = state.text_x

@@ -76,6 +76,7 @@ class RenderContext:
     preview_is_git_diff: bool = False
     source_selection_anchor: tuple[int, int] | None = None
     source_selection_focus: tuple[int, int] | None = None
+    source_progress: str = ""
     theme: UITheme = DEFAULT_THEME
 
 
@@ -131,6 +132,7 @@ def render_dual_page_context(context: RenderContext) -> None:
         source_selection_anchor=context.source_selection_anchor,
         source_selection_focus=context.source_selection_focus,
         theme=context.theme,
+        source_progress=context.source_progress,
     )
 
 
@@ -159,9 +161,12 @@ def _compose_status_left_text(
     status_total: int,
     text_percent: float,
     status_message: str,
+    source_progress: str = "",
 ) -> str:
     """Compose left status segment with location and transient message."""
     base = f"{current_path} ({status_start}-{status_end}/{status_total} {text_percent:5.1f}%)"
+    if source_progress:
+        base = f"{source_progress} {base}"
     if not status_message:
         return base
     return f"{base} · {status_message}"
@@ -217,6 +222,7 @@ def render_dual_page(
     tree_roots: list[Path] | None = None,
     workspace_expanded: list[set[Path]] | None = None,
     theme: UITheme | None = None,
+    source_progress: str = "",
 ) -> None:
     """Render one full terminal frame for split or text-only mode."""
     active_theme = theme or DEFAULT_THEME
@@ -278,6 +284,7 @@ def render_dual_page(
             status_total,
             text_percent,
             status_message,
+            source_progress,
         )
         status = build_status_line(left_status, width)
         out.append(active_theme.reverse)
@@ -381,6 +388,7 @@ def render_dual_page(
         status_total,
         text_percent,
         status_message,
+        source_progress,
     )
     status = build_status_line(left_status, width)
     out.append(active_theme.reverse)

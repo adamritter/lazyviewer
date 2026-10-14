@@ -32,6 +32,9 @@ class SourcePaneRenderer:
         source_selection_focus: tuple[int, int] | None,
     ) -> None:
         """Initialize renderer state and sticky-header metadata."""
+        begin_frame = getattr(text_lines, "begin_frame", None)
+        if begin_frame is not None:
+            begin_frame(text_x=text_x)
         self.text_lines = text_lines
         self.text_start = text_start
         self.line_width = line_width

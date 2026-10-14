@@ -1,0 +1,2 @@
+# Optional benchmark runner; not a LazyViewer runtime dependency.
+tui-test==0.1.0

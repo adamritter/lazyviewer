@@ -4,7 +4,7 @@ This keeps module-mode execution behavior identical to the CLI script.
 All argument parsing and runtime setup happen in ``lazyviewer.cli``.
 """
 
-from .cli import main
+from . import main
 
 
 if __name__ == "__main__":
